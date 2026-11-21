@@ -120,13 +120,19 @@ export function IdeaDetail({
       cancelled = true;
     };
   }, [ideaId, loadTarget, loadTry]);
-  const noteId = noteLoad?.id === ideaId ? noteLoad.noteId : null;
+  // The store's id for the idea's note: an unsaved placeholder follows to
+  // the saved note once the first write saves it.
+  const loadedId = noteLoad?.id === ideaId ? noteLoad.noteId : null;
+  const followed = useNotesStore((s) => (loadedId === null ? undefined : s.byTarget[`idea:${ideaId}`]));
+  const noteId = loadedId === null ? null : (followed ?? loadedId);
+  // The editor's identity (a saved placeholder keeps its editor).
+  const editorKey = useNotesStore((s) => (noteId === null ? null : (s.origins[noteId] ?? noteId)));
   const noteFailed = noteLoad?.id === ideaId && noteLoad.failed;
   // The status line fades out over the editor fading in, then goes (at once under reduced motion).
   const [statusGone, setStatusGone] = useState<number | null>(null);
   // Loading again (another idea, then back): the line fades out again too.
   if (noteId === null && statusGone !== null) setStatusGone(null);
-  const showStatus = noteId === null || (statusGone !== noteId && !prefersReducedMotion());
+  const showStatus = noteId === null || (statusGone !== editorKey && !prefersReducedMotion());
   // "Couldn't load" and "Loading" cross-fade: the one replaced fades out.
   const lineId = showStatus ? (noteFailed ? "failed" : "loading") : null;
   const statusLines = useLeaving(useMemo(() => (lineId ? [{ id: lineId }] : []), [lineId]));
@@ -338,7 +344,7 @@ export function IdeaDetail({
             )}
             onTransitionEnd={(e) => {
               // Its own fade only: a child's transition bubbling up is not it.
-              if (e.target === e.currentTarget && noteId !== null) setStatusGone(noteId);
+              if (e.target === e.currentTarget && editorKey !== null) setStatusGone(editorKey);
             }}
           >
             {statusLines.map((line) => {

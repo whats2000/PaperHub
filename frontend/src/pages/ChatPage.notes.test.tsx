@@ -378,3 +378,37 @@ describe("ChatPage Notes pane", () => {
     expect(useNotesPaneStore.getState()).toMatchObject({ open: true, activeTab: "notes" });
   });
 });
+
+describe("ChatPage Notes pane: nothing is created by looking", () => {
+  it("showing a new chat's note sends nothing to the server", async () => {
+    const sent: string[] = [];
+    server.use(
+      http.post("*", ({ request }) => {
+        sent.push(new URL(request.url).pathname);
+        return HttpResponse.json({});
+      }),
+      http.get(`${API_BASE_URL}/notes/target`, ({ request }) => {
+        sent.push(`GET ${new URL(request.url).pathname}`);
+        return HttpResponse.json(note(12, "session", "42", CHAT_TITLE));
+      }),
+    );
+    // A new chat, not on the server yet.
+    act(() => {
+      useChatStore.getState().newSession();
+    });
+    expect(useChatStore.getState().sessions.find((s) => s.id === useChatStore.getState().activeSessionId)?.backend_session_id).toBeNull();
+    render(<ChatPage />);
+    await userEvent.click(notesButton());
+    const editor = await screen.findByTestId("note-editor");
+    // An empty editor on a local placeholder: no chat, no note created.
+    expect(editor.textContent).toMatch(/note -\d+/);
+    expect(sent).toEqual([]);
+  });
+
+  it("the notes scroll area never scrolls sideways (a table keeps its own scroll box)", async () => {
+    render(<ChatPage />);
+    await userEvent.click(notesButton());
+    const panel = within(await screen.findByRole("region", { name: "Notes" })).getByRole("tabpanel");
+    expect(panel).toHaveClass("overflow-x-clip", "overflow-y-auto");
+  });
+});

@@ -42,7 +42,7 @@ import { prefersReducedMotion } from "@/lib/motion";
 import { propText } from "@/lib/notes/ops";
 import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/store/canvas";
-import { useNotesStore } from "@/store/notes";
+import { savedNoteId, useNotesStore } from "@/store/notes";
 
 import { atomCaret } from "./atomCaret";
 import { insertInlineMath } from "./blocks/InlineMath";
@@ -168,13 +168,20 @@ function takeBlocks(editor: BlockOps, tree: EditorBlock[], ids: readonly string[
   return true;
 }
 
+/** The editor instance a note keeps: a note saved from a placeholder
+ * (its first write) keeps the placeholder's editor, so typing goes on. */
+function useEditorKey(noteId: number): number {
+  return useNotesStore((s) => s.origins[noteId] ?? noteId);
+}
+
 export function NoteEditor(props: NoteEditorProps) {
   // Each note gets its own loading line and editor state.
-  return <NoteEditorFrame key={props.noteId} {...props} />;
+  return <NoteEditorFrame key={useEditorKey(props.noteId)} {...props} />;
 }
 
 function NoteEditorFrame(props: NoteEditorProps) {
   const { t, i18n } = useTranslation();
+  const editorKey = useEditorKey(props.noteId);
   const loaded = useNotesStore((s) => s.notes[props.noteId] !== undefined);
   // The loading line fades out over the editor fading in (never vanishes).
   const [loaderGone, setLoaderGone] = useState(loaded);
@@ -198,7 +205,7 @@ function NoteEditorFrame(props: NoteEditorProps) {
       )}
       {/* A new note, or a new UI language (BlockNote's own strings), is a new
           editor: its history and dictionary start fresh. */}
-      {loaded && <LoadedNoteEditor key={`${props.noteId}:${i18n.language}`} {...props} />}
+      {loaded && <LoadedNoteEditor key={`${editorKey}:${i18n.language}`} {...props} />}
     </div>
   );
 }
@@ -221,6 +228,9 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
   const lostBadges = useLostCommentBadges(noteId);
   // The note card shows one part, and nothing else.
   const cardPart = card?.partId ?? null;
+  // The editor outlives a placeholder's save (its id changes): what it
+  // reads at run time follows the saved id.
+  const editorKey = useEditorKey(noteId);
 
   const editor = useCreateBlockNote(
     {
@@ -244,9 +254,9 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
         codeFence,
         dividerRule,
         syntaxHighlighter,
-        noteParts(() => partsViewOf(noteId), cardPart),
+        noteParts(() => partsViewOf(savedNoteId(editorKey)), cardPart),
         noteSuggestionMarks(() => ({
-          suggestions: useNotesStore.getState().notes[noteId]?.suggestions ?? [],
+          suggestions: useNotesStore.getState().notes[savedNoteId(editorKey)]?.suggestions ?? [],
           host: suggestionHost,
         })),
         lostCommentBadges(lostBadges.badgeView),
@@ -254,7 +264,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
         noteFind(),
       ],
     },
-    [noteId],
+    [editorKey],
   );
 
   // What the server has (or will have once the queue lands), as editor blocks.

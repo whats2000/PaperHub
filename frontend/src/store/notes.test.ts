@@ -5,7 +5,16 @@ import { waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 
 import { API_BASE_URL } from "@/lib/api";
-import { CARET_GIVE_UP_MS, clearPendingNoteOps, pendingNoteOps, resetLinkTargets, useNotesStore } from "@/store/notes";
+import {
+  CARET_GIVE_UP_MS,
+  clearPendingNoteOps,
+  isUnsavedNote,
+  pendingNoteOps,
+  resetLinkTargets,
+  savedNoteId,
+  setNoteSessionCreator,
+  useNotesStore,
+} from "@/store/notes";
 import type { ApplyResult, NoteBlock, NoteOpsBody } from "@/types/notes";
 
 const { toastFn } = vi.hoisted(() => ({ toastFn: vi.fn() }));
@@ -921,5 +930,99 @@ describe("resolveLinkTarget", () => {
     server.use(http.get(`${API_BASE_URL}/notes/12`, () => new HttpResponse(null, { status: 404 })));
     await useNotesStore.getState().resolveLinkTarget("note", 12, { maxAgeMs: 60_000 });
     expect(useNotesStore.getState().linkTargets["note:12"]?.status).toBe("dead");
+  });
+});
+
+describe("nothing is created by looking (Task 14)", () => {
+  const saved = { id: 9, target_kind: "session" as const, target_id: "42", title: "", revision: 0, updated_at: "x" };
+  const ins = (id: string, text: string) => ({
+    op: "insert" as const,
+    block_id: id,
+    block: { type: "paragraph" as const, props: {}, content: [{ type: "text", text, styles: {} }] },
+  });
+
+  it("a target with no note gets an empty placeholder, and nothing is created", async () => {
+    const calls: string[] = [];
+    server.use(
+      http.get(`${API_BASE_URL}/notes/target`, () =>
+        HttpResponse.json({ note: null, blocks: [], shared_by: 2, default_title: "Attention", suggestions: [], comments: [] }),
+      ),
+      http.post(`${API_BASE_URL}/notes/target`, () => {
+        calls.push("create");
+        return HttpResponse.json({});
+      }),
+    );
+    const id = await useNotesStore.getState().loadTarget("paper", 3);
+    expect(isUnsavedNote(id)).toBe(true);
+    const st = useNotesStore.getState();
+    expect(st.byTarget["paper:3"]).toBe(id);
+    expect(st.notes[id]).toMatchObject({ blocks: [], sharedBy: 2, defaultTitle: "Attention" });
+    // Looking again keeps the same placeholder; flushing nothing creates nothing.
+    expect(await useNotesStore.getState().loadTarget("paper", 3)).toBe(id);
+    await useNotesStore.getState().flush(id);
+    expect(calls).toEqual([]);
+  });
+
+  it("the first write of a local chat's note creates the chat, then the note, then saves it — once", async () => {
+    const order: string[] = [];
+    const sessionCreator = vi.fn(() => {
+      order.push("session");
+      return Promise.resolve(42);
+    });
+    setNoteSessionCreator(sessionCreator);
+    server.use(
+      http.post(`${API_BASE_URL}/notes/target`, async ({ request }) => {
+        const url = new URL(request.url);
+        order.push(`note:${url.searchParams.get("kind")}:${url.searchParams.get("id")}`);
+        await new Promise((r) => setTimeout(r, 30));
+        return HttpResponse.json({ note: saved, blocks: [], shared_by: 1, default_title: "", suggestions: [], comments: [] });
+      }),
+      http.post(`${API_BASE_URL}/notes/9/ops`, async ({ request }) => {
+        const body = (await request.json()) as NoteOpsBody;
+        posted.push(body);
+        order.push("ops");
+        return HttpResponse.json({ ...result(body.base_revision + 1, body.ops.map((o) => o.block_id!)), note_id: 9 });
+      }),
+    );
+    const ph = useNotesStore.getState().openChatDraft(5);
+    expect(isUnsavedNote(ph)).toBe(true);
+    expect(useNotesStore.getState().openChatDraft(5)).toBe(ph);
+    expect(sessionCreator).not.toHaveBeenCalled();
+    // Typing: the first keystrokes, then more while the note is being made.
+    useNotesStore.getState().applyLocal(ph, [ins("p1", "H")], "pane");
+    const first = useNotesStore.getState().flush(ph);
+    useNotesStore.getState().applyLocal(ph, [upd("p1", "He")], "pane");
+    const second = useNotesStore.getState().flush(ph);
+    await Promise.all([first, second]);
+    await useNotesStore.getState().flush(9);
+    expect(order[0]).toBe("session");
+    expect(order.filter((o) => o.startsWith("note:"))).toEqual(["note:session:42"]);
+    expect(sessionCreator).toHaveBeenCalledTimes(1);
+    // Nothing typed is lost: the saved note has the latest text.
+    const sent = posted.flatMap((b) => b.ops);
+    expect(sent[0]).toMatchObject({ op: "insert", block_id: "p1" });
+    const last = sent.filter((o) => o.block_id === "p1").at(-1)!;
+    expect(JSON.stringify(last.block?.content)).toContain('"He"');
+    const st = useNotesStore.getState();
+    expect(st.notes[ph]).toBeUndefined();
+    expect(st.byTarget["local:5"]).toBe(9);
+    expect(st.byTarget["session:42"]).toBe(9);
+    expect(st.origins[9]).toBe(ph);
+    expect(savedNoteId(ph)).toBe(9);
+    expect(st.notes[9]!.blocks.map((b) => b.text)).toEqual(["He"]);
+  });
+
+  it("a note saved elsewhere (a mark) replaces an empty placeholder", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/target`, () =>
+        HttpResponse.json({ note: null, blocks: [], shared_by: 0, suggestions: [], comments: [] }),
+      ),
+    );
+    const ph = await useNotesStore.getState().loadTarget("paper", 3);
+    await useNotesStore.getState().noteAppeared(7);
+    const st = useNotesStore.getState();
+    expect(st.byTarget["paper:3"]).toBe(7);
+    expect(st.notes[ph]).toBeUndefined();
+    expect(st.notes[7]!.blocks.map((b) => b.id)).toEqual(["a", "b"]);
   });
 });

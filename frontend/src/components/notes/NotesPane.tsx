@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
 import { useNotesPaneStore } from "@/store/notesPane";
-import { useNotesStore } from "@/store/notes";
+import { isUnsavedNote, useNotesStore } from "@/store/notes";
 
 import { NoteEditor } from "./NoteEditor";
 import { notePanelId, noteTabId } from "./noteTabIds";
@@ -21,7 +21,8 @@ interface Props {
   onClose: () => void;
 }
 
-type Target = { kind: "paper" | "session"; id: number };
+/** The chat tab's target is the chat's local id. */
+type Target = { kind: "paper" | "chat"; id: number };
 
 /** A chat's note request shows only while that chat is on screen. */
 function requestShowsHere(request: { kind: string; id: number }, backendSessionId: number | null): boolean {
@@ -61,11 +62,14 @@ export function NotesPane({ onClose }: Props) {
     else if (request.kind === "paper") setChosen("paper");
   }
   const tab: NoteTab = paperId === null ? "chat" : session === null ? "paper" : chosen;
+  // The chat tab names the chat by its local id: it stays the same note
+  // when the chat reaches the server (its first message, or the note's
+  // first write).
   const target: Target | null =
     tab === "paper" && paperId !== null
       ? { kind: "paper", id: paperId }
-      : backendSessionId !== null
-        ? { kind: "session", id: backendSessionId }
+      : session !== null && activeSessionId !== null
+        ? { kind: "chat", id: activeSessionId }
         : null;
 
   const refTitle = useChatStore((s) =>
@@ -81,24 +85,41 @@ export function NotesPane({ onClose }: Props) {
   const paperTitle =
     paperId === null ? null : (refTitle ?? paperNoteTitle ?? t("pane.paper", "Paper"));
 
-  const [loaded, setLoaded] = useState<{ key: string; noteId: number | null; failed: boolean }>({
+  // `storeKey`: the store's `byTarget` key the note is shown under; it
+  // follows a placeholder to its saved note (nothing is created by
+  // looking: an unsaved note is a placeholder until its first write).
+  const [loaded, setLoaded] = useState<{ key: string; storeKey: string | null; failed: boolean }>({
     key: "",
-    noteId: null,
+    storeKey: null,
     failed: false,
   });
   const targetKey = target ? `${target.kind}:${target.id}` : "";
   const loadTarget = useNotesStore((s) => s.loadTarget);
-  const ensureBackendSession = useChatStore((s) => s.ensureBackendSession);
+  const openChatDraft = useNotesStore((s) => s.openChatDraft);
+
+  // A chat's note started while the chat was local (only on this page)
+  // keeps showing after the chat reaches the server.
+  const draftKey = target?.kind === "chat" ? `local:${target.id}` : null;
+  const hasDraft = useNotesStore((s) => draftKey !== null && s.byTarget[draftKey] !== undefined);
+  const localChat = target?.kind === "chat" && backendSessionId === null;
 
   useEffect(() => {
-    if (!target) return;
+    if (!target || hasDraft) return;
+    if (target.kind === "chat" && backendSessionId === null) {
+      // A chat not on the server: an empty note, saved (chat first) by
+      // the first write.
+      openChatDraft(target.id);
+      return;
+    }
     let cancelled = false;
-    loadTarget(target.kind, target.id).then(
-      (noteId) => {
-        if (!cancelled) setLoaded({ key: targetKey, noteId, failed: false });
+    const kind = target.kind === "chat" ? "session" : "paper";
+    const id = target.kind === "chat" ? backendSessionId! : target.id;
+    loadTarget(kind, id).then(
+      () => {
+        if (!cancelled) setLoaded({ key: targetKey, storeKey: `${kind}:${id}`, failed: false });
       },
       () => {
-        if (!cancelled) setLoaded({ key: targetKey, noteId: null, failed: true });
+        if (!cancelled) setLoaded({ key: targetKey, storeKey: null, failed: true });
       },
     );
     return () => {
@@ -106,20 +127,15 @@ export function NotesPane({ onClose }: Props) {
     };
     // `target` is rebuilt every render; its key names it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetKey, loadTarget]);
-
-  // A chat not yet sent to the server gets its session when its note is asked for.
-  const needsSession = tab === "chat" && session !== null && backendSessionId === null;
-  useEffect(() => {
-    if (needsSession && activeSessionId !== null) {
-      void ensureBackendSession(activeSessionId).catch(() => {
-        setLoaded({ key: "", noteId: null, failed: true });
-      });
-    }
-  }, [needsSession, activeSessionId, ensureBackendSession]);
+  }, [targetKey, hasDraft, localChat, loadTarget, openChatDraft]);
 
   const current = loaded.key === targetKey ? loaded : null;
-  const noteId = current?.noteId ?? null;
+  const storeKey = hasDraft ? draftKey : localChat ? null : (current?.storeKey ?? null);
+  const shownId = useNotesStore((s) => (storeKey === null ? undefined : s.byTarget[storeKey]));
+  const noteId = shownId ?? null;
+  // What the server knows the note by (export, the guide's tools): none
+  // until its first write.
+  const savedId = noteId !== null && !isUnsavedNote(noteId) ? noteId : null;
 
   // The note scrolls with the reader (Follow); the guide opens from the
   // toolbar's ⋯ menu and from the editor tip.
@@ -153,7 +169,7 @@ export function NotesPane({ onClose }: Props) {
   }, [request, panel, noteId, backendSessionId, consumeRequest]);
 
   const sharedBy = useNotesStore((s) => (noteId === null ? null : (s.notes[noteId]?.sharedBy ?? null)));
-  const { onExport, docxReason } = useNoteExport(noteId);
+  const { onExport, docxReason } = useNoteExport(savedId);
 
   return (
     <section
@@ -174,7 +190,7 @@ export function NotesPane({ onClose }: Props) {
         followLabel={followLabel}
         followAvailable={tab === "paper"}
         sharedBy={sharedBy}
-        onExport={noteId === null ? undefined : onExport}
+        onExport={savedId === null ? undefined : onExport}
         docxReason={docxReason}
         guideOpen={guideOpen}
         onGuideOpenChange={setGuideOpen}
@@ -184,23 +200,23 @@ export function NotesPane({ onClose }: Props) {
         id={notePanelId(idBase)}
         role="tabpanel"
         aria-labelledby={noteTabId(idBase, tab)}
-        className="relative min-h-0 flex-1 overflow-y-auto"
+        className="relative min-h-0 flex-1 overflow-x-clip overflow-y-auto"
       >
-        {current?.noteId != null ? (
+        {noteId !== null ? (
           <div
-            key={current.noteId}
+            key={storeKey ?? ""}
             className={cn(
               "h-full animate-in fade-in-0 duration-200 ease-out motion-reduce:animate-none",
               tab === "chat" ? "slide-in-from-right-3" : "slide-in-from-left-3",
             )}
           >
-            <NoteEditor noteId={current.noteId} variant="pane" onOpenGuide={() => setGuideOpen(true)} />
+            <NoteEditor noteId={noteId} variant="pane" onOpenGuide={() => setGuideOpen(true)} />
           </div>
         ) : current?.failed ? (
           <p role="alert" className="px-4 py-3 text-sm text-muted-foreground">
             {t("pane.loadFailed", "Couldn't load this note.")}
           </p>
-        ) : target === null && !needsSession ? (
+        ) : target === null ? (
           <p className="px-4 py-3 text-sm text-muted-foreground">
             {t("pane.empty", "Open a paper or start a chat to take notes.")}
           </p>

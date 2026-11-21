@@ -4,6 +4,7 @@
   "title": { "label": "Note title", "untitled": "Untitled", "saveFailed": "Couldn't save the title." },
   "saveRefused": "Couldn't save that change. Showing the saved version.",
   "retrying": "Not saved — retrying",
+  "createFailed": "Couldn't save this note.",
   "conflict": "Updated from another view",
   "insertAppended": "A new line could not go where you put it, so it was saved at the end of the note.",
   "insertNotSaved": "A new line could not be saved. It stays here, marked Not saved; edit it to try again.",
@@ -96,6 +97,8 @@
     "headingGone": "This heading was deleted",
     "paperGone": "This paper is no longer in your library",
     "unreachable": "Couldn't open that link: where it points is not there.",
+    "cantOpen": "Can't open this right now",
+    "retry": "Retry",
     "kind": {
       "paper": "Paper",
       "paperNote": "Paper note",

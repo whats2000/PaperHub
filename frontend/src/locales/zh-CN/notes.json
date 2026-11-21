@@ -4,6 +4,7 @@
   "title": { "label": "笔记标题", "untitled": "未命名", "saveFailed": "无法保存标题。" },
   "saveRefused": "无法保存这项更改，已显示已保存的版本。",
   "retrying": "尚未保存，正在重试",
+  "createFailed": "无法保存这条笔记。",
   "conflict": "已按另一个视图的内容更新",
   "insertAppended": "有一行新内容无法放在你指定的位置，已保存到笔记末尾。",
   "insertNotSaved": "有一行新内容无法保存。它仍留在这里并标为“未保存”，编辑后会再试一次。",
@@ -96,6 +97,8 @@
     "headingGone": "这个标题已删除",
     "paperGone": "这篇论文已不在你的文献库中",
     "unreachable": "无法打开这个链接：它指向的地方已不存在。",
+    "cantOpen": "现在无法打开",
+    "retry": "重试",
     "kind": {
       "paper": "论文",
       "paperNote": "论文笔记",

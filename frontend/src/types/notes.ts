@@ -109,6 +109,10 @@ export interface NoteDetail extends NoteWithBlocks {
   comments: NoteComment[];
 }
 
+/** A target's note as `GET /notes/target` answers: `note: null` while it
+ *  has none (looking creates nothing; the first write creates it). */
+export type NoteTargetDetail = Omit<NoteDetail, "note"> & { note: Note | null };
+
 export interface NoteBlockIn {
   type: NoteBlockType;
   props: Record<string, unknown>;

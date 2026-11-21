@@ -4,7 +4,8 @@
  * previews where it goes and the first lines there, with Open and Edit
  * display text; keyboard focus opens it too (Tab moves into it, Enter
  * follows the link). A target since deleted: grey and struck through, the
- * preview says so, a click does nothing (no error toast). */
+ * preview says so, a click says it was deleted; one out of reach says "Can't open this
+ * right now" with Retry (plain notices, never an error toast). */
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -18,6 +19,13 @@ import { linkTargetKey, noteTargetInfo, useNotesStore, type LinkTargetInfo } fro
 import type { NoteTargetKind } from "@/types/notes";
 
 import { sectionLabel } from "./markProps";
+
+/** The link's note is there (only its heading may be gone). */
+function noteAlive(noteId: number): boolean {
+  const st = useNotesStore.getState();
+  const loaded = st.notes[noteId];
+  return loaded ? !loaded.note.deleted_at : st.linkTargets[linkTargetKey("note", noteId)]?.status === "ok";
+}
 
 /** Hover: how long before the preview opens, and before it closes. */
 const OPEN_DELAY_MS = 250;
@@ -128,8 +136,21 @@ export function NoteLinkView({
     if (dead || targetId <= 0) return;
     setPreview(false);
     void openNoteLink(link).then((outcome) => {
-      // Deleted meanwhile: the chip turns grey (the lookup was refreshed).
-      if (outcome === "unreachable") toast(t("notes:link.unreachable", "Couldn't open that link: where it points is not there."));
+      // Plain notices, never an error: deleted meanwhile (the chip turns
+      // grey in place, the lookup was refreshed), or only out of reach now.
+      if (outcome === "gone") {
+        toast(
+          !isNote
+            ? t("notes:link.paperGone", "This paper is no longer in your library")
+            : blockId && noteAlive(targetId)
+              ? t("notes:link.headingGone", "This heading was deleted")
+              : t("notes:link.noteGone", "This note was deleted"),
+        );
+      } else if (outcome === "unreachable") {
+        toast(t("notes:link.cantOpen", "Can't open this right now"), {
+          action: { label: t("notes:link.retry", "Retry"), onClick: open },
+        });
+      }
     });
   };
 

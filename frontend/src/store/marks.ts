@@ -282,6 +282,8 @@ function refreshNote(noteId: number | undefined): void {
   if (noteId === undefined) return;
   const notes = useNotesStore.getState();
   if (notes.notes[noteId]) void notes.loadNote(noteId).catch(() => undefined);
+  // The mark made the note: an empty one shown for its paper shows it.
+  else void notes.noteAppeared(noteId).catch(() => undefined);
 }
 
 /** Where in the paper's note a new mark should go: right after the block

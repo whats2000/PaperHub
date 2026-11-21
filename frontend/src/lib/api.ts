@@ -73,6 +73,7 @@ import type {
   NoteCommentStatus,
   NoteDetail,
   NoteOpsBody,
+  NoteTargetDetail,
   NoteTargetKind,
   PaperPageBlock,
   SplitResult,
@@ -1284,13 +1285,19 @@ export async function discardHeld(
 
 // ---- Notes (Plan H5b.1) ----------------------------------------------------
 
-/** The note of a paper / chat / idea, created on first use, with its open
- *  suggestions and comment threads. */
+/** The note of a paper / chat / idea with its open suggestions and comment
+ *  threads, or `note: null` when it has none yet (looking creates nothing). */
 export async function getNoteForTarget(
   kind: NoteTargetKind,
   id: number,
-): Promise<NoteDetail> {
-  return apiFetch<NoteDetail>(`/notes/target?kind=${kind}&id=${id}`);
+): Promise<NoteTargetDetail> {
+  return apiFetch<NoteTargetDetail>(`/notes/target?kind=${kind}&id=${id}`);
+}
+
+/** The target's note, created now when it has none (its first write).
+ *  Idempotent: a second call returns the same note. */
+export async function createNoteForTarget(kind: NoteTargetKind, id: number): Promise<NoteDetail> {
+  return apiFetch<NoteDetail>(`/notes/target?kind=${kind}&id=${id}`, { method: "POST" });
 }
 
 export async function getNote(noteId: number): Promise<NoteDetail> {

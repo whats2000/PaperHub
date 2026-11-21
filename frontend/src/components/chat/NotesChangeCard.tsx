@@ -35,6 +35,11 @@ function refreshNote(noteId: number) {
       .getState()
       .loadNote(noteId)
       .catch(() => undefined);
+  } else {
+    void useNotesStore
+      .getState()
+      .noteAppeared(noteId)
+      .catch(() => undefined);
   }
 }
 

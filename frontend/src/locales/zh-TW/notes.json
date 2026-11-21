@@ -4,6 +4,7 @@
   "title": { "label": "筆記標題", "untitled": "未命名", "saveFailed": "無法儲存標題。" },
   "saveRefused": "無法儲存這項變更，已顯示已儲存的版本。",
   "retrying": "尚未儲存，正在重試",
+  "createFailed": "無法儲存這則筆記。",
   "conflict": "已依另一個視窗的內容更新",
   "insertAppended": "有一行新內容無法放在你指定的位置，已儲存到筆記結尾。",
   "insertNotSaved": "有一行新內容無法儲存。它仍留在這裡並標示為「未儲存」，編輯後會再試一次。",
@@ -96,6 +97,8 @@
     "headingGone": "這個標題已刪除",
     "paperGone": "這篇論文已不在你的文獻庫中",
     "unreachable": "無法開啟這個連結：它指向的地方已不存在。",
+    "cantOpen": "現在無法開啟",
+    "retry": "重試",
     "kind": {
       "paper": "論文",
       "paperNote": "論文筆記",

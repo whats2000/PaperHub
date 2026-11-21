@@ -21,6 +21,7 @@ import { createJSONStorage, persist, type StateStorage } from "zustand/middlewar
 import {
   ApiError,
   createNoteComment,
+  createNoteForTarget,
   getNote,
   getNoteForTarget,
   getPaperInfo,
@@ -41,6 +42,7 @@ import type {
   NoteBlockIn,
   NoteComment,
   NoteCommentStatus,
+  NoteDetail,
   NoteOp,
   NoteSuggestion,
   NoteTargetKind,
@@ -116,7 +118,18 @@ interface NotesStore {
    * block id -> the insert that would save it. Re-applied over every
    * reload, never sent until the user edits one (one more try). */
   drafts: Record<number, Record<string, NoteOp>>;
+  /** The note of a target: its saved note, else a local placeholder (id
+   * < 0) that its first write saves (looking creates nothing). */
   loadTarget: (kind: NoteTargetKind, id: number) => Promise<number>;
+  /** The note of a chat not on the server yet: a placeholder whose first
+   * write creates the chat, then its note. */
+  openChatDraft: (localSessionId: number) => number;
+  /** Saved note id -> the placeholder it began as (its editor stays). */
+  origins: Record<number, number>;
+  /** The server saved note `noteId` (a mark, the agent): a placeholder
+   * still empty for its target (or under `alsoKey`, a local chat's note)
+   * shows it instead. */
+  noteAppeared: (noteId: number, alsoKey?: string) => Promise<void>;
   loadNote: (noteId: number) => Promise<void>;
   /** Sets the page title (shown at once, saved to the server). */
   renameNote: (noteId: number, title: string) => Promise<void>;
@@ -253,6 +266,41 @@ interface Burst {
 const inRetry = new Map<number, Burst>();
 let colorsRequest: Promise<void> | null = null;
 
+/** Notes not on the server yet: a target shown with no note gets a local
+ * placeholder (a negative id) until its first write creates the note (and
+ * the chat, when that is not on the server either). */
+interface UnsavedTarget {
+  kind: NoteTargetKind;
+  /** The target's id; null for a chat not on the server yet. */
+  id: number | null;
+  localSessionId?: number;
+}
+const unsaved = new Map<number, UnsavedTarget>();
+/** Placeholder -> the id the server saved it under. */
+const aliases = new Map<number, number>();
+const creating = new Map<number, Promise<number>>();
+let nextPlaceholder = -1;
+let sessionCreator: ((localSessionId: number) => Promise<number>) | null = null;
+
+/** Who puts a local chat on the server (the chat store) when its note is
+ * first written. */
+export function setNoteSessionCreator(fn: (localSessionId: number) => Promise<number>): void {
+  sessionCreator = fn;
+}
+
+/** A placeholder for a note the server does not have yet. */
+export const isUnsavedNote = (id: number | null | undefined): boolean => typeof id === "number" && id < 0;
+
+/** The id a note is saved under (a placeholder once saved: its saved id). */
+export const savedNoteId = (id: number): number => aliases.get(id) ?? id;
+
+/** Moves `from`'s entry of a per-note record to `to` (kept if `to` has one). */
+function moveKey<T>(rec: Record<number, T>, from: number, to: number): Record<number, T> {
+  if (!(from in rec)) return rec;
+  const { [from]: value, ...rest } = rec;
+  return to in rest ? rest : { ...rest, [to]: value as T };
+}
+
 /** Link target lookups in flight, by `linkTargetKey`. */
 const linkRequests = new Map<string, Promise<void>>();
 
@@ -328,6 +376,9 @@ export function clearPendingNoteOps(): void {
   attempts.clear();
   inRetry.clear();
   rebuilds.clear();
+  unsaved.clear();
+  aliases.clear();
+  creating.clear();
 }
 
 /** The edits of a note not yet saved, in send order (a copy). */
@@ -889,9 +940,130 @@ export const useNotesStore = create<NotesStore>()(
         if (res.rejected.length) await resolveConflict(noteId, res.rejected, burst.ops);
       };
 
+      /** A placeholder's state, empty: what an editor shows before the
+       * first write (nothing is created by looking). */
+      const placeholder = (
+        target: UnsavedTarget,
+        key: string,
+        extra: { defaultTitle?: string; sharedBy?: number } = {},
+      ): number => {
+        const ph = nextPlaceholder--;
+        unsaved.set(ph, target);
+        set((s) => ({
+          notes: {
+            ...s.notes,
+            [ph]: {
+              note: {
+                id: ph,
+                target_kind: target.kind,
+                target_id: target.id === null ? "" : String(target.id),
+                title: "",
+                revision: 0,
+                updated_at: "",
+                deleted_at: null,
+              },
+              blocks: [],
+              suggestions: [],
+              comments: [],
+              revision: 0,
+              ...extra,
+            },
+          },
+          byTarget: { ...s.byTarget, [key]: ph },
+        }));
+        return ph;
+      };
+
+      /** The placeholder's state under its saved note `d` (every per-note
+       * entry moved; edits queued meanwhile follow it). Open editors keep
+       * their editor (`origins`), so the user's typing is never cut. */
+      const adopt = (ph: number, d: NoteDetail, key: string) => {
+        const real = d.note.id;
+        aliases.set(ph, real);
+        unsaved.delete(ph);
+        clearTimeout(timers.get(ph));
+        timers.delete(ph);
+        attempts.delete(ph);
+        const q = pending.get(ph) ?? [];
+        pending.delete(ph);
+        if (q.length) pending.set(real, [...(pending.get(real) ?? []), ...q]);
+        set((s) => {
+          const cur = s.notes[ph];
+          const prev = s.notes[real];
+          // The server already had something (a mark saved meanwhile):
+          // its blocks, the edits not yet sent put back on top.
+          const serverHas = d.blocks.length > 0 || prev !== undefined;
+          const blocks = serverHas
+            ? applyOpsLocally(real, prev?.blocks ?? d.blocks, q)
+            : (cur?.blocks ?? []).map((b) => ({ ...b, note_id: real }));
+          const { [ph]: _gone, ...notes } = s.notes;
+          void _gone;
+          const byTarget = Object.fromEntries(
+            Object.entries(s.byTarget).map(([k, v]) => [k, v === ph ? real : v]),
+          );
+          byTarget[key] = real;
+          const reloads = moveKey(s.reloads, ph, real);
+          const renote = <T extends { noteId: number }>(t: T | null): T | null =>
+            t && t.noteId === ph ? { ...t, noteId: real } : t;
+          return {
+            notes: {
+              ...notes,
+              [real]: {
+                note: { ...d.note, title: cur?.note.title || d.note.title },
+                blocks,
+                suggestions: prev?.suggestions ?? d.suggestions,
+                comments: prev?.comments ?? d.comments,
+                sharedBy: d.shared_by,
+                defaultTitle: d.default_title ?? cur?.defaultTitle,
+                revision: prev?.revision ?? d.note.revision,
+              },
+            },
+            byTarget,
+            origins: { ...s.origins, [real]: s.origins[ph] ?? ph },
+            reloads: serverHas ? bump(reloads, real, null) : reloads,
+            renames: moveKey(s.renames, ph, real),
+            localEdits: moveKey(s.localEdits, ph, real),
+            retrying: moveKey(s.retrying, ph, real),
+            drafts: moveKey(s.drafts, ph, real),
+            activePart: moveKey(s.activePart, ph, real),
+            folded: moveKey(s.folded, ph, real),
+            lastCaret: moveKey(s.lastCaret, ph, real),
+            lastCaretOffset: moveKey(s.lastCaretOffset, ph, real),
+            quoteTarget: renote(s.quoteTarget),
+            caretAfter: renote(s.caretAfter),
+          };
+        });
+      };
+
+      /** Saves a placeholder's note: the chat first when it is not on the
+       * server, then the note (idempotent: a second call is the same
+       * note). Resolves with the saved id. */
+      const materialize = (ph: number): Promise<number> => {
+        const saved = aliases.get(ph);
+        if (saved !== undefined) return Promise.resolve(saved);
+        const known = creating.get(ph);
+        if (known) return known;
+        const p = (async () => {
+          const target = unsaved.get(ph);
+          if (!target) throw new Error(`note ${ph} has no target`);
+          if (target.id === null) {
+            if (!sessionCreator || target.localSessionId === undefined) {
+              throw new Error("no chat to keep this note in");
+            }
+            target.id = await sessionCreator(target.localSessionId);
+          }
+          const d = await createNoteForTarget(target.kind, target.id);
+          adopt(ph, d, `${target.kind}:${target.id}`);
+          return d.note.id;
+        })().finally(() => creating.delete(ph));
+        creating.set(ph, p);
+        return p;
+      };
+
       return {
         notes: {},
         byTarget: {},
+        origins: {},
         reloads: {},
         renames: {},
         localEdits: {},
@@ -899,10 +1071,43 @@ export const useNotesStore = create<NotesStore>()(
         drafts: {},
 
         loadTarget: async (kind, id) => {
-          const known = get().byTarget[`${kind}:${id}`];
+          const key = `${kind}:${id}`;
+          const known = get().byTarget[key];
           if (known !== undefined) await get().flush(known);
-          const d = await getNoteForTarget(kind, id);
-          const { blocks, unsaved } = rebase(d.note.id, d.blocks);
+          const got = await getNoteForTarget(kind, id);
+          const shown = get().byTarget[key];
+          if (got.note === null) {
+            // No note yet: an empty placeholder, saved by the first write.
+            if (shown !== undefined && isUnsavedNote(shown) && get().notes[shown]) {
+              set((s) => {
+                const cur = s.notes[shown];
+                if (!cur) return {};
+                return {
+                  notes: {
+                    ...s.notes,
+                    [shown]: { ...cur, sharedBy: got.shared_by, defaultTitle: got.default_title ?? cur.defaultTitle },
+                  },
+                };
+              });
+              return shown;
+            }
+            return placeholder({ kind, id }, key, { sharedBy: got.shared_by, defaultTitle: got.default_title });
+          }
+          // A placeholder still being typed in stays until its own save.
+          if (shown !== undefined && isUnsavedNote(shown) && (pending.get(shown)?.length || creating.has(shown))) {
+            return shown;
+          }
+          if (shown !== undefined && isUnsavedNote(shown)) {
+            // Saved elsewhere (a mark, the agent): the saved note replaces it.
+            unsaved.delete(shown);
+            set((s) => {
+              const { [shown]: _gone, ...notes } = s.notes;
+              void _gone;
+              return { notes };
+            });
+          }
+          const d = { ...got, note: got.note };
+          const { blocks, unsaved: hasUnsaved } = rebase(d.note.id, d.blocks);
           set((s) => {
             const prev = s.notes[d.note.id];
             return {
@@ -916,25 +1121,71 @@ export const useNotesStore = create<NotesStore>()(
                   sharedBy: d.shared_by,
                   defaultTitle: d.default_title ?? prev?.defaultTitle,
                   revision:
-                    unsaved && prev ? Math.min(prev.revision, d.note.revision) : d.note.revision,
+                    hasUnsaved && prev ? Math.min(prev.revision, d.note.revision) : d.note.revision,
                 },
               },
-              byTarget: { ...s.byTarget, [`${kind}:${id}`]: d.note.id },
+              byTarget: { ...s.byTarget, [key]: d.note.id },
               reloads: prev ? bump(s.reloads, d.note.id, null) : s.reloads,
             };
           });
           return d.note.id;
         },
 
+        noteAppeared: async (noteId, alsoKey) => {
+          const s0 = get();
+          if (s0.notes[noteId] || !Object.values(s0.byTarget).some(isUnsavedNote)) return;
+          const d = await getNote(noteId);
+          const key = `${d.note.target_kind}:${d.note.target_id}`;
+          const byTarget = get().byTarget;
+          const ph = [byTarget[key], alsoKey === undefined ? undefined : byTarget[alsoKey]].find(
+            (id): id is number => id !== undefined && isUnsavedNote(id),
+          );
+          // One being typed in is saved by its own first write (the same note).
+          if (ph === undefined || pending.get(ph)?.length || creating.has(ph)) return;
+          unsaved.delete(ph);
+          set((s) => {
+            const { [ph]: _gone, ...notes } = s.notes;
+            void _gone;
+            const next = Object.fromEntries(
+              Object.entries(s.byTarget).map(([k, v]) => [k, v === ph ? noteId : v]),
+            );
+            next[key] = noteId;
+            return {
+              notes: {
+                ...notes,
+                [noteId]: {
+                  note: d.note,
+                  blocks: d.blocks,
+                  suggestions: d.suggestions,
+                  comments: d.comments,
+                  sharedBy: d.shared_by,
+                  defaultTitle: d.default_title,
+                  revision: d.note.revision,
+                },
+              },
+              byTarget: next,
+            };
+          });
+        },
+
+        openChatDraft: (localSessionId) => {
+          const key = `local:${localSessionId}`;
+          const known = get().byTarget[key];
+          if (known !== undefined && get().notes[known]) return known;
+          return placeholder({ kind: "session", id: null, localSessionId }, key);
+        },
+
         renameNote: async (noteId, title) => {
+          // A title is a write: an unsaved note is saved first.
+          let id = savedNoteId(noteId);
           const setTitle = (value: string, defaultTitle?: string) =>
             set((s) => {
-              const cur = s.notes[noteId];
+              const cur = s.notes[id];
               if (!cur) return {};
               return {
                 notes: {
                   ...s.notes,
-                  [noteId]: {
+                  [id]: {
                     ...cur,
                     note: { ...cur.note, title: value },
                     defaultTitle: defaultTitle ?? cur.defaultTitle,
@@ -942,14 +1193,17 @@ export const useNotesStore = create<NotesStore>()(
                 },
               };
             });
-          const before = get().notes[noteId]?.note.title;
+          const before = get().notes[id]?.note.title;
           setTitle(title);
+          if (isUnsavedNote(id) && !title.trim()) return;
           try {
-            const d = await patchNoteTitle(noteId, title);
+            if (isUnsavedNote(id)) id = await materialize(id);
+            const d = await patchNoteTitle(id, title);
             // A newer rename may have been typed meanwhile: keep it.
-            if (get().notes[noteId]?.note.title === title) setTitle(d.note.title, d.default_title);
+            if (get().notes[id]?.note.title === title) setTitle(d.note.title, d.default_title);
           } catch (err) {
-            if (before !== undefined && get().notes[noteId]?.note.title === title) setTitle(before);
+            id = savedNoteId(id);
+            if (before !== undefined && get().notes[id]?.note.title === title) setTitle(before);
             toast.error(i18n.t("notes:title.saveFailed", "Couldn't save the title."));
             throw err;
           }
@@ -957,11 +1211,14 @@ export const useNotesStore = create<NotesStore>()(
 
         loadNote: async (noteId) => {
           await get().flush(noteId);
-          await reload(noteId);
+          const id = savedNoteId(noteId);
+          if (isUnsavedNote(id)) return; // nothing saved yet
+          await reload(id);
         },
 
-        applyLocal: (noteId, ops, origin) => {
+        applyLocal: (rawId, ops, origin) => {
           if (!ops.length) return;
+          const noteId = savedNoteId(rawId);
           set((s) => {
             const cur = s.notes[noteId];
             if (!cur) return {};
@@ -999,9 +1256,35 @@ export const useNotesStore = create<NotesStore>()(
           schedule(noteId);
         },
 
-        flush: async (noteId) => {
+        flush: async (rawId) => {
+          let noteId = savedNoteId(rawId);
           clearTimeout(timers.get(noteId));
           timers.delete(noteId);
+          if (isUnsavedNote(noteId)) {
+            // The first write: save the note (and its chat) first.
+            if (!pending.get(noteId)?.length) return;
+            const ph = noteId;
+            try {
+              noteId = await materialize(ph);
+            } catch (err) {
+              if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+                // It can never be saved (the paper or chat is gone): the
+                // words stay on screen; the next edit tries again.
+                attempts.delete(ph);
+                setRetrying(ph, false);
+                toast.error(i18n.t("notes:createFailed", "Couldn't save this note."));
+                return;
+              }
+              const n = (attempts.get(ph) ?? 0) + 1;
+              attempts.set(ph, n);
+              setRetrying(ph, true);
+              schedule(ph, RETRY_DELAYS_MS[Math.min(n, RETRY_DELAYS_MS.length) - 1]);
+              return;
+            }
+            setRetrying(noteId, false);
+            clearTimeout(timers.get(noteId));
+            timers.delete(noteId);
+          }
           // One burst at a time: the next one needs this one's revision.
           while (inflight.has(noteId)) await inflight.get(noteId);
           if (!inRetry.has(noteId) && !pending.get(noteId)?.length) return;
@@ -1021,7 +1304,7 @@ export const useNotesStore = create<NotesStore>()(
 
         activePart: {},
         setActivePart: (noteId, partId) =>
-          set((s) => ({ activePart: { ...s.activePart, [noteId]: partId } })),
+          set((s) => ({ activePart: { ...s.activePart, [savedNoteId(noteId)]: partId } })),
         focusOn: false,
         setFocusOn: (on) => set({ focusOn: on }),
         followOn: true,
@@ -1039,7 +1322,8 @@ export const useNotesStore = create<NotesStore>()(
               },
             };
           }),
-        keepFolds: (noteId, dividerIds) => {
+        keepFolds: (rawId, dividerIds) => {
+          const noteId = savedNoteId(rawId);
           const cur = get().folded[noteId] ?? [];
           const kept = cur.filter((d) => dividerIds.has(d));
           if (kept.length !== cur.length) set((s) => ({ folded: { ...s.folded, [noteId]: kept } }));
@@ -1048,7 +1332,8 @@ export const useNotesStore = create<NotesStore>()(
         setQuoteTarget: (target) => set({ quoteTarget: target }),
         lastCaret: {},
         lastCaretOffset: {},
-        setLastCaret: (noteId, blockId, offset) => {
+        setLastCaret: (rawId, blockId, offset) => {
+          const noteId = savedNoteId(rawId);
           if (get().lastCaret[noteId] !== blockId) set((s) => ({ lastCaret: { ...s.lastCaret, [noteId]: blockId } }));
           const cur = get().lastCaretOffset[noteId];
           if (typeof offset === "number" ? cur !== offset : cur !== undefined) {
@@ -1073,8 +1358,11 @@ export const useNotesStore = create<NotesStore>()(
           }
         },
 
-        addComment: async (noteId, blockId, quote, text) => {
-          await get().flush(noteId);
+        addComment: async (rawId, blockId, quote, text) => {
+          await get().flush(rawId);
+          // The block must be on the server: an unsaved note is saved first.
+          const noteId = savedNoteId(rawId);
+          if (isUnsavedNote(noteId)) throw new Error("the note is not saved yet");
           const thread = await createNoteComment(noteId, { block_id: blockId, quote, text });
           writeComments(noteId, (list) => [...list, thread]);
           return thread;

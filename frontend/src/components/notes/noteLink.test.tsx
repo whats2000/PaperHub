@@ -248,7 +248,7 @@ describe("a [[ link chip", () => {
     expect(useCanvasStore.getState().requestedEndChunkId).toBe(405);
   });
 
-  it("a click checks an old lookup again: a note deleted since shows dead and opens nothing", async () => {
+  it("a click checks an old lookup again: a note deleted since shows dead, says so and opens nothing", async () => {
     note12(404);
     seed([link()]);
     useNotesStore.setState({
@@ -261,7 +261,10 @@ describe("a [[ link chip", () => {
     fireEvent.click(chip()!);
     await waitFor(() => expect(chip()).toHaveAttribute("data-dead", "true"));
     expect(useNotesPaneStore.getState().request).toBeNull();
-    expect(toastFn).not.toHaveBeenCalled();
+    // A plain notice says which case it is (never an error toast); the
+    // chip stays grey in place.
+    await waitFor(() => expect(toastFn).toHaveBeenCalledWith("This note was deleted"));
+    expect(errorFn).not.toHaveBeenCalled();
   });
 
   it("Edit display text starts empty, never from the placeholder", async () => {
@@ -380,15 +383,27 @@ describe("following a link to another place", () => {
     expect(useNavStore.getState().page).toBe("chat");
   });
 
-  it("clicking a chip whose place is gone says so, neutrally", async () => {
-    server.use(noteOf(21, "session", "77"), http.get(`${API_BASE_URL}/sessions`, () => HttpResponse.json([])));
+  it("clicking a chip it can't open now says so, neutrally, with Retry", async () => {
+    let sessions: unknown[] = [];
+    server.use(noteOf(21, "session", "77"), http.get(`${API_BASE_URL}/sessions`, () => HttpResponse.json(sessions)));
     useChatStore.setState({ sessions: [], activeSessionId: null });
     seed([link({ targetId: 21, name: "Chat note" })]);
     mount();
     await waitFor(() => expect(chip()?.textContent).toBe("N"));
     fireEvent.click(chip()!);
-    await waitFor(() => expect(toastFn).toHaveBeenCalledWith("Couldn't open that link: where it points is not there."));
+    await waitFor(() => expect(toastFn).toHaveBeenCalledTimes(1));
+    const [text, opts] = toastFn.mock.calls[0] as [string, { action: { label: string; onClick: () => void } }];
+    expect(text).toBe("Can't open this right now");
+    expect(opts.action.label).toBe("Retry");
     expect(errorFn).not.toHaveBeenCalled();
+    // The chip is not dead: only out of reach. Retry, once it is there, opens it.
+    expect(chip()).not.toHaveAttribute("data-dead");
+    sessions = [{ id: 77, title: "Back", created_at: "", updated_at: "", message_count: 1 }];
+    opts.action.onClick();
+    await waitFor(() =>
+      expect(useNotesPaneStore.getState().request).toMatchObject({ kind: "session", id: 77, noteId: 21 }),
+    );
+    expect(toastFn).toHaveBeenCalledTimes(1);
   });
 
   it("a deleted note opens nothing", async () => {

@@ -18,7 +18,7 @@ import { createBackendSession, listSessionReferences } from "@/lib/api";
 import { laterIso, nowIso, parseBackendTime } from "@/lib/sessionTime";
 import { useMemoriesStore } from "@/store/memories";
 import { useNavStore } from "@/store/nav";
-import { noteMarksChanged, useNotesStore } from "@/store/notes";
+import { noteMarksChanged, setNoteSessionCreator, useNotesStore } from "@/store/notes";
 import { useSlidesStore } from "@/store/slides";
 
 interface ChatState {
@@ -806,6 +806,9 @@ export const useChatStore = create<ChatState>()(
           const notes = useNotesStore.getState();
           if (typeof noteId === "number" && notes.notes[noteId]) {
             void notes.loadNote(noteId).catch(() => undefined);
+          } else if (typeof noteId === "number") {
+            // A note the pane shows as empty (not saved yet) was just made.
+            void notes.noteAppeared(noteId, `local:${sessionId}`).catch(() => undefined);
           }
         }
       },
@@ -1150,3 +1153,7 @@ export const useChatStore = create<ChatState>()(
     },
   ),
 );
+
+// A chat's note written before the chat is on the server: its first save
+// puts the chat there first (nothing is created by just showing it).
+setNoteSessionCreator((localSessionId) => useChatStore.getState().ensureBackendSession(localSessionId));
