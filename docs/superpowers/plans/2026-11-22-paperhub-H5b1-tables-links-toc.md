@@ -195,6 +195,17 @@
 - [ ] **Step 4: Run** + typecheck + lint + parity → PASS.
 - [ ] **Step 5: Commit** `feat(notes): floating table of contents`.
 
+### Task 12: Table display style (three-line / grid)
+
+**Files:**
+- Modify: `frontend/src/components/notes/schema.ts` (table spec propSchema `{tableStyle: {default: "threeLine", values: ["threeLine","grid"]}}` — only this prop; no colours), `NoteTableHandles.tsx` (⋯ menu: Style: Three-line / Grid, checked state), `frontend/src/index.css` (three-line and grid rules; faint editing lines on `:focus-within` / `:hover`; reduced motion for any transition), four `notes.json`, `guideData.ts`
+- Modify: `backend/src/paperhub/notes/ops.py` / `models.py` (a table block's props allow `tableStyle` ∈ {threeLine, grid}, reject others), `backend/src/paperhub/notes/export.py` + `pandoc.py` (docx: three-line = top/mid/bottom borders only, grid = all borders; Markdown unchanged)
+- Test: `frontend/src/components/notes/tables.test.tsx`, `backend/tests/notes/test_table_blocks.py`, `backend/tests/notes/test_export_tables.py`
+
+- [ ] **Step 1: Failing tests**: a new table has `tableStyle: "threeLine"`; the ⋯ menu switches it and the table root carries `data-table-style`; an old table with no prop renders three-line; backend accepts both values, rejects `"fancy"`; docx of a three-line table has no vertical / inner horizontal borders and has top, header-bottom and bottom borders; grid docx has all borders.
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement** (docx borders by post-processing the pandoc docx table XML or a reference style — pick the smaller change and document it). **Step 4: Run** → PASS + typecheck / lint / parity / ruff / mypy.
+- [ ] **Step 5: Commit** `feat(notes): three-line and grid table styles`.
+
 ## Phase 4 — Verification
 
 ### Task 11: Full gates and live check on a workspace copy
