@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { noteOutline, type EditorBlockLike } from "./outline";
+import { noteOutline, storedNoteOutline, type EditorBlockLike } from "./outline";
 
 const run = (text: string) => [{ type: "text", text, styles: {} }];
 const h = (id: string, level: number, text: string, children: EditorBlockLike[] = []): EditorBlockLike => ({
@@ -60,5 +60,28 @@ describe("noteOutline", () => {
       },
     ];
     expect(noteOutline(blocks)[0]!.text).toBe("On links");
+  });
+});
+
+describe("storedNoteOutline", () => {
+  it("lists stored blocks in document order, a nested heading under its parent", () => {
+    const row = (id: string, text: string, level: number, parent_id: string | null = null) => ({
+      id,
+      parent_id,
+      type: "heading",
+      props: { level },
+      content: [{ type: "text", text, styles: {} }],
+    });
+    // "b" is a child of "a" but stored after "c".
+    const blocks = [row("a", "Alpha", 1), row("c", "Gamma", 1), row("b", "Beta", 2, "a")];
+    expect(storedNoteOutline(blocks).map((e) => e.text)).toEqual(["Alpha", "Beta", "Gamma"]);
+  });
+
+  it("keeps a block whose parent is missing, after the tree", () => {
+    const blocks = [
+      { id: "x", parent_id: "gone", type: "heading", props: { level: 1 }, content: "Orphan" },
+      { id: "a", parent_id: null, type: "heading", props: { level: 1 }, content: "Alpha" },
+    ];
+    expect(storedNoteOutline(blocks).map((e) => e.text)).toEqual(["Alpha", "Orphan"]);
   });
 });

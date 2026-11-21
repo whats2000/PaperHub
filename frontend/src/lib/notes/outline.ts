@@ -55,3 +55,30 @@ export function noteOutline(blocks: EditorBlockLike[]): OutlineEntry[] {
   walk(blocks);
   return out;
 }
+
+/** The part of a stored block (`NoteBlock`) the outline reads. */
+export interface StoredBlockLike extends Omit<EditorBlockLike, "children"> {
+  parent_id: string | null;
+}
+
+/** The outline of a note's stored blocks: rebuilt as a tree from
+ * `parent_id`, so a nested heading lists under its parent whatever the
+ * array's order; a block whose parent is missing comes after the tree (as
+ * the server lists orphans). */
+export function storedNoteOutline(blocks: StoredBlockLike[]): OutlineEntry[] {
+  const ids = new Set(blocks.map((b) => b.id));
+  const kids = new Map<string | null, StoredBlockLike[]>();
+  const orphans: StoredBlockLike[] = [];
+  for (const b of blocks) {
+    if (b.parent_id !== null && !ids.has(b.parent_id)) {
+      orphans.push(b);
+      continue;
+    }
+    const list = kids.get(b.parent_id);
+    if (list) list.push(b);
+    else kids.set(b.parent_id, [b]);
+  }
+  const tree = (list: StoredBlockLike[]): EditorBlockLike[] =>
+    list.map((b) => ({ ...b, children: tree(kids.get(b.id) ?? []) }));
+  return noteOutline([...tree(kids.get(null) ?? []), ...tree(orphans)]);
+}

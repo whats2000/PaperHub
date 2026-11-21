@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { noteOutline, type OutlineEntry } from "@/lib/notes/outline";
+import { storedNoteOutline, type OutlineEntry } from "@/lib/notes/outline";
 import { revealBlock, unfoldInNote } from "@/lib/notes/reveal";
 import { cn } from "@/lib/utils";
 import { useNotesStore } from "@/store/notes";
@@ -37,7 +37,7 @@ const sameOutline = (a: OutlineEntry[], b: OutlineEntry[]) =>
  * in a paragraph does not touch the list). */
 function useOutline(noteId: number | null): OutlineEntry[] {
   const blocks = useNotesStore((s) => (noteId === null ? undefined : s.notes[noteId]?.blocks));
-  const fresh = useMemo(() => noteOutline(blocks ?? []), [blocks]);
+  const fresh = useMemo(() => storedNoteOutline(blocks ?? []), [blocks]);
   const [kept, setKept] = useState(fresh);
   if (kept !== fresh && !sameOutline(kept, fresh)) setKept(fresh);
   return kept;
