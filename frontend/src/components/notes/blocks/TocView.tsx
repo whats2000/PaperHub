@@ -6,11 +6,10 @@ import { noteOutline, type EditorBlockLike } from "@/lib/notes/outline";
 import { revealBlock, unfoldInNote } from "@/lib/notes/reveal";
 
 import { useNoteEditorContext } from "./markProps";
+import { TocList } from "./TocList";
 import { useTocRows } from "./useTocRows";
 
 export type TocEditor = NonNullable<Parameters<typeof useEditorChange>[1]>;
-
-const INDENT_PX = 16;
 
 /** The note's table of contents: its headings and sections, listed live from
  * the editor's own document and indented by level; a click glides to the
@@ -44,34 +43,7 @@ export function TocView({ editor }: { editor: TocEditor }) {
           {t("notes:toc.empty", "Headings you add appear here.")}
         </div>
       ) : (
-        <ul className="m-0 list-none p-0">
-          {entries.map((e) => (
-            <li
-              key={e.blockId}
-              data-state={e.state}
-              aria-hidden={e.state === "out" ? true : undefined}
-              className="grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none"
-              style={{
-                gridTemplateRows: e.state === "open" ? "1fr" : "0fr",
-                opacity: e.state === "open" ? 1 : 0,
-              }}
-            >
-              <div
-                className="min-h-0 overflow-hidden"
-                style={{ paddingLeft: (e.level - 1) * INDENT_PX }}
-              >
-                <button
-                  type="button"
-                  tabIndex={e.state === "out" ? -1 : 0}
-                  onClick={() => go(e.blockId)}
-                  className="w-full truncate rounded-sm py-[2px] text-left text-[13px] text-muted-foreground underline-offset-2 transition-colors duration-150 hover:bg-accent hover:text-foreground hover:underline motion-reduce:transition-none"
-                >
-                  {e.text}
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <TocList rows={entries} onGo={go} />
       )}
     </div>
   );
