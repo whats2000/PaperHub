@@ -151,7 +151,7 @@ export function NotesChangeCard({ data }: { data: NotesChangedData }) {
   const ToggleIcon = busy ? Loader2 : undone ? Redo2 : Undo2;
 
   return (
-    <div className="not-prose mb-2 animate-in fade-in-0 zoom-in-95 duration-200 motion-reduce:animate-none">
+    <div className="not-prose mt-2 animate-in fade-in-0 zoom-in-95 duration-200 motion-reduce:animate-none">
       <div
         data-testid="notes-change-card"
         data-undone={undone || undefined}

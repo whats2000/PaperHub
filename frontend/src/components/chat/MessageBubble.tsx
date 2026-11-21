@@ -264,9 +264,6 @@ export function MessageBubble({
             )}
           </div>
         )}
-        {notesEvents.map((d) => (
-          <NotesChangeCard key={d.change_set_id} data={d} />
-        ))}
         {isAssistant && <PausedLine count={pausedCount} />}
         <div
           className={
@@ -471,6 +468,12 @@ export function MessageBubble({
             ))}
           </div>
         )}
+
+        {/* The agent's note changes, one card per change set: under the
+            answer, with the other results of what the agent did. */}
+        {notesEvents.map((d) => (
+          <NotesChangeCard key={d.change_set_id} data={d} />
+        ))}
 
         {/* Deck chip — rendered when a slide deck has been generated for this
             turn (deck SSE event). Shows below search results if both exist. */}

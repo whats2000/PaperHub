@@ -177,7 +177,7 @@ describe("NotesChangeCard", () => {
 });
 
 describe("MessageBubble", () => {
-  it("shows a replayed notes_changed event as the card, above the answer", async () => {
+  it("shows a replayed notes_changed event as the card, below the answer", async () => {
     server.use(
       http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () =>
         HttpResponse.json(detail({ status: "undone", head: { id: "cs_1", status: "undone" } })),
@@ -196,7 +196,7 @@ describe("MessageBubble", () => {
     );
     const card = screen.getByTestId("notes-change-card");
     const answer = screen.getByText("I put three notes under §2.");
-    expect(card.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(answer.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // Its state is the server's, not the event's.
     expect(await screen.findByRole("button", { name: /Apply again/ })).toBeInTheDocument();
   });
