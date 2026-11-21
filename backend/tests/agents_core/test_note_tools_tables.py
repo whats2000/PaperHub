@@ -322,3 +322,62 @@ async def test_accepted_suggestion_on_a_user_table_merges_per_cell(
     assert rows[1][0] == _bold("ORR")
     assert _marks(rows[1][1]) == ["m1"]
     assert _cell_texts(block.content)[2] == ["x", "z"]
+
+
+# ------------------------------------------------- caption and notes (Task 13)
+
+CAPTIONED = {"caption": 'Rates & "means"', "notes": "ORR, objective response.\n* $p<0.05$"}
+
+
+async def _captioned(conn: aiosqlite.Connection, actor: Any = "user") -> tuple[int, str, int]:
+    nid = await _chat_note(conn)
+    res = await apply_ops(conn, nid, base_revision=0, actor=actor, ops=[
+        Op(op="insert", block=BlockIn(type="table", props=CAPTIONED, content={
+            "type": "tableContent", "columnWidths": [None, None],
+            "headerRows": 1, "rows": [{"cells": ["k", "v"]},
+                                      {"cells": ["ORR", "62%"]}]}))])
+    return nid, res.applied[0], res.revision
+
+
+async def test_read_note_shows_the_caption_and_the_notes(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    from paperhub.outbound.context import begin_turn, current_private
+
+    _, bid, _ = await _captioned(migrated_db)
+    begin_turn()
+    out = await _call(_ctx(migrated_db, fake_tracer), "read_note", note="chat")
+    assert (f'<note_block id="{bid}" type="table" '
+            'caption="Rates &amp; &quot;means&quot;" author="user">'
+            "| k | v |\n| --- | --- |\n| ORR | 62% |\n"
+            "<table_notes>ORR, objective response.\n* $p&lt;0.05$</table_notes>"
+            "</note_block>") in out.content
+    # The caption and the notes are note material, private like the cells.
+    [item] = [i for i in current_private() if i.kind == "note" and ":block:" in i.ref]
+    assert item.text.startswith('Rates & "means"\n| k | v |')
+    assert item.text.endswith("* $p<0.05$")
+
+
+async def test_an_agent_update_keeps_the_caption_and_the_notes(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid, bid, rev = await _captioned(migrated_db, actor="agent")
+    out = await _update(_ctx(migrated_db, fake_tracer), bid, rev,
+                        "| k | v |\n|---|---|\n| ORR | 70% |")
+    assert out.record["applied"] == [bid]
+    [block] = await list_blocks(migrated_db, nid)
+    assert block.props == CAPTIONED
+    assert _cell_texts(block.content)[1] == ["ORR", "70%"]
+
+
+async def test_notes_echoed_back_in_an_update_set_the_notes(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid, bid, rev = await _captioned(migrated_db, actor="agent")
+    out = await _update(_ctx(migrated_db, fake_tracer), bid, rev,
+                        "| k | v |\n|---|---|\n| ORR | 62% |\n"
+                        "<table_notes>NR, not reached; $p&lt;0.01$</table_notes>")
+    assert out.record["applied"] == [bid]
+    [block] = await list_blocks(migrated_db, nid)
+    assert block.props == {"caption": CAPTIONED["caption"],
+                           "notes": "NR, not reached; $p<0.01$"}

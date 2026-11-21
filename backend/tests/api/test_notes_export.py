@@ -288,7 +288,7 @@ async def test_export_passes_the_table_style_to_word(
     seen: list[str] = []
 
     def fake(md: str, resources: dict[str, bytes], *,
-             table_style: str = "threeLine") -> bytes:
+             table_style: str = "threeLine", **_kw: object) -> bytes:
         seen.append(table_style)
         return b"docx"
     monkeypatch.setattr(note_pandoc, "pandoc_status", lambda: "ok")
@@ -298,3 +298,33 @@ async def test_export_passes_the_table_style_to_word(
     r = await client.get(f"/notes/{nid}/export", params=params)
     assert r.status_code == 200 and r.content == b"docx"
     assert seen == [want]
+
+
+async def test_export_passes_the_table_label_and_notes_to_word(
+        client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[dict[str, object]] = []
+
+    def fake(md: str, resources: dict[str, bytes], **kw: object) -> bytes:
+        seen.append({**kw, "md": md})
+        return b"docx"
+    monkeypatch.setattr(note_pandoc, "pandoc_status", lambda: "ok")
+    monkeypatch.setattr(note_pandoc, "markdown_to_docx", fake)
+    nid = await _paper_note(client)
+    table = {"type": "tableContent", "columnWidths": [None], "headerRows": 1,
+             "rows": [{"cells": ["h"]}, {"cells": ["1"]}]}
+    await _write(client, nid, [
+        {"type": "table", "content": table, "props": {"caption": "C", "notes": "N"}},
+        {"type": "table", "content": table, "props": {"caption": "D"}}])
+    r = await client.get(f"/notes/{nid}/export",
+                         params={"format": "docx", "table_label": "表"})
+    assert r.status_code == 200
+    [call] = seen
+    assert call["table_label"] == "表" and call["table_notes"] == [True, False]
+    assert "Table: C" in str(call["md"])
+    # The label defaults to English and is bounded.
+    seen.clear()
+    await client.get(f"/notes/{nid}/export", params={"format": "docx"})
+    assert seen[0]["table_label"] == "Table"
+    r = await client.get(f"/notes/{nid}/export",
+                         params={"format": "docx", "table_label": "x" * 41})
+    assert r.status_code == 422

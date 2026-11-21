@@ -43,6 +43,7 @@ from paperhub.notes.models import (
     BlockType,
     check_inline,
     check_table,
+    check_table_props,
 )
 from paperhub.notes.order import key_between
 from paperhub.notes.store import (
@@ -72,6 +73,7 @@ class BlockIn(BaseModel):
             if not isinstance(self.content, dict):
                 raise ValueError("a table block's content must be an object")
             check_table(self.content)
+            check_table_props(self.props)
         elif isinstance(self.content, dict):
             raise ValueError("only a table block has object content")
         return self

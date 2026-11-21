@@ -134,3 +134,50 @@ async def test_helpers() -> None:
          "rows": [{"cells": [cell]}]}
     assert check_table(t) == t
     assert table_rows(t) == [[[{"type": "text", "text": "z", "styles": {}}]]]
+
+
+# ------------------------------------------------- caption and notes (Task 13)
+
+async def test_caption_and_notes_are_stored_and_searchable(
+    client: AsyncClient, tmp_path: Path,
+) -> None:
+    nid = await _note(client)
+    r = await _insert(client, nid, {
+        "type": "table", "content": TABLE,
+        "props": {"caption": "Response rates", "notes": "ORR, objective response; $p<0.05$"}})
+    assert r.status_code == 200, r.text
+    blk = next(b for b in (await client.get(f"/notes/{nid}")).json()["blocks"]
+               if b["id"] == TID)
+    assert blk["props"] == {"caption": "Response rates",
+                            "notes": "ORR, objective response; $p<0.05$"}
+    # The caption first, the notes last.
+    assert blk["text"] == ("Response rates\n指標 | 值\nORR | 62%\n"
+                           "ORR, objective response; $p<0.05$")
+    async with (
+        aiosqlite.connect(tmp_path / "paperhub.db") as conn,
+        conn.execute(
+            "SELECT b.id FROM note_blocks_fts f JOIN note_blocks b "
+            "ON b.rowid = f.rowid WHERE note_blocks_fts MATCH 'rates'"
+        ) as cur,
+    ):
+        assert [r[0] for r in await cur.fetchall()] == [TID]
+
+
+@pytest.mark.parametrize("props", [
+    {"textColor": "red"},
+    {"caption": 3},
+    {"notes": ["a"]},
+    {"caption": "x" * 2001},
+], ids=["other", "caption-int", "notes-list", "too-long"])
+async def test_other_table_props_are_rejected(client: AsyncClient,
+                                              props: dict[str, Any]) -> None:
+    nid = await _note(client)
+    r = await _insert(client, nid, {"type": "table", "content": TABLE,
+                                    "props": props})
+    assert r.status_code == 422
+
+
+async def test_block_text_with_caption_and_notes() -> None:
+    assert block_text("table", {"caption": "C", "notes": ""}, TABLE) == (
+        "C\n指標 | 值\nORR | 62%")
+    assert block_text("table", {"notes": "N"}, TABLE) == "指標 | 值\nORR | 62%\nN"

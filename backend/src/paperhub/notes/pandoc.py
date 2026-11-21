@@ -21,8 +21,11 @@ Note text is untrusted input to pandoc. What holds:
   resources, and no image path or URL in the note is ever read.
 - After the second run the tables are drawn in the viewer's table style
   (``style_docx_tables``): pandoc's own ``word/document.xml`` is rewritten
-  to give each table its borders (three-line or grid). No reference docx
-  is involved, so neither run reads anything more.
+  to give each table its borders (three-line or grid). Then each table
+  caption gets its "Table N." (a Word SEQ field) and a table's notes
+  paragraph (put in the Table Note style in the AST) is drawn small
+  (``docx_table_captions``). No reference docx is involved, so neither run
+  reads anything more.
 """
 from __future__ import annotations
 
@@ -35,8 +38,10 @@ import subprocess
 import tempfile
 import time
 import zipfile
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal
+from xml.sax.saxutils import escape as xml_escape
 
 PANDOC_TIMEOUT_S = 60
 BIB_NAME = "references.bib"
@@ -53,6 +58,8 @@ _READER = (
     "+blank_before_blockquote+blank_before_header+backtick_code_blocks"
     "+task_lists+strikeout+bracketed_spans+escaped_line_breaks"
     "+implicit_figures+citations+tex_math_dollars+footnotes+pipe_tables"
+    # A table's caption (the exporter's ``Table: <caption>`` line).
+    "+table_captions"
     # Typography and heading anchors: neither sets metadata or paths.
     "+smart+auto_identifiers")
 _NAME = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
@@ -60,6 +67,8 @@ _NAME = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
 PandocStatus = Literal["ok", "pandoc_missing", "pandoc_too_old"]
 TableStyle = Literal["threeLine", "grid"]
 TABLE_STYLES: tuple[TableStyle, ...] = ("threeLine", "grid")
+# The Word paragraph style of a table's notes (styleId without the space).
+TABLE_NOTE_STYLE = "Table Note"
 
 
 class PandocError(RuntimeError):
@@ -155,12 +164,37 @@ def _own_images_only(node: Any, files: dict[str, str]) -> Any:
     return node
 
 
+def _mark_table_notes(node: Any, flags: Sequence[bool], seen: list[int]) -> None:
+    """In ``node`` (pandoc JSON AST, changed in place), the paragraph right
+    after the n-th table, when ``flags[n]``, put in the Table Note style.
+    ``seen`` counts the tables passed (document order)."""
+    if isinstance(node, list):
+        for i, item in enumerate(node):
+            if isinstance(item, dict) and item.get("t") == "Table":
+                n = seen[0]
+                seen[0] += 1
+                nxt = node[i + 1] if i + 1 < len(node) else None
+                if (n < len(flags) and flags[n] and isinstance(nxt, dict)
+                        and nxt.get("t") == "Para"):
+                    node[i + 1] = {"t": "Div", "c": [
+                        ["", [], [["custom-style", TABLE_NOTE_STYLE]]], [nxt]]}
+                continue
+            _mark_table_notes(item, flags, seen)
+    elif isinstance(node, dict):
+        for v in node.values():
+            _mark_table_notes(v, flags, seen)
+
+
 def markdown_to_docx(md: str, resources: dict[str, bytes], *,
-                     table_style: TableStyle = "threeLine") -> bytes:
+                     table_style: TableStyle = "threeLine",
+                     table_label: str = "Table",
+                     table_notes: Sequence[bool] = ()) -> bytes:
     """The ``.docx`` of ``md``. ``resources`` are the files it refers to by
     relative path (images, and ``references.bib`` for its ``[@key]``
     citations, which pandoc's citeproc then renders with a reference list).
-    Its tables are drawn in ``table_style``."""
+    Its tables are drawn in ``table_style``; each caption is numbered
+    "``table_label`` N.", and the paragraph after the n-th table is its
+    notes (drawn small) when ``table_notes[n]``."""
     if table_style not in TABLE_STYLES:
         raise PandocError(f"unknown table style {table_style!r}")
     names = [_safe(n) for n in resources]
@@ -189,6 +223,7 @@ def markdown_to_docx(md: str, resources: dict[str, bytes], *,
                           "--to", "json", "--output", "note.json"], "note.json")
         try:
             doc = _own_images_only(json.loads(ast), files)
+            _mark_table_notes(doc.get("blocks", []), table_notes, [0])
             (root / "note.json").write_text(json.dumps(doc), encoding="utf-8")
         except (ValueError, TypeError, KeyError, OSError) as exc:
             raise PandocError(f"could not rewrite the AST: {exc!r}") from exc
@@ -196,7 +231,8 @@ def markdown_to_docx(md: str, resources: dict[str, bytes], *,
                 "--to", "docx", "--output", "note.docx"]
         if bib.strip():
             args += ["--citeproc", "--bibliography", BIB_NAME]
-        return style_docx_tables(_run(root, args, "note.docx"), table_style)
+        styled = style_docx_tables(_run(root, args, "note.docx"), table_style)
+        return docx_table_captions(styled, table_label)
 
 
 # Table borders, in eighths of a point: booktabs' heavy top / bottom rule
@@ -324,13 +360,86 @@ def style_docx_tables(docx: bytes, style: TableStyle) -> bytes:
 def _with_document(src: zipfile.ZipFile, xml: str) -> bytes:
     """``src`` with ``word/document.xml`` replaced by ``xml``, every other
     part (and the parts' order and compression) as it was."""
+    return _with_parts(src, {"word/document.xml": xml})
+
+
+def _with_parts(src: zipfile.ZipFile, parts: dict[str, str]) -> bytes:
+    """``src`` with each part named in ``parts`` replaced, every other part
+    (and the parts' order and compression) as it was."""
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w") as dst:
         for info in src.infolist():
-            data = (xml.encode("utf-8") if info.filename == "word/document.xml"
-                    else src.read(info))
+            text = parts.get(info.filename)
+            data = text.encode("utf-8") if text is not None else src.read(info)
             dst.writestr(info, data, compress_type=info.compress_type)
     return out.getvalue()
+
+
+# A table's caption paragraph (pandoc's style) and its notes paragraph
+# (``_mark_table_notes``): the notes are small and grey, as in a journal.
+_CAPTION_PARA = re.compile(
+    r'(<w:p>\s*<w:pPr>(?:(?!</w:pPr>|</w:p>).)*?<w:pStyle w:val="TableCaption"\s*/>'
+    r'.*?</w:pPr>)(.*?</w:p>)', re.S)
+_TABLE_NOTE_RPR = ('<w:color w:val="595959" />', '<w:sz w:val="18" />',
+                   '<w:szCs w:val="18" />')
+
+
+def _caption_prefix(label: str, n: int) -> str:
+    """"<label> N. " in bold, N a Word SEQ field (so Word renumbers it)."""
+    bold = "<w:rPr><w:b /></w:rPr>"
+    return (f'<w:r>{bold}<w:t xml:space="preserve">{xml_escape(label)} </w:t></w:r>'
+            r'<w:fldSimple w:instr=" SEQ Table \* ARABIC ">'
+            f"<w:r>{bold}<w:t>{n}</w:t></w:r></w:fldSimple>"
+            f'<w:r>{bold}<w:t xml:space="preserve">. </w:t></w:r>')
+
+
+def _small_table_notes(styles: str) -> str:
+    style = re.search(
+        rf'<w:style [^>]*w:styleId="{TABLE_NOTE_STYLE.replace(" ", "")}"[^>]*>(.*?)</w:style>',
+        styles, re.S)
+    if style is None:
+        return styles
+    inner = style[1]
+    rpr = re.search(r"<w:rPr>(.*?)</w:rPr>|<w:rPr\s*/>", inner, re.S)
+    props = (rpr[1] or "") if rpr else ""
+    for child in _TABLE_NOTE_RPR:
+        props = _with_child(props, child, _RPR_ORDER)
+    inner = (inner[:rpr.start()] + f"<w:rPr>{props}</w:rPr>" + inner[rpr.end():]
+             if rpr else inner + f"<w:rPr>{props}</w:rPr>")
+    return styles[:style.start(1)] + inner + styles[style.end(1):]
+
+
+def docx_table_captions(docx: bytes, label: str) -> bytes:
+    """``docx`` (pandoc's) with each table caption opened by a bold
+    "``label`` N." (N counting the captions) and the Table Note style drawn
+    small and grey. pandoc writes the XML, so note text in it is escaped:
+    no tag matched here can come from the note."""
+    try:
+        src = zipfile.ZipFile(io.BytesIO(docx))
+    except zipfile.BadZipFile as exc:
+        raise PandocError(f"could not read the .docx: {exc!r}") from exc
+    with src:
+        try:
+            xml = src.read("word/document.xml").decode("utf-8")
+            names = set(src.namelist())
+            styles = (src.read("word/styles.xml").decode("utf-8")
+                      if "word/styles.xml" in names else None)
+        except (zipfile.BadZipFile, KeyError, UnicodeDecodeError) as exc:
+            raise PandocError(f"could not read the .docx: {exc!r}") from exc
+        count = [0]
+
+        def number(m: re.Match[str]) -> str:
+            if "SEQ Table" in m[2]:
+                return m[0]
+            count[0] += 1
+            return m[1] + _caption_prefix(label, count[0]) + m[2]
+
+        parts = {"word/document.xml": _CAPTION_PARA.sub(number, xml)}
+        if styles is not None:
+            parts["word/styles.xml"] = _small_table_notes(styles)
+        if parts["word/document.xml"] == xml and parts.get("word/styles.xml") == styles:
+            return docx
+        return _with_parts(src, parts)
 
 
 def _run(root: Path, args: list[str], output: str) -> bytes:

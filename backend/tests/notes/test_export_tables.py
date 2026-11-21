@@ -394,3 +394,114 @@ def test_malformed_properties_are_a_pandoc_error() -> None:
     from paperhub.notes.pandoc import PandocError, _props
     with pytest.raises(PandocError):
         _props("no element here", "tblPr", "<w:x />", ("x",))
+
+
+# ------------------------------------------------- caption and notes (Task 13)
+
+def _ctbl(bid: str, props: dict[str, Any], rows: list[list[Any]] | None = None) -> Block:
+    return Block(id=bid, note_id=1, parent_id=None, type="table", props=props,
+                 content=_table(rows or [["k", "v"], ["ORR", "62%"]]),
+                 text="", author="user", section_key=None, changed_rev=1)
+
+
+def _para(bid: str, text: str) -> Block:
+    return Block(id=bid, note_id=1, parent_id=None, type="paragraph", props={},
+                 content=[_txt(text)], text=text, author="user",
+                 section_key=None, changed_rev=1)
+
+
+CAP = {"caption": "Response rates $p<0.05$",
+       "notes": "ORR, objective response.\n* $p<0.05$"}
+
+
+def test_markdown_caption_line_and_notes_paragraph() -> None:
+    md = note_to_markdown(NOTE, [_ctbl("t1", CAP)], {})[0]
+    # The math as a quote's ("<" kept from reading as HTML), one paragraph
+    # of notes with a hard break per line.
+    assert md.endswith(
+        "| ORR | 62% |\n\nTable: Response rates $p<{}0.05$\n\n"
+        "ORR, objective response.\\\n\\* $p<{}0.05$\n")
+
+
+def test_markdown_caption_only_and_notes_only() -> None:
+    md = note_to_markdown(NOTE, [_ctbl("t1", {"caption": "Only"})], {})[0]
+    assert md.endswith("| ORR | 62% |\n\nTable: Only\n")
+    md = note_to_markdown(NOTE, [_ctbl("t1", {"notes": "n.s."})], {})[0]
+    assert md.endswith("| ORR | 62% |\n\nn\\.s.\n")
+    assert "Table:" not in md
+
+
+def test_a_paragraph_that_reads_as_a_caption_is_escaped() -> None:
+    md = note_to_markdown(NOTE, [_ctbl("t1", {}), _para("p1", "Table: mine"),
+                                 _para("p2", ": also mine")], {})[0]
+    assert "\n\nTable\: mine\n\n\: also mine\n" in md
+
+
+def test_table_notes_flags_follow_the_written_tables() -> None:
+    broken = Block(id="t0", note_id=1, parent_id=None, type="table", props={"notes": "x"},
+                   content={"type": "tableContent", "rows": []}, text="",
+                   author="user", section_key=None, changed_rev=1)
+    blocks = [_ctbl("t1", CAP), broken, _ctbl("t2", {"caption": "c"}),
+              _ctbl("t3", {"notes": "  \n\x00"}), _ctbl("t4", {"notes": "y"})]
+    flags: list[bool] = []
+    note_to_markdown(NOTE, blocks, {}, table_notes=flags)
+    assert flags == [True, False, False, True]
+
+
+def _docx_parts(blocks: list[Block], style: str = "threeLine",
+                label: str = "Table") -> tuple[str, str]:
+    flags: list[bool] = []
+    md = note_to_markdown(NOTE, blocks, {}, table_notes=flags)[0]
+    docx = markdown_to_docx(md, {}, table_style=style,  # type: ignore[arg-type]
+                            table_label=label, table_notes=flags)
+    with zipfile.ZipFile(io.BytesIO(docx)) as z:
+        return (z.read("word/document.xml").decode("utf-8"),
+                z.read("word/styles.xml").decode("utf-8"))
+
+
+def _caption_paras(xml: str) -> list[str]:
+    return re.findall(r'<w:p><w:pPr><w:pStyle w:val="TableCaption" />.*?</w:p>', xml, re.S)
+
+
+def _text_of(p: str) -> str:
+    return "".join(re.findall(r"<(?:w|m):t(?: [^>]*)?>([^<]*)</(?:w|m):t>", p))
+
+
+@pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not installed")
+@pytest.mark.parametrize("style", ["threeLine", "grid"])
+def test_docx_numbered_caption_and_small_notes(style: str) -> None:
+    blocks = [_ctbl("t1", CAP), _para("p1", "Between"),
+              _ctbl("t2", {"caption": "Second"}), _para("p2", "After")]
+    xml, styles = _docx_parts(blocks, style)
+    caps = _caption_paras(xml)
+    assert len(caps) == 2
+    # A real Word caption: "Table" and a SEQ field, bold, before the text.
+    assert all(r'w:instr=" SEQ Table \* ARABIC "' in c for c in caps)
+    assert _text_of(caps[0]).startswith("Table 1. Response rates")
+    assert _text_of(caps[1]) == "Table 2. Second"
+    # The notes: one paragraph in the small Table Note style, after table 1.
+    notes = re.findall(r'<w:p><w:pPr><w:pStyle w:val="TableNote" />.*?</w:p>', xml, re.S)
+    assert len(notes) == 1 and "objective response" in notes[0]
+    assert xml.index(notes[0]) > xml.index("</w:tbl>")
+    style_el = re.search(r'<w:style [^>]*w:styleId="TableNote".*?</w:style>', styles, re.S)
+    assert style_el and '<w:sz w:val="18" />' in style_el[0]
+    # The other paragraphs stay body text; the tables keep their style.
+    assert "TableNote" not in re.search(r"<w:p>(?:(?!</w:p>).)*Between.*?</w:p>", xml, re.S)[0]  # type: ignore[index]
+    assert "TableNote" not in re.search(r"<w:p>(?:(?!</w:p>).)*After.*?</w:p>", xml, re.S)[0]  # type: ignore[index]
+    assert xml.count("<w:tblBorders>") == 2
+
+
+@pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not installed")
+def test_docx_caption_label_is_the_viewers() -> None:
+    xml, _ = _docx_parts([_ctbl("t1", {"caption": "反應率"})], label="表")
+    assert _text_of(_caption_paras(xml)[0]) == "表 1. 反應率"
+
+
+def test_docx_caption_label_is_escaped() -> None:
+    from paperhub.notes.pandoc import docx_table_captions
+    body = ('<w:p><w:pPr><w:pStyle w:val="TableCaption" /></w:pPr>'
+            '<w:r><w:t xml:space="preserve">c</w:t></w:r></w:p>')
+    out = docx_table_captions(_docx_of(body), "<b>&")
+    with zipfile.ZipFile(io.BytesIO(out)) as z:
+        xml = z.read("word/document.xml").decode("utf-8")
+    assert "&lt;b&gt;&amp; " in xml and "<b>" not in xml

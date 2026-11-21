@@ -92,6 +92,31 @@ def table_aligns(content: dict[str, Any]) -> list[str]:
     return out
 
 
+# A table's own props: its caption (above it, "Table N.") and its notes
+# (below it), plain text with ``$…$`` math. Nothing else (no colour).
+TABLE_TEXT_PROPS = ("caption", "notes")
+TABLE_TEXT_MAX = 2000
+
+
+def check_table_props(props: dict[str, Any]) -> dict[str, Any]:
+    """Raise ``ValueError`` unless ``props`` holds only a table's caption
+    and notes, each a string of at most ``TABLE_TEXT_MAX`` characters."""
+    for key, value in props.items():
+        if key not in TABLE_TEXT_PROPS:
+            raise ValueError(f"a table's props are only caption and notes, not {key}")
+        if not isinstance(value, str):
+            raise ValueError(f"a table's {key} must be a string")
+        if len(value) > TABLE_TEXT_MAX:
+            raise ValueError(f"a table's {key} is at most {TABLE_TEXT_MAX} characters")
+    return props
+
+
+def table_block_text(props: dict[str, Any], body: str) -> str:
+    """A table's text with its caption first and its notes last."""
+    parts = [str(props.get("caption") or ""), body, str(props.get("notes") or "")]
+    return "\n".join(p for p in parts if p)
+
+
 def check_table(content: dict[str, Any]) -> dict[str, Any]:
     """Raise ``ValueError`` with a reason unless ``content`` is a table a
     Markdown table can hold: rectangular, no colours or merged cells."""

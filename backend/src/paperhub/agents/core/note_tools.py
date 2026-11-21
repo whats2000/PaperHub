@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -48,13 +49,15 @@ from paperhub.notes.comments import list_comments
 from paperhub.notes.gfm_table import parse_gfm_table, table_to_gfm
 from paperhub.notes.inline_merge import cite_ids, cite_quotes, read_text
 from paperhub.notes.marks import color_labels
-from paperhub.notes.models import Block, Note, table_rows
+from paperhub.notes.models import Block, Note, table_block_text, table_rows
 from paperhub.notes.ops import BlockIn, Op, apply_ops
 from paperhub.notes.papers import _section_order
 from paperhub.notes.run_text import read_runs
 from paperhub.notes.scope import is_unsaved, note_ref, notes_in_scope, ref_of
 from paperhub.notes.store import block_text, list_blocks, new_block_id
 
+# A table's notes in read_note, after its GFM body.
+TABLE_NOTES = "table_notes"
 PAGE_BLOCKS = 40
 PAGE_CHARS = 6_000
 SEARCH_LIMIT = 20
@@ -69,9 +72,12 @@ _SCOPE = {"type": "string", "enum": ["chat", "all"],
 def _text(b: Block, quotes: dict[str, str] | None = None) -> str:
     """A block's text as the agent reads it: inline math ``$…$``, a math
     block ``$$…$$``, a mention its label, an alias-less mark citation the
-    quote's start (``quotes`` by mark id)."""
-    return (read_text(b.type, b.props, b.content, quotes)
-            or str(b.props.get("title") or ""))
+    quote's start (``quotes`` by mark id); a table its caption, its GFM and
+    its notes."""
+    text = read_text(b.type, b.props, b.content, quotes)
+    if b.type == "table":
+        return table_block_text(b.props, text)
+    return text or str(b.props.get("title") or "")
 
 
 def _level(b: Block) -> int | None:
@@ -99,15 +105,24 @@ def _block_xml(b: Block, labels: dict[str, str] | None = None,
         return (f'<note_block id="{esc(b.id)}" type="toc" '
                 f'author="{esc(b.author)}"/>')
     cited: str | None = None
+    attrs = ""
+    if b.type == "table":
+        # The caption as an attribute; the notes after the GFM body.
+        caption = str(b.props.get("caption") or "")
+        attrs = f' caption="{esc(caption)}"' if caption else ""
     if text is None and b.type == "table" and isinstance(b.content, dict):
         cited = _table_xml(b.content, quotes)
+        notes = str(b.props.get("notes") or "")
+        if notes:
+            cited += (f"\n<{TABLE_NOTES}>{html.escape(notes, quote=False)}"
+                      f"</{TABLE_NOTES}>")
     elif text is None:
         cited = cite_runs_xml(b.content, quotes)
     body = cited if cited is not None else html.escape(
         _text(b, quotes) if text is None else text, quote=False)
     if b.type in MARK_BLOCKS and b.props.get("markId"):
         body = mark_xml(b.props, labels or {}, body)
-    return (f'<note_block id="{esc(b.id)}" type="{esc(b.type)}" '
+    return (f'<note_block id="{esc(b.id)}" type="{esc(b.type)}"{attrs} '
             f'author="{esc(b.author)}">{body}</note_block>')
 
 
@@ -564,6 +579,9 @@ def _check_citations(
     return block.model_copy(update={"content": _check_runs(block.content, check)})
 
 
+_NOTES_TAG = re.compile(rf"<{TABLE_NOTES}>(.*?)</{TABLE_NOTES}>", re.S)
+
+
 class _TableError(ValueError):
     """A table block whose GFM content does not parse."""
 
@@ -576,8 +594,15 @@ def _gfm_block(raw: Any) -> Any:
     block = raw["block"]
     if block.get("type") != "table" or not isinstance(block.get("content"), str):
         return raw
+    # The notes as read_note shows them, echoed back: they set the notes.
+    gfm = block["content"]
+    notes = _NOTES_TAG.search(gfm)
+    if notes:
+        gfm = gfm[:notes.start()] + gfm[notes.end():]
+        props = block.get("props") if isinstance(block.get("props"), dict) else {}
+        block = {**block, "props": {**props, "notes": html.unescape(notes[1]).strip()}}
     try:
-        content = parse_gfm_table(block["content"])
+        content = parse_gfm_table(gfm)
     except ValueError as exc:
         raise _TableError(str(exc)) from exc
     return {**raw, "block": {**block, "content": content}}

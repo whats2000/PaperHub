@@ -497,6 +497,8 @@ class _Writer:
         # Inline code spans, held out of the line-level escaping (hard
         # breaks, line starts, indents) until the block is written.
         self._held: dict[str, str] = {}
+        # For each table written, in order: a notes paragraph follows it.
+        self.table_notes: list[bool] = []
         self._nonce = secrets.token_hex(8)
 
     def cite(self, pid: int | None, locator: str = "") -> str:
@@ -769,14 +771,33 @@ _REF_TYPES = frozenset({"paperQuote", "paperFigure", "paperEquation", "paperRegi
 _ALIGN_ROW = {"left": ":--", "center": ":-:", "right": "--:", "": "---"}
 
 
-def _table(w: _Writer, b: Block) -> str:
-    """A pipe table: the header row (empty when the table has none), the
-    alignment row, then the body. Every cell goes through ``w.inline``."""
+def _written_rows(b: Block) -> list[list[list[dict[str, Any]]]]:
+    """The rows of a table block as the export writes them (none: the
+    table is not written)."""
     content = b.content if isinstance(b.content, dict) else {}
     try:
-        rows = table_rows(content)
+        return table_rows(content)
     except ValueError:
-        return ""
+        return []
+
+
+def _notes_lines(b: Block) -> list[str]:
+    return [ln for ln in str(b.props.get("notes") or "").split("\n") if ln.strip()]
+
+
+def _table_text(w: _Writer, raw: str) -> str:
+    """One line of a table's caption or notes: its ``$…$`` kept as math,
+    the rest escaped (as in a quote)."""
+    return " ".join(p for p in _quote_paragraphs(w, " ".join(raw.split())) if p)
+
+
+def _table(w: _Writer, b: Block) -> str:
+    """A pipe table: the header row (empty when the table has none), the
+    alignment row, then the body. Every cell goes through ``w.inline``.
+    A caption follows as pandoc's ``Table: <caption>`` line, then the notes
+    as one paragraph (a hard break per line)."""
+    content = b.content if isinstance(b.content, dict) else {}
+    rows = _written_rows(b)
     if not rows:
         return ""
     width = max(len(r) for r in rows)
@@ -798,6 +819,13 @@ def _table(w: _Writer, b: Block) -> str:
     rest = body[header_rows:]
     out = [line(head), line([_ALIGN_ROW[a] for a in aligns])]
     out += [line(r) for r in rest]
+    caption = _table_text(w, str(b.props.get("caption") or ""))
+    if caption:
+        out += ["", f"Table: {caption}"]
+    notes = [t for t in (_table_text(w, ln) for ln in _notes_lines(b)) if t]
+    if notes:
+        out += ["", "\\\n".join(notes)]
+    w.table_notes.append(bool(notes))
     return "\n".join(out)
 
 
@@ -993,10 +1021,13 @@ def note_to_markdown(
     chunk_papers: Mapping[int, int] | None = None,
     mark_papers: Mapping[str, int] | None = None,
     mark_cites: Mapping[str, MarkCite] | None = None,
+    table_notes: list[bool] | None = None,
 ) -> tuple[str, dict[str, bytes], str]:
     """``(markdown, image files by relative path, BibTeX)`` of a note.
     ``blocks`` in document order; ``chunk_papers`` maps a cited chunk id to
-    its paper, ``mark_papers`` a reference block's mark id to its paper."""
+    its paper, ``mark_papers`` a reference block's mark id to its paper.
+    ``table_notes``, when given, is filled with one flag per table written:
+    whether its notes paragraph follows it (for ``markdown_to_docx``)."""
     note, blocks, papers = _clean_inputs(note, blocks, papers)
     w = _Writer(note, papers, chunk_papers or {}, mark_papers or {},
                 mark_cites)
@@ -1027,6 +1058,8 @@ def note_to_markdown(
     for i, text in enumerate(w.footnotes, 1):
         out += f"\n\n[^{i}]: {text}"
     bib = "\n\n".join(_bib_entry(w.keys[pid], w.papers[pid]) for pid in w.cited)
+    if table_notes is not None:
+        table_notes[:] = w.table_notes
     return out.rstrip() + "\n", w.images, (bib + "\n" if bib else "")
 
 
