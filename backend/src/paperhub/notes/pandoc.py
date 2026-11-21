@@ -46,7 +46,7 @@ _READER = (
     "+all_symbols_escapable+intraword_underscores+space_in_atx_header"
     "+blank_before_blockquote+blank_before_header+backtick_code_blocks"
     "+task_lists+strikeout+bracketed_spans+escaped_line_breaks"
-    "+implicit_figures+citations+tex_math_dollars+footnotes"
+    "+implicit_figures+citations+tex_math_dollars+footnotes+pipe_tables"
     # Typography and heading anchors: neither sets metadata or paths.
     "+smart+auto_identifiers")
 _NAME = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")

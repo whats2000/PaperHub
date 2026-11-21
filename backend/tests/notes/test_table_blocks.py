@@ -124,7 +124,7 @@ async def test_paragraph_is_unchanged(client: AsyncClient) -> None:
 
 
 async def test_helpers() -> None:
-    assert check_table(TABLE) is TABLE or check_table(TABLE) == TABLE
+    assert check_table(TABLE) == TABLE
     rows = table_rows(TABLE)
     assert [[c[0]["text"] for c in r] for r in rows] == [["指標", "值"], ["ORR", "62%"]]
     assert block_text("table", {}, TABLE) == "指標 | 值\nORR | 62%"

@@ -37,7 +37,7 @@ import aiosqlite
 
 from paperhub.notes.mark_pieces import live_pieces
 from paperhub.notes.marks import joined_quote
-from paperhub.notes.models import Block, Note
+from paperhub.notes.models import Block, Note, table_aligns, table_rows
 from paperhub.pipelines.page_pdf import crop_png, page_pdf_path
 from paperhub.pipelines.paper_asset import read_paper_asset
 from paperhub.translation.language import canonical_language
@@ -173,7 +173,7 @@ def _cited(blocks: Iterable[Block]) -> tuple[set[int], set[int]]:
                 papers.add(int(m["vpaper"]))
 
     for b in blocks:
-        for run in _runs(b.content):
+        for run in _all_runs(b):
             if run.get("type") == "mention":
                 pid = (run.get("props") or {}).get("paperId")
                 if isinstance(pid, int) and pid > 0:
@@ -343,6 +343,16 @@ def _runs(content: Any) -> list[dict[str, Any]]:
     if not isinstance(content, list):
         return [{"type": "text", "text": content}] if isinstance(content, str) else []
     return [r for r in content if isinstance(r, dict)]
+
+
+def _all_runs(b: Block) -> list[dict[str, Any]]:
+    """The runs of a block, a table's cells included."""
+    if b.type == "table" and isinstance(b.content, dict):
+        try:
+            return [r for row in table_rows(b.content) for c in row for r in c]
+        except ValueError:
+            return []
+    return _runs(b.content)
 
 
 def _json(v: Any, default: Any) -> Any:
@@ -647,6 +657,44 @@ _LIST = set(_LIST_MARKER)
 _REF_TYPES = frozenset({"paperQuote", "paperFigure", "paperEquation", "paperRegion"})
 
 
+_ALIGN_ROW = {"left": ":--", "center": ":-:", "right": "--:", "": "---"}
+
+
+def _table(w: _Writer, b: Block) -> str:
+    """A pipe table: the header row (empty when the table has none), the
+    alignment row, then the body. Every cell goes through ``w.inline``."""
+    content = b.content if isinstance(b.content, dict) else {}
+    try:
+        rows = table_rows(content)
+    except ValueError:
+        return ""
+    if not rows:
+        return ""
+    width = max(len(r) for r in rows)
+    aligns = (table_aligns(content) + [""] * width)[:width]
+
+    def cell(runs: list[dict[str, Any]]) -> str:
+        text = " ".join(w.inline(runs).split("\n"))
+        # A code span keeps its pipes: a table row reads them as cells.
+        for token in _HELD.findall(text):
+            span = w._held.get(token, "")
+            if span.startswith("`"):
+                w._held[token] = span.replace("|", "\\|")
+        return text.strip()
+
+    def line(cells: list[str]) -> str:
+        cells = cells + [""] * (width - len(cells))
+        return "| " + " | ".join(cells) + " |"
+
+    body = [[cell(c) for c in r] for r in rows]
+    header_rows = 1 if content.get("headerRows") else 0
+    head = body[0] if header_rows else [""] * width
+    rest = body[header_rows:]
+    out = [line(head), line([_ALIGN_ROW[a] for a in aligns])]
+    out += [line(r) for r in rest]
+    return "\n".join(out)
+
+
 def _block(w: _Writer, b: Block, heading_offset: int) -> str:
     t = b.type
     if t == "section":
@@ -681,6 +729,8 @@ def _block(w: _Writer, b: Block, heading_offset: int) -> str:
     if t == "checkListItem":
         box = "x" if b.props.get("checked") else " "
         return f"- [{box}] {_hard_breaks(w.inline(b.content))}"
+    if t == "table":
+        return _table(w, b)
     if t == "paperQuote":
         return _paper_quote(w, b)
     if t in ("paperFigure", "paperEquation", "paperRegion"):
@@ -835,7 +885,7 @@ async def export_sources(
     citation's live mark quotes."""
     pids, chunk_ids = _cited(blocks)
     cite_ids = {str((r.get("props") or {}).get("markId") or "")
-                for b in blocks for r in _runs(b.content)
+                for b in blocks for r in _all_runs(b)
                 if r.get("type") == "markCite"} - {""}
     mark_ids: set[str] = set()
     for b in blocks:

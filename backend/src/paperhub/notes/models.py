@@ -63,6 +63,19 @@ def table_rows(content: dict[str, Any]) -> list[list[list[dict[str, Any]]]]:
             for row in content.get("rows", [])]
 
 
+def table_aligns(content: dict[str, Any]) -> list[str]:
+    """Each column's alignment (``left`` / ``center`` / ``right`` / ``""``
+    for the default), read from the first row's cells."""
+    rows = content.get("rows") or []
+    cells = rows[0].get("cells", []) if rows and isinstance(rows[0], dict) else []
+    out: list[str] = []
+    for cell in cells:
+        props = cell.get("props") if isinstance(cell, dict) else None
+        a = props.get("textAlignment") if isinstance(props, dict) else None
+        out.append(a if a in ("left", "center", "right") else "")
+    return out
+
+
 def check_table(content: dict[str, Any]) -> dict[str, Any]:
     """Raise ``ValueError`` with a reason unless ``content`` is a table a
     Markdown table can hold: rectangular, no colours or merged cells."""
