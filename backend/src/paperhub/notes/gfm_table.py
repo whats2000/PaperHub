@@ -2,24 +2,19 @@
 
 The agent reads a table as a pipe table (the first row is the header, the
 delimiter row carries each column's alignment) and writes one the same way.
-A cell reads like any runs (``inline_merge.read_runs``); a pipe inside a
+A cell reads like any runs (``run_text.read_runs``); a pipe inside a
 cell is written ``\\|``. Left alignment is the editor's default, so it is
-written ``---`` and ``:--`` parses to the default.
+written ``---`` and ``:--`` parses to the default. Laying a table written
+as text over the stored one is ``inline_merge.merge_table``.
 """
 from __future__ import annotations
 
-import copy
 import re
 from collections.abc import Callable
 from typing import Any
 
-from paperhub.notes.inline_merge import (
-    is_rich,
-    preserve_runs,
-    read_runs,
-    unwrap_cite_tags,
-)
 from paperhub.notes.models import table_aligns, table_rows
+from paperhub.notes.run_text import read_runs
 
 _DELIM = re.compile(r"^\s*(:?)-+(:?)\s*$")
 _ALIGN_ROW = {"center": ":-:", "right": "--:"}
@@ -106,7 +101,7 @@ def parse_gfm_table(text: str) -> dict[str, Any]:
                      for r in rows]}
 
 
-def _fold(text: str) -> str:
+def fold_cell(text: str) -> str:
     """A cell's text on one line, edges trimmed (a GFM row is one line)."""
     return " ".join(text.split("\n")).strip()
 
@@ -130,79 +125,7 @@ def table_to_gfm(content: dict[str, Any], quotes: dict[str, str] | None = None,
         cells = cells + [""] * (width - len(cells))
         return "| " + " | ".join(cells) + " |"
 
-    body = [[_fold(render(c)).replace("|", "\\|") for c in r] for r in rows]
+    body = [[fold_cell(render(c)).replace("|", "\\|") for c in r] for r in rows]
     out = [line(body[0]), line([_ALIGN_ROW.get(a, "---") for a in aligns])]
     out += [line(r) for r in body[1:]]
     return "\n".join(out)
-
-
-def _cell_node(cell: Any) -> dict[str, Any]:
-    """A parsed cell as a ``tableCell`` node."""
-    if isinstance(cell, dict) and cell.get("type") == "tableCell":
-        return cell
-    return {"type": "tableCell", "props": {},
-            "content": table_rows({"rows": [{"cells": [cell]}]})[0][0]}
-
-
-def merge_table(old: dict[str, Any], new: dict[str, Any],
-                quotes: dict[str, str]) -> tuple[dict[str, Any], dict[str, list[Any]]]:
-    """``new`` (a table the agent wrote as text) laid over the stored
-    ``old`` one, cell by cell: a cell whose text is unchanged keeps its
-    runs (the same place first, else an unused old cell of that text), a
-    changed cell keeps the runs its text did not change (``preserve_runs``
-    against the cell in the same place). The header / column settings of
-    ``old`` stay while the column count does. ``(content, report)``,
-    ``report`` the inline nodes ``kept`` and ``dropped``."""
-    old_rows = table_rows(old)
-    old_text = [[_fold(read_runs(c, quotes)) for c in r] for r in old_rows]
-    used: set[tuple[int, int]] = set()
-    report: dict[str, list[Any]] = {"kept": [], "dropped": []}
-
-    def same_text(r: int, c: int, text: str) -> tuple[int, int] | None:
-        if (r < len(old_rows) and c < len(old_rows[r])
-                and (r, c) not in used and old_text[r][c] == text):
-            return r, c
-        for i, row in enumerate(old_text):
-            for j, t in enumerate(row):
-                if t == text and (i, j) not in used:
-                    return i, j
-        return None
-
-    rows: list[dict[str, Any]] = []
-    for r, row in enumerate(new.get("rows", [])):
-        cells: list[dict[str, Any]] = []
-        for c, raw in enumerate(row.get("cells", [])):
-            node = _cell_node(raw)
-            text = unwrap_cite_tags(read_runs(node.get("content") or []))
-            runs: Runs = ([{"type": "text", "text": text, "styles": {}}]
-                          if text else [])
-            hit = same_text(r, c, _fold(text))
-            if hit is not None:
-                used.add(hit)
-                runs = copy.deepcopy(old_rows[hit[0]][hit[1]])
-            elif (r < len(old_rows) and c < len(old_rows[r])
-                  and is_rich(old_rows[r][c])):
-                runs, rep = preserve_runs(old_rows[r][c], text, quotes)
-                report["kept"] += rep["kept"]
-                report["dropped"] += rep["dropped"]
-            cells.append({**node, "content": runs})
-        rows.append({"cells": cells})
-    out = {**new, "rows": rows}
-    width = len(rows[0]["cells"]) if rows else 0
-    for key in ("headerRows", "headerCols"):
-        if key in old:
-            out[key] = old[key]
-    widths = old.get("columnWidths")
-    if isinstance(widths, list) and len(widths) == width:
-        out["columnWidths"] = list(widths)
-    return out, report
-
-
-def is_plain_table(content: dict[str, Any]) -> bool:
-    """Whether every cell is plain text (a table written as text): only
-    such a table is laid over the stored one cell by cell."""
-    try:
-        rows = table_rows(content)
-    except ValueError:
-        return False
-    return not any(is_rich(c) for row in rows for c in row)

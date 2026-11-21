@@ -21,7 +21,9 @@ from typing import Any
 
 import aiosqlite
 
+from paperhub.notes.gfm_table import fold_cell, table_to_gfm
 from paperhub.notes.models import table_rows
+from paperhub.notes.run_text import INLINE_NODES, node_text, read_runs
 
 # Blocks that own a ``note_marks`` row (the mark follows the block).
 MARK_BLOCK_TYPES = frozenset(
@@ -31,7 +33,6 @@ MARK_BLOCK_TYPES = frozenset(
 # mark's identity and is kept from the stored block.
 MARK_EDITABLE_PROPS = frozenset({"color", "style"})
 
-_INLINE_NODES = frozenset({"markCite", "inlineMath", "mention"})
 _CITE_TAG = re.compile(r'<mark_cite mark="[^"]*">(.*?)</mark_cite>', re.S)
 
 
@@ -44,47 +45,6 @@ def merge_props(block_type: str, old: dict[str, Any],
     return {**old, **{k: v for k, v in new.items() if k in MARK_EDITABLE_PROPS}}
 
 
-def cite_default_text(quote: str) -> str:
-    """A mark citation's text when it has no alias (``notes.export``'s
-    ``cite_default_text``; imported late, export imports the op engine)."""
-    from paperhub.notes.export import cite_default_text as _default
-    return _default(quote)
-
-
-def node_text(run: dict[str, Any], quotes: dict[str, str]) -> str:
-    """How an inline node reads as text."""
-    props = run.get("props") or {}
-    kind = run.get("type")
-    if kind == "markCite":
-        alias = str(props.get("text") or "")
-        return alias or cite_default_text(quotes.get(str(props.get("markId")), ""))
-    if kind == "inlineMath":
-        return f"${props.get('latex') or ''}$"
-    if kind == "mention":
-        return str(props.get("label") or "")
-    return ""
-
-
-def read_runs(content: Any, quotes: dict[str, str] | None = None) -> str:
-    """A block's runs as the agent reads them."""
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    q = quotes or {}
-    out: list[str] = []
-    for run in content:
-        if not isinstance(run, dict):
-            continue
-        if run.get("type") in _INLINE_NODES:
-            out.append(node_text(run, q))
-        elif isinstance(run.get("text"), str):
-            out.append(run["text"])
-        if isinstance(run.get("content"), list):  # a link's runs
-            out.append(read_runs(run["content"], q))
-    return "".join(out)
-
-
 def read_text(block_type: str, props: dict[str, Any], content: Any,
               quotes: dict[str, str] | None = None) -> str:
     """A block's text as the agent reads it (a math block as ``$$…$$``)."""
@@ -95,7 +55,6 @@ def read_text(block_type: str, props: dict[str, Any], content: Any,
     if block_type == "paperQuote":
         return str(props.get("quote") or "")
     if block_type == "table" and isinstance(content, dict):
-        from paperhub.notes.gfm_table import table_to_gfm
         return table_to_gfm(content, quotes)
     if block_type == "codeBlock":
         return read_runs(content, quotes) or str(props.get("code") or "")
@@ -195,7 +154,7 @@ def _leaves(content: list[Any], quotes: dict[str, str]
                 links.append({k: v for k, v in run.items() if k != "content"})
                 walk(run["content"], len(links) - 1)
                 continue
-            node = run.get("type") in _INLINE_NODES or not isinstance(
+            node = run.get("type") in INLINE_NODES or not isinstance(
                 run.get("text"), str)
             text = node_text(run, quotes) if node else str(run["text"])
             leaves.append(_Leaf(pos, text, run, node, link))
@@ -356,3 +315,99 @@ def _merge_same_style(runs: list[dict[str, Any]], link_of: list[int | None]
     return [r for r in out if r.get("type") != "text" or r["text"]], [
         lk for r, lk in zip(out, links, strict=True)
         if r.get("type") != "text" or r["text"]]
+
+
+def is_plain_table(content: dict[str, Any]) -> bool:
+    """Whether every cell is plain text (a table written as text): only
+    such a table is laid over the stored one cell by cell."""
+    try:
+        rows = table_rows(content)
+    except ValueError:
+        return False
+    return not any(is_rich(c) for row in rows for c in row)
+
+
+def _cell_node(cell: Any) -> dict[str, Any]:
+    """A parsed cell as a ``tableCell`` node."""
+    if isinstance(cell, dict) and cell.get("type") == "tableCell":
+        return cell
+    return {"type": "tableCell", "props": {},
+            "content": table_rows({"rows": [{"cells": [cell]}]})[0][0]}
+
+
+def merge_table(old: dict[str, Any], new: dict[str, Any],
+                quotes: dict[str, str]) -> tuple[dict[str, Any], dict[str, list[Any]]]:
+    """``new`` (a table the agent wrote as text) laid over the stored
+    ``old`` one, cell by cell, each old cell's runs used at most once:
+
+    1. a new cell whose text equals an old cell's keeps that cell's runs
+       (the old cell in the same place first, then any old cell not yet
+       taken, so a row moved by an inserted or removed row keeps its runs);
+    2. a changed cell keeps the runs its text did not change
+       (``preserve_runs``) only over the old cell in its place when no
+       other cell took it; otherwise it is plain text.
+
+    The header / column settings of ``old`` stay while the column count
+    does. ``(content, report)``: the inline nodes ``kept`` (in the cells
+    that took old runs) and ``dropped`` (changed away, or in old cells no
+    new cell took)."""
+    old_rows = table_rows(old)
+    old_text = {(i, j): fold_cell(read_runs(c, quotes))
+                for i, row in enumerate(old_rows) for j, c in enumerate(row)}
+    nodes: list[list[dict[str, Any]]] = []
+    texts: dict[tuple[int, int], str] = {}
+    for r, row in enumerate(new.get("rows", [])):
+        nodes.append([_cell_node(c) for c in row.get("cells", [])])
+        for c, node in enumerate(nodes[-1]):
+            texts[(r, c)] = unwrap_cite_tags(read_runs(node.get("content") or []))
+    took: dict[tuple[int, int], tuple[int, int]] = {}  # new cell -> old cell
+    taken: set[tuple[int, int]] = set()
+    for pos, text in texts.items():  # 1a: same place, same text
+        if pos not in taken and old_text.get(pos) == fold_cell(text):
+            took[pos] = pos
+            taken.add(pos)
+    for pos, text in texts.items():  # 1b: same text anywhere else
+        if pos in took:
+            continue
+        hit = next((o for o, t in old_text.items()
+                    if o not in taken and t == fold_cell(text)), None)
+        if hit is not None:
+            took[pos] = hit
+            taken.add(hit)
+    report: dict[str, list[Any]] = {"kept": [], "dropped": []}
+    runs_at: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for pos, src in took.items():
+        old_runs = old_rows[src[0]][src[1]]
+        runs_at[pos] = json.loads(json.dumps(old_runs))
+        report["kept"] += preserve_runs(old_runs, read_runs(old_runs, quotes),
+                                        quotes)[1]["kept"]
+    for pos, text in texts.items():  # 2: changed cells
+        if pos in took:
+            continue
+        if pos in old_text and pos not in taken:
+            taken.add(pos)
+            old_runs = old_rows[pos[0]][pos[1]]
+            if is_rich(old_runs):
+                runs_at[pos], rep = preserve_runs(old_runs, text, quotes)
+                report["kept"] += rep["kept"]
+                report["dropped"] += rep["dropped"]
+                continue
+            report["dropped"] += preserve_runs(old_runs, "", quotes)[1]["dropped"]
+        runs_at[pos] = ([{"type": "text", "text": text, "styles": {}}]
+                        if text else [])
+    for pos in old_text:  # old cells no new cell took
+        if pos not in taken:
+            old_runs = old_rows[pos[0]][pos[1]]
+            report["dropped"] += preserve_runs(old_runs, "", quotes)[1]["dropped"]
+    rows = [{"cells": [{**node, "content": runs_at[(r, c)]}
+                       for c, node in enumerate(row)]}
+            for r, row in enumerate(nodes)]
+    out = {**new, "rows": rows}
+    width = len(rows[0]["cells"]) if rows else 0
+    for key in ("headerRows", "headerCols"):
+        if key in old:
+            out[key] = old[key]
+    widths = old.get("columnWidths")
+    if isinstance(widths, list) and len(widths) == width:
+        out["columnWidths"] = list(widths)
+    return out, report

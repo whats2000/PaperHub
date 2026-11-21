@@ -281,6 +281,7 @@
     "addedUnder_one": "在 {{section}} 下新增了 {{count}} 則筆記",
     "addedUnder_other": "在 {{section}} 下新增了 {{count}} 則筆記",
     "addedTable": "新增了一個表格（{{rows}} 列 × {{cols}} 欄）",
+    "addedTableUnder": "在 {{section}} 下新增了一個表格（{{rows}} 列 × {{cols}} 欄）",
     "updated_one": "更新了 {{count}} 則筆記",
     "updated_other": "更新了 {{count}} 則筆記",
     "deleted_one": "移除了 {{count}} 則筆記",

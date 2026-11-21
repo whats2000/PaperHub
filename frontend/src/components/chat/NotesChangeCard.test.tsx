@@ -97,6 +97,20 @@ describe("NotesChangeCard", () => {
     expect(screen.getByText(/^Added 1 note$/)).toBeInTheDocument();
   });
 
+  it("names the paper section a table was added under", () => {
+    server.use(http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => HttpResponse.json(detail())));
+    render(
+      <NotesChangeCard
+        data={{
+          ...data,
+          summary: { ...data.summary, added: 1, suggested: 0, tables_added: [{ rows: 4, cols: 3 }] },
+        }}
+      />,
+    );
+    expect(screen.getByText("Added a table (4 rows × 3 columns) under §2")).toBeInTheDocument();
+    expect(screen.queryByText(/Added \d+ note/)).not.toBeInTheDocument();
+  });
+
   it("Undo turns into Apply again and back, each call on the set live at the time", async () => {
     server.use(
       http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => HttpResponse.json(detail())),

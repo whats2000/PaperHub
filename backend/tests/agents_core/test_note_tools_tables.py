@@ -211,3 +211,114 @@ async def test_update_of_a_changed_cell_keeps_its_unchanged_runs(
     cell = table_rows(block.content)[1][1]  # type: ignore[arg-type]
     assert any(r.get("type") == "markCite" for r in cell)
     assert out.record["inline"][0]["block_id"] == bid
+
+
+# --- review fixes: rows moved / inserted, suggestions ----------------------
+
+def _cite_cell(pre: str) -> list[dict[str, Any]]:
+    return [{"type": "text", "text": pre, "styles": {"bold": True}},
+            {"type": "text", "text": " ", "styles": {}},
+            {"type": "markCite", "props": {"markId": "m1", "text": "Tab 2"}}]
+
+
+SHIFT = {"type": "tableContent", "columnWidths": [None, None], "headerRows": 1,
+         "rows": [{"cells": ["A", _cite_cell("62%")]},
+                  {"cells": ["B", "70%"]}]}
+
+
+async def _agent_table(conn: aiosqlite.Connection,
+                       content: dict[str, Any]) -> tuple[int, str, int]:
+    nid = await _chat_note(conn)
+    res = await apply_ops(conn, nid, base_revision=0, actor="agent", ops=[
+        Op(op="insert", block=BlockIn(type="table", content=content))])
+    return nid, res.applied[0], res.revision
+
+
+async def _update(ctx: ToolContext, bid: str, rev: int, gfm: str) -> ToolOutcome:
+    out = await _call(ctx, "edit_note", note="chat", base_revision=rev, ops=[
+        {"op": "update", "block_id": bid,
+         "block": {"type": "table", "content": gfm}}])
+    assert not out.record.get("error"), out.content
+    return out
+
+
+def _marks(cell: list[dict[str, Any]]) -> list[str]:
+    return [r["props"]["markId"] for r in cell if r.get("type") == "markCite"]
+
+
+async def test_row_inserted_above_a_rich_row_keeps_it_and_reports_truly(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid, bid, rev = await _agent_table(migrated_db, SHIFT)
+    out = await _update(_ctx(migrated_db, fake_tracer), bid, rev,
+                        "| C | 55% |\n|---|---|\n| A | 62% Tab 2 |\n| B | 70% |")
+    [block] = await list_blocks(migrated_db, nid)
+    rows = table_rows(block.content)  # type: ignore[arg-type]
+    assert rows[0][1] == [{"type": "text", "text": "55%", "styles": {}}]
+    assert rows[1][1] == _cite_cell("62%")
+    assert rows[2][0] == [{"type": "text", "text": "B", "styles": {}}]
+    inline = out.record.get("inline") or [{"kept": [], "dropped": []}]
+    assert all(not e["dropped"] for e in inline)
+    assert [d["markId"] for e in inline for d in e["kept"]] == ["m1"]
+
+
+async def test_new_row_with_the_same_words_gets_no_copied_citation(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid, bid, rev = await _agent_table(migrated_db, SHIFT)
+    await _update(_ctx(migrated_db, fake_tracer), bid, rev,
+                  "| C | 55% Tab 2 |\n|---|---|\n| A | 62% Tab 2 |\n| B | 70% |")
+    [block] = await list_blocks(migrated_db, nid)
+    rows = table_rows(block.content)  # type: ignore[arg-type]
+    assert rows[0][1] == [{"type": "text", "text": "55% Tab 2", "styles": {}}]
+    assert _marks(rows[1][1]) == ["m1"]
+    assert sum(len(_marks(c)) for r in rows for c in r) == 1
+
+
+async def test_removed_row_lets_the_rows_below_keep_their_runs(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    content = {"type": "tableContent", "columnWidths": [None, None],
+               "headerRows": 1, "rows": [
+                   {"cells": ["k", "v"]}, {"cells": ["gone", "x"]},
+                   {"cells": [_bold("ORR"), _cite_cell("62%")]}]}
+    nid, bid, rev = await _agent_table(migrated_db, content)
+    out = await _update(_ctx(migrated_db, fake_tracer), bid, rev,
+                        "| k | v |\n|---|---|\n| ORR | 62% Tab 2 |")
+    [block] = await list_blocks(migrated_db, nid)
+    rows = table_rows(block.content)  # type: ignore[arg-type]
+    assert rows[1] == [_bold("ORR"), _cite_cell("62%")]
+    assert all(not e["dropped"] for e in out.record.get("inline") or [])
+
+
+async def test_removed_cited_row_reports_its_citation_dropped(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid, bid, rev = await _agent_table(migrated_db, SHIFT)
+    out = await _update(_ctx(migrated_db, fake_tracer), bid, rev,
+                        "| B | 70% |\n|---|---|")
+    [block] = await list_blocks(migrated_db, nid)
+    assert _cell_texts(block.content) == [["B", "70%"]]
+    [entry] = out.record["inline"]
+    assert [d["markId"] for d in entry["dropped"]] == ["m1"]
+
+
+async def test_accepted_suggestion_on_a_user_table_merges_per_cell(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    from paperhub.notes.ops import resolve_suggestion
+
+    nid = await _chat_note(migrated_db)
+    res = await apply_ops(migrated_db, nid, base_revision=0, actor="user", ops=[
+        Op(op="insert", block=BlockIn(type="table", content=RICH))])
+    bid = res.applied[0]
+    out = await _update(_ctx(migrated_db, fake_tracer), bid, res.revision,
+                        "| k | v |\n|---|---|\n| ORR | 62% src |\n| x | z |")
+    [sugg] = out.record["suggested"]
+    assert out.record["applied"] == []
+    await resolve_suggestion(migrated_db, sugg["suggestion_id"], accept=True)
+    [block] = await list_blocks(migrated_db, nid)
+    rows = table_rows(block.content)  # type: ignore[arg-type]
+    assert rows[1][0] == _bold("ORR")
+    assert _marks(rows[1][1]) == ["m1"]
+    assert _cell_texts(block.content)[2] == ["x", "z"]

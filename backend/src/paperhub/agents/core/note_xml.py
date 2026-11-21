@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import html
 
-from paperhub.notes.inline_merge import node_text, read_runs
+from paperhub.notes.run_text import node_text, read_runs
 
 
 def esc(value: object) -> str:

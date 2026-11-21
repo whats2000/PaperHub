@@ -26,13 +26,14 @@ import aiosqlite
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from paperhub.db.connection import write_transaction
-from paperhub.notes.gfm_table import is_plain_table, merge_table
 from paperhub.notes.inline_merge import (
     MARK_BLOCK_TYPES,
     cite_ids,
     cite_quotes,
+    is_plain_table,
     is_rich,
     merge_props,
+    merge_table,
     preserve_runs,
 )
 from paperhub.notes.mark_pieces import revive_latest

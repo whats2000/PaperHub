@@ -46,11 +46,12 @@ from paperhub.notes.agent_reads import (
 )
 from paperhub.notes.comments import list_comments
 from paperhub.notes.gfm_table import parse_gfm_table, table_to_gfm
-from paperhub.notes.inline_merge import cite_ids, cite_quotes, read_runs, read_text
+from paperhub.notes.inline_merge import cite_ids, cite_quotes, read_text
 from paperhub.notes.marks import color_labels
 from paperhub.notes.models import Block, Note, table_rows
 from paperhub.notes.ops import BlockIn, Op, apply_ops
 from paperhub.notes.papers import _section_order
+from paperhub.notes.run_text import read_runs
 from paperhub.notes.scope import note_ref, notes_in_scope, ref_of
 from paperhub.notes.store import block_text, list_blocks, new_block_id
 

@@ -132,10 +132,16 @@ export function NotesChangeCard({ data }: { data: NotesChangedData }) {
   tables.forEach((table, i) => {
     parts.push({
       key: `table-${i}`,
-      text: t("notes:card.addedTable", "Added a table ({{rows}} rows × {{cols}} columns)", {
-        rows: table.rows,
-        cols: table.cols,
-      }),
+      text: s.section
+        ? t("notes:card.addedTableUnder", "Added a table ({{rows}} rows × {{cols}} columns) under {{section}}", {
+            rows: table.rows,
+            cols: table.cols,
+            section: sectionLabel(s.section),
+          })
+        : t("notes:card.addedTable", "Added a table ({{rows}} rows × {{cols}} columns)", {
+            rows: table.rows,
+            cols: table.cols,
+          }),
     });
   });
   if (s.updated > 0) {
