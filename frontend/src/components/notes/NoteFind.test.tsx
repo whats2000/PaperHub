@@ -321,3 +321,57 @@ describe("findMatches in a table", () => {
     expect(hits.map((h) => h.blockId)).toEqual(["p", "t"]);
   });
 });
+
+describe("find in a table's caption and notes", () => {
+  const captioned = () => [
+    {
+      id: "t",
+      type: "table",
+      props: { caption: "Needle rates", notes: "n.s., not a needle" },
+      content: { type: "tableContent", columnWidths: [null], headerRows: 1, rows: [{ cells: ["h"] }, { cells: ["a needle"] }] },
+    },
+  ];
+
+  it("matches the caption first, then the cells, then the notes, with their offsets", () => {
+    const editor = makeEditor([], captioned());
+    const hits = findMatches(editor.prosemirrorState.doc, "NEEDLE");
+    expect(hits.map((h) => [h.kind, h.blockId, h.at ?? null])).toEqual([
+      ["caption", "t", [0, 6]],
+      ["text", "t", null],
+      ["notes", "t", [12, 18]],
+    ]);
+  });
+
+  it("Ctrl+F finds caption and notes words and highlights them where they are drawn", async () => {
+    seed([
+      blk("t", {
+        type: "table",
+        props: { caption: "Needle rates", notes: "n.s., not a needle" },
+        content: {
+          type: "tableContent",
+          columnWidths: [null, null],
+          headerRows: 1,
+          rows: [{ cells: ["head", "x"] }, { cells: ["a", "b"] }],
+        } as never,
+        text: "Needle rates\nhead | x\na | b\nn.s., not a needle",
+      }),
+    ]);
+    const pm = mount();
+    await screen.findByText("Needle rates", { exact: false });
+    act(() => {
+      ctrlF(pm);
+    });
+    typeQuery("needle");
+    expect(count()).toBe("1 / 2");
+    const caption = document.querySelector("[data-table-caption='caption']")!;
+    expect(caption.querySelector(".ph-find-current")?.textContent).toBe("Needle");
+    act(() => {
+      fireEvent.keyDown(findBox(), { key: "Enter" });
+    });
+    expect(count()).toBe("2 / 2");
+    const notes = document.querySelector("[data-table-caption='notes']")!;
+    expect(notes.querySelector(".ph-find-current")?.textContent).toBe("needle");
+    expect(caption.querySelector(".ph-find-current")).toBeNull();
+    expect(caption.querySelector(".ph-find")?.textContent).toBe("Needle");
+  });
+});

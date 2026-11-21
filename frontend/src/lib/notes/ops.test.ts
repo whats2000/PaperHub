@@ -80,6 +80,12 @@ describe("blockText for a table", () => {
     };
     expect(blockText("table", {}, content)).toBe("指標 | 值\nORR | 62%");
   });
+
+  it("puts the caption first and the notes last, like the backend", () => {
+    const content = { type: "tableContent", columnWidths: [null], rows: [{ cells: ["a"] }] };
+    expect(blockText("table", { caption: "Rates", notes: "n.s." }, content)).toBe("Rates\na\nn.s.");
+    expect(blockText("table", { caption: "", notes: "N" }, content)).toBe("a\nN");
+  });
 });
 
 describe("blockText of inline nodes (the backend's _runs_text)", () => {

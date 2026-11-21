@@ -52,7 +52,10 @@ export function blockText(type: string, props: Record<string, unknown>, content:
   if (type === "section") return propText(props.title);
   if (type === "paperQuote") return propText(props.quote);
   if (type === "math") return propText(props.latex);
-  if (type === "table") return tableText(content);
+  if (type === "table") {
+    // The caption first, the notes last (the backend's `table_block_text`).
+    return [propText(props.caption), tableText(content), propText(props.notes)].filter(Boolean).join("\n");
+  }
   if (type === "codeBlock") return runsText(content) || propText(props.code);
   return runsText(content);
 }

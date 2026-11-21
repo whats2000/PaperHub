@@ -75,6 +75,8 @@ import { NoteTitle } from "./NoteTitle";
 import { MATH_ALIASES, mathInput, slashLineText, turnIntoEquation } from "./mathInput";
 import { noteSchema, paperhubKeys } from "./schema";
 import { NoteTableHandles } from "./NoteTableHandles";
+import { TableCaptions } from "./TableCaption";
+import { createCaptionHosts, tableCaptions } from "./tableCaptions";
 import { insertNoteTable, notePasteHandler, tableClean, tableKeys } from "./tableKeys";
 import { tableMotion } from "./tableMotion";
 import { UnsavedDrafts } from "./UnsavedDrafts";
@@ -228,6 +230,8 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
   const suggestionHost = useSuggestionHosts();
   // Badges for open comment threads whose words are gone.
   const lostBadges = useLostCommentBadges(noteId);
+  // Tables' captions and notes are rendered into these hosts.
+  const [captionHosts] = useState(createCaptionHosts);
   // The note card shows one part, and nothing else.
   const cardPart = card?.partId ?? null;
   // The editor outlives a placeholder's save (its id changes): what it
@@ -262,6 +266,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
           host: suggestionHost,
         })),
         lostCommentBadges(lostBadges.badgeView),
+        tableCaptions(captionHosts),
         citationChips(),
         noteFind(),
       ],
@@ -777,6 +782,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
         >
           <NoteFormattingBar onComment={comments.start} />
           <NoteTableHandles />
+          <TableCaptions hosts={captionHosts} />
           {/* No blocks inside a table cell (as BlockNote's own slash menu). */}
           <SuggestionMenuController
             triggerCharacter="/"

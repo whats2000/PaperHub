@@ -86,12 +86,17 @@ export function NoteFindBar({ editor, noteId, cardPart, focusSeq, open, onClose,
       }
       setFindMatches(v, list, m ? i : -1);
       if (!m) return;
+      const inPart = m.kind === "caption" || m.kind === "notes";
       if (m.kind === "block") setAtomCaret(v, m.from, "before");
-      else {
+      else if (!inPart) {
         const sel = m.kind === "node" ? NodeSelection.create(v.state.doc, m.from) : TextSelection.create(v.state.doc, m.from, m.to);
         v.dispatch(v.state.tr.setSelection(sel));
       }
-      const el = v.dom.querySelector(".ph-find-current");
+      // A table's caption / notes draws its own highlight after this render:
+      // the part itself is scrolled to (the caret stays where it was).
+      const el = inPart
+        ? v.dom.querySelector(`[data-id="${m.blockId}"] [data-table-caption="${m.kind}"]`)
+        : v.dom.querySelector(".ph-find-current");
       if (el && typeof el.scrollIntoView === "function") {
         el.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
       }

@@ -3,7 +3,8 @@
  * A ⠿ handle on each row (left) and column (top) drags to reorder (BlockNote)
  * and opens a menu: insert above / below / left / right, delete, and a
  * column's alignment (GFM `:--` `:-:` `--:`). The table's ⋯ (top right) holds
- * the header row / header column switches. The "+" extend buttons are
+ * the header row / header column switches and Add / Remove caption and
+ * notes (TableCaption.tsx). The "+" extend buttons are
  * BlockNote's. Nothing a GFM table cannot hold is offered: no cell colours,
  * no merge / split (the cell menu is gone).
  */
@@ -16,6 +17,7 @@ import {
   useBlockNoteEditor,
   useComponentsContext,
   useExtension,
+  useEditorState,
   useExtensionState,
   usePortalElement,
   type GenericPopoverReference,
@@ -33,11 +35,13 @@ import {
   GripVertical,
   Trash2,
 } from "lucide-react";
-import { useMemo, type FC } from "react";
+import { useMemo, useRef, type FC } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { TableContent } from "@/types/notes";
 
+import type { TablePart } from "./noteFind";
+import { requestTablePart } from "./tableCaptions";
 import { columnAlignment, deleteRowOrColumn, setColumnAlignment, type Alignment } from "./tableKeys";
 import { shrinkAway } from "./tableMotion";
 
@@ -170,6 +174,43 @@ function TableMoreMenu() {
     if (!block) return;
     editor.updateBlock(block.id, { type: "table", content: { ...block.content, [key]: on ? 1 : undefined } } as never);
   };
+  // The table's caption / notes as they are now (the handles' block is a
+  // snapshot from the last hover).
+  const blockId = block?.id;
+  const parts = useEditorState({
+    editor,
+    selector: ({ editor: e }) => {
+      const props = blockId ? (e.getBlock(blockId)?.props as Record<string, unknown> | undefined) : undefined;
+      return { caption: Boolean(props?.caption), notes: Boolean(props?.notes) };
+    },
+  });
+  // "Add …" opens the part with the caret in it: the closing menu must not
+  // hand the focus back to the editor.
+  const keepFocus = useRef(false);
+  const partItem = (part: TablePart) => {
+    const has = parts[part];
+    const onClick = () => {
+      if (!block) return;
+      if (has) editor.updateBlock(block.id, { props: { [part]: "" } });
+      else {
+        keepFocus.current = true;
+        requestTablePart(block.id, part);
+      }
+    };
+    const text =
+      part === "caption"
+        ? has
+          ? t("notes:table.removeCaption", "Remove caption")
+          : t("notes:table.addCaption", "Add caption")
+        : has
+          ? t("notes:table.removeNotes", "Remove notes")
+          : t("notes:table.addNotes", "Add notes");
+    return (
+      <C.Generic.Menu.Item key={part} onClick={onClick}>
+        {text}
+      </C.Generic.Menu.Item>
+    );
+  };
 
   return (
     <GenericPopover
@@ -186,7 +227,8 @@ function TableMoreMenu() {
             if (open) tableHandles.freezeHandles();
             else {
               tableHandles.unfreezeHandles();
-              editor.focus();
+              if (!keepFocus.current) editor.focus();
+              keepFocus.current = false;
             }
           }}
         >
@@ -208,6 +250,9 @@ function TableMoreMenu() {
             <C.Generic.Menu.Item checked={headerCol} onClick={() => setHeader("headerCols", !headerCol)}>
               {t("notes:table.headerColumn", "Header column")}
             </C.Generic.Menu.Item>
+            <C.Generic.Menu.Divider />
+            {partItem("caption")}
+            {partItem("notes")}
           </C.Generic.Menu.Dropdown>
         </C.Generic.Menu.Root>
       )}

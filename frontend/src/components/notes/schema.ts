@@ -42,6 +42,26 @@ const {
   table,
 } = defaultBlockSpecs;
 
+const TABLE_PROP_SCHEMA = { caption: { default: "" }, notes: { default: "" } } as const;
+
+/** BlockNote's table node with the caption and notes as node attributes
+ * (its own node has none for a prop schema to fill). Copied or dragged
+ * HTML carries them on the block's `data-caption` / `data-notes`. */
+const tableNode = table.implementation.node.extend({
+  addAttributes() {
+    const attr = (name: "caption" | "notes") => ({
+      default: "",
+      parseHTML: (el: HTMLElement) =>
+        el.closest?.('[data-content-type="table"]')?.getAttribute(`data-${name}`) ?? "",
+      renderHTML: (attrs: Record<string, unknown>) => {
+        const v = attrs[name];
+        return typeof v === "string" && v ? { [`data-${name}`]: v } : {};
+      },
+    });
+    return { ...(this.parent?.() ?? {}), caption: attr("caption"), notes: attr("notes") };
+  },
+});
+
 export const noteSchema = BlockNoteSchema.create({
   blockSpecs: {
     paragraph,
@@ -51,8 +71,13 @@ export const noteSchema = BlockNoteSchema.create({
     checkListItem,
     quote,
     // No colour on a table: a GFM table holds none (the ⋮⋮ menu's Colors
-    // item shows only for blocks with a textColor prop).
-    table: { ...table, config: { ...table.config, propSchema: {} } },
+    // item shows only for blocks with a textColor prop). Its caption and
+    // notes (plain text with `$…$`) are its only props (TableCaption.tsx).
+    table: {
+      ...table,
+      config: { ...table.config, propSchema: TABLE_PROP_SCHEMA },
+      implementation: { ...table.implementation, node: tableNode },
+    },
     divider: dividerBlock(),
     codeBlock: codeBlockWithCopy(),
     callout: calloutBlock(),

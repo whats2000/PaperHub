@@ -96,6 +96,12 @@ describe("useNoteExport", () => {
     ]);
   });
 
+  it("names Word's table captions in the viewer's language (Table N. / 表 N.)", async () => {
+    const { result } = renderHook(() => useNoteExport(7));
+    await act(() => result.current.onExport("docx"));
+    expect(requested.at(-1)?.get("table_label")).toBe("Table");
+  });
+
   it("takes Word's reason from the capabilities", async () => {
     caps = { md: true, docx: false, docx_reason: "pandoc_too_old" };
     const { result } = renderHook(() => useNoteExport(7));

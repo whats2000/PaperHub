@@ -82,7 +82,20 @@
     "deleteRow": "刪除列",
     "deleteColumn": "刪除欄",
     "headerRow": "標題列",
-    "headerColumn": "標題欄"
+    "headerColumn": "標題欄",
+    "captionLabel": "表 {{n}}.",
+    "captionWord": "表",
+    "addCaption": "新增表格標題",
+    "removeCaption": "移除表格標題",
+    "addNotes": "新增表註",
+    "removeNotes": "移除表註",
+    "captionField": "表格標題",
+    "notesField": "表註",
+    "captionKeys": "Enter：完成 · Esc",
+    "notesKeys": "Enter：換行 · Ctrl+Enter 或 Esc：完成",
+    "captionPlaceholder": "表格標題 — 可用 $數學式$",
+    "notesPlaceholder": "表註 — 縮寫、* p < 0.05",
+    "editPart": "點一下即可編輯"
   },
   "mention": {
     "sections": "這篇論文的章節",
@@ -275,7 +288,7 @@
       "inlineCite": "以行內引用插在游標處；滑過引用可切換形式",
       "tableTab": "在表格中：下一格／上一格",
       "tableNewRow": "在表格中：在下方新增一列",
-      "tableHandles": "⠿ 插入、對齊、刪除或拖曳 · ⋯ 標題列／欄 · + 新增"
+      "tableHandles": "⠿ 插入、對齊、刪除或拖曳 · ⋯ 標題列／欄、表格標題、表註 · + 新增"
     }
   },
   "code": {

@@ -64,7 +64,7 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
       {
         id: "tableHandles",
         plainLeft: "Hover a table",
-        right: "⠿ insert, align, delete or drag · ⋯ header row / column · + add",
+        right: "⠿ insert, align, delete or drag · ⋯ header row / column, caption, notes · + add",
       },
     ],
   },

@@ -6,7 +6,10 @@
  * label, an inline citation by its words, a `[[` link by its display text
  * or, without one, its target's saved name): a match touching it covers the
  * whole node. A paper reference block matches by its quote and is one unit
- * too. Matches never cross blocks.
+ * too. A table's caption and notes (props drawn outside the document,
+ * TableCaption.tsx) match by their raw text: caption first, then the cells,
+ * then the notes; their part draws its own highlight. Matches never cross
+ * blocks.
  */
 import { createExtension } from "@blocknote/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
@@ -20,11 +23,17 @@ export interface FindMatch {
   from: number;
   to: number;
   /** "text": words (maybe with inline nodes); "node": one inline node;
-   * "block": a reference block (`from` is its content node). */
-  kind: "text" | "node" | "block";
+   * "block": a reference block (`from` is its content node); "caption" /
+   * "notes": in a table's caption or notes (`from` is the table node). */
+  kind: "text" | "node" | "block" | TablePart;
   /** The block holding the match. */
   blockId: string;
+  /** A caption / notes match: its start and end in that text. */
+  at?: [number, number];
 }
+
+/** A table's caption (above it) or notes (below it). */
+export type TablePart = "caption" | "notes";
 
 /** Reference blocks that match by their quote. */
 const REF_TYPES = new Set(["paperQuote", "paperEquation", "paperFigure", "paperRegion"]);
@@ -75,15 +84,8 @@ export function findMatches(doc: PMNode, query: string): FindMatch[] {
     return !node.isTextblock;
   });
   const out: FindMatch[] = [];
-  doc.descendants((node, pos) => {
+  const textblock = (node: PMNode, pos: number) => {
     const blockId = () => blockIdInDoc(doc, pos) ?? "";
-    if (REF_TYPES.has(node.type.name)) {
-      for (let n = indexesOf(fold(String(node.attrs.quote ?? "")), q).length; n > 0; n--) {
-        out.push({ from: pos, to: pos + node.nodeSize, kind: "block", blockId: blockId() });
-      }
-      return false;
-    }
-    if (!node.isTextblock) return true;
     // Each character, and the document range it stands for.
     let text = "";
     const at: { from: number; to: number; atom: boolean }[] = [];
@@ -102,6 +104,31 @@ export function findMatches(doc: PMNode, query: string): FindMatch[] {
       const kind = a.atom && b.atom && a.from === b.from ? "node" : "text";
       out.push({ from: a.from, to: b.to, kind, blockId: blockId() });
     }
+  };
+  doc.descendants((node, pos) => {
+    const blockId = () => blockIdInDoc(doc, pos) ?? "";
+    if (REF_TYPES.has(node.type.name)) {
+      for (let n = indexesOf(fold(String(node.attrs.quote ?? "")), q).length; n > 0; n--) {
+        out.push({ from: pos, to: pos + node.nodeSize, kind: "block", blockId: blockId() });
+      }
+      return false;
+    }
+    if (node.type.name === "table") {
+      const part = (kind: TablePart) => {
+        for (const i of indexesOf(fold(str(node.attrs[kind])), q)) {
+          out.push({ from: pos, to: pos + node.nodeSize, kind, blockId: blockId(), at: [i, i + q.length] });
+        }
+      };
+      part("caption");
+      node.descendants((child, p) => {
+        if (child.isTextblock) textblock(child, pos + 1 + p);
+        return !child.isTextblock;
+      });
+      part("notes");
+      return false;
+    }
+    if (!node.isTextblock) return true;
+    textblock(node, pos);
     return false;
   });
   return out;
@@ -119,9 +146,11 @@ const CURRENT = "ph-find ph-find-current";
 
 function decorations(doc: PMNode, s: FindState): DecorationSet {
   if (!s.matches.length) return DecorationSet.empty;
-  const decos = s.matches.map((m, i) => {
+  // A caption / notes match is drawn by its part (TableCaption.tsx).
+  const decos = s.matches.flatMap((m, i) => {
+    if (m.kind === "caption" || m.kind === "notes") return [];
     const attrs = { class: i === s.current ? CURRENT : ALL, "data-find": m.kind };
-    return m.kind === "text" ? Decoration.inline(m.from, m.to, attrs) : Decoration.node(m.from, m.to, attrs);
+    return [m.kind === "text" ? Decoration.inline(m.from, m.to, attrs) : Decoration.node(m.from, m.to, attrs)];
   });
   return DecorationSet.create(doc, decos);
 }

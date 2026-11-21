@@ -59,7 +59,9 @@ export function useNoteExport(noteId: number | null) {
       try {
         // The tables come out in the style the viewer reads them in.
         const { tableStyle } = useNotesStore.getState();
-        const { blob, filename } = await exportNote(noteId, format, tableStyle);
+        // Word's table captions read "Table 1." in the viewer's language.
+        const label = t("notes:table.captionWord", "Table");
+        const { blob, filename } = await exportNote(noteId, format, tableStyle, label);
         save(blob, filename);
       } catch (err) {
         const reason = reasonOf(err);

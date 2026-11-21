@@ -82,7 +82,20 @@
     "deleteRow": "Delete row",
     "deleteColumn": "Delete column",
     "headerRow": "Header row",
-    "headerColumn": "Header column"
+    "headerColumn": "Header column",
+    "captionLabel": "Table {{n}}.",
+    "captionWord": "Table",
+    "addCaption": "Add caption",
+    "removeCaption": "Remove caption",
+    "addNotes": "Add notes",
+    "removeNotes": "Remove notes",
+    "captionField": "Table caption",
+    "notesField": "Table notes",
+    "captionKeys": "Enter: done · Esc",
+    "notesKeys": "Enter: new line · Ctrl+Enter or Esc: done",
+    "captionPlaceholder": "Caption — $math$ works",
+    "notesPlaceholder": "Notes — abbreviations, * p < 0.05",
+    "editPart": "Click to edit"
   },
   "mention": {
     "sections": "Sections of this paper",
@@ -275,7 +288,7 @@
       "inlineCite": "It lands inline at the caret; hover a citation to switch form",
       "tableTab": "In a table: next / previous cell",
       "tableNewRow": "In a table: a new row below",
-      "tableHandles": "⠿ insert, align, delete or drag · ⋯ header row / column · + add"
+      "tableHandles": "⠿ insert, align, delete or drag · ⋯ header row / column, caption, notes · + add"
     }
   },
   "code": {

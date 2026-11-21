@@ -82,7 +82,20 @@
     "deleteRow": "行を削除",
     "deleteColumn": "列を削除",
     "headerRow": "見出し行",
-    "headerColumn": "見出し列"
+    "headerColumn": "見出し列",
+    "captionLabel": "表 {{n}}.",
+    "captionWord": "表",
+    "addCaption": "キャプションを追加",
+    "removeCaption": "キャプションを削除",
+    "addNotes": "表の注を追加",
+    "removeNotes": "表の注を削除",
+    "captionField": "表のキャプション",
+    "notesField": "表の注",
+    "captionKeys": "Enter：完了 · Esc",
+    "notesKeys": "Enter：改行 · Ctrl+Enter または Esc：完了",
+    "captionPlaceholder": "キャプション — $数式$ も使えます",
+    "notesPlaceholder": "注 — 略語、* p < 0.05",
+    "editPart": "クリックして編集"
   },
   "mention": {
     "sections": "この論文のセクション",
@@ -275,7 +288,7 @@
       "inlineCite": "カーソル位置にインライン引用として入る。引用にホバーで形式を切替",
       "tableTab": "表の中：次／前のセル",
       "tableNewRow": "表の中：下に行を追加",
-      "tableHandles": "⠿ 挿入・揃え・削除・ドラッグ · ⋯ 見出し行／列 · + 追加"
+      "tableHandles": "⠿ 挿入・揃え・削除・ドラッグ · ⋯ 見出し行／列、キャプション、表の注 · + 追加"
     }
   },
   "code": {

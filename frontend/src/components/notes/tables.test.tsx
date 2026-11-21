@@ -685,3 +685,238 @@ describe("motion, robustly", () => {
     expect(document.querySelector(".bn-extend-button")!.closest(".tableWrapper")).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------- caption and notes
+
+describe("table caption and notes", () => {
+  const second = blk("t2", {
+    type: "table",
+    content: {
+      type: "tableContent",
+      columnWidths: [null],
+      headerRows: 1,
+      rows: [{ cells: ["k"] }, { cells: ["v"] }],
+    },
+    text: "k\nv",
+  });
+
+  /** The caption (or notes) part of the table block `id`. */
+  const part = (id: string, which: "caption" | "notes") =>
+    document.querySelector<HTMLElement>(`[data-id="${id}"] [data-table-caption='${which}']`);
+
+  async function openTableMenu(pm: PM, r = 1, c = 0) {
+    hoverCell(pm, r, c);
+    const more = await waitFor(() => tableOptions());
+    act(() => {
+      fireEvent.click(more);
+    });
+    return screen.findByRole("menu", HIDDEN);
+  }
+
+  const items = (menu: HTMLElement) =>
+    [...menu.querySelectorAll("[role^=menuitem]")].map((e) => e.textContent?.trim());
+
+  const propsOf = (pm: PM, id: string) => {
+    let props: Record<string, unknown> | null = null;
+    pm.editor.view.state.doc.descendants((node) => {
+      if (props) return false;
+      if (node.type.name === "blockContainer" && node.attrs.id === id) props = node.firstChild!.attrs;
+      return !props;
+    });
+    return props as unknown as Record<string, unknown>;
+  };
+
+  it("Add caption shows an editable Table 1. above the table with the caret in it; Enter saves it", async () => {
+    seed([seededTable]);
+    const pm = mountEditor();
+    const menu = await openTableMenu(pm);
+    expect(items(menu)).toEqual(["Header row", "Header column", "Add caption", "Add notes"]);
+    act(() => {
+      fireEvent.click(within(menu).getByText("Add caption"));
+    });
+    const field = await waitFor(() => {
+      const el = screen.getByRole("textbox", { name: "Table caption" });
+      expect(document.activeElement).toBe(el);
+      return el;
+    });
+    const cap = part("t", "caption")!;
+    expect(cap).toHaveAttribute("data-state", "open");
+    expect(cap.textContent).toContain("Table 1.");
+    // Above the table.
+    const table = pm.querySelector("[data-id='t'] table")!;
+    expect(cap.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    act(() => {
+      fireEvent.change(field, { target: { value: "Response rates $p$" } });
+    });
+    act(() => {
+      fireEvent.keyDown(field, { key: "Enter" });
+    });
+    expect(propsOf(pm, "t").caption).toBe("Response rates $p$");
+    expect(screen.queryByRole("textbox", { name: "Table caption" })).toBeNull();
+    expect(cap.textContent).toContain("Response rates");
+    expect(cap.querySelector(".katex")).not.toBeNull();
+    const again = await openTableMenu(pm);
+    expect(items(again)).toContain("Remove caption");
+  });
+
+  it("captioned tables are numbered in order: a caption added above renumbers both", async () => {
+    seed([{ ...second, id: "t0" }, blk("t", { ...seededTable, props: { caption: "Lower" } })]);
+    const pm = mountEditor();
+    await waitFor(() => expect(part("t", "caption")?.textContent).toContain("Table 1."));
+    // The first table's rows come first in the document.
+    const menu = await openTableMenu(pm, 1, 0);
+    act(() => {
+      fireEvent.click(within(menu).getByText("Add caption"));
+    });
+    const field = await screen.findByRole("textbox", { name: "Table caption" });
+    expect(part("t0", "caption")!.textContent).toContain("Table 1.");
+    expect(part("t", "caption")!.textContent).toContain("Table 2.");
+    act(() => {
+      fireEvent.change(field, { target: { value: "Upper" } });
+    });
+    act(() => {
+      fireEvent.blur(field);
+    });
+    expect(propsOf(pm, "t0").caption).toBe("Upper");
+    expect(part("t0", "caption")!.textContent).toContain("Table 1.");
+    expect(part("t", "caption")!.textContent).toContain("Table 2.");
+  });
+
+  it("emptying the caption removes it (it collapses toward the table) and the menu says Add again", async () => {
+    seed([blk("t", { ...seededTable, props: { caption: "Gone soon" } })]);
+    const pm = mountEditor();
+    const cap = await waitFor(() => {
+      const el = part("t", "caption")!;
+      expect(el.textContent).toContain("Gone soon");
+      return el;
+    });
+    act(() => {
+      fireEvent.click(within(cap).getByRole("button", { name: /Gone soon/ }));
+    });
+    const field = await screen.findByRole("textbox", { name: "Table caption" });
+    act(() => {
+      fireEvent.change(field, { target: { value: "  " } });
+    });
+    act(() => {
+      fireEvent.keyDown(field, { key: "Enter" });
+    });
+    expect(propsOf(pm, "t").caption).toBe("");
+    // It plays its exit (closed, its words kept while it collapses).
+    expect(cap).toHaveAttribute("data-state", "closed");
+    expect(cap).toHaveAttribute("data-side", "above");
+    const menu = await openTableMenu(pm);
+    expect(items(menu)).toContain("Add caption");
+    expect(items(menu)).not.toContain("Remove caption");
+  });
+
+  it("Remove caption / Remove notes in the table menu clear them", async () => {
+    seed([blk("t", { ...seededTable, props: { caption: "C", notes: "N" } })]);
+    const pm = mountEditor();
+    let menu = await openTableMenu(pm);
+    expect(items(menu)).toEqual(["Header row", "Header column", "Remove caption", "Remove notes"]);
+    act(() => {
+      fireEvent.click(within(menu).getByText("Remove notes"));
+    });
+    expect(propsOf(pm, "t").notes).toBe("");
+    expect(propsOf(pm, "t").caption).toBe("C");
+    menu = await openTableMenu(pm);
+    act(() => {
+      fireEvent.click(within(menu).getByText("Remove caption"));
+    });
+    expect(propsOf(pm, "t").caption).toBe("");
+  });
+
+  it("notes sit below the table in muted text, several lines, and take $...$ as math", async () => {
+    seed([blk("t", { ...seededTable, props: { notes: "ORR, objective response.\n* $p<0.05$" } })]);
+    const pm = mountEditor();
+    const notes = await waitFor(() => {
+      const el = part("t", "notes")!;
+      expect(el.textContent).toContain("objective response");
+      return el;
+    });
+    const table = pm.querySelector("[data-id='t'] table")!;
+    expect(notes.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(notes.querySelector(".text-muted-foreground")).not.toBeNull();
+    expect(notes.querySelector(".katex")).not.toBeNull();
+    expect(notes.querySelector(".whitespace-pre-wrap")).not.toBeNull();
+    // Edited in place: Enter is a new line, Ctrl+Enter (or leaving) saves.
+    act(() => {
+      // (jsdom cannot name a button holding KaTeX's MathML: found by tag.)
+      fireEvent.click(notes.querySelector("button")!);
+    });
+    const field = await screen.findByRole("textbox", { name: "Table notes" });
+    act(() => {
+      fireEvent.change(field, { target: { value: "a\nb" } });
+    });
+    act(() => {
+      fireEvent.keyDown(field, { key: "Enter" });
+    });
+    expect(screen.getByRole("textbox", { name: "Table notes" })).toBe(field);
+    act(() => {
+      fireEvent.keyDown(field, { key: "Enter", ctrlKey: true });
+    });
+    expect(propsOf(pm, "t").notes).toBe("a\nb");
+    expect(notes.textContent).not.toContain("Table");
+  });
+
+  it("caption and notes are saved as the table's props, an empty one sent as none", async () => {
+    const posted: NoteOpsBody[] = [];
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        const body = (await request.json()) as NoteOpsBody;
+        posted.push(body);
+        const res: ApplyResult = {
+          note_id: 7,
+          revision: body.base_revision + 1,
+          change_set_id: "cs",
+          applied: body.ops.map((o) => o.block_id ?? ""),
+          suggested: [],
+          rejected: [],
+          reparented: [],
+        };
+        return HttpResponse.json(res);
+      }),
+    );
+    seed([blk("t", { ...seededTable, props: { notes: "N" } })]);
+    const pm = mountEditor();
+    const menu = await openTableMenu(pm);
+    act(() => {
+      fireEvent.click(within(menu).getByText("Add caption"));
+    });
+    const field = await screen.findByRole("textbox", { name: "Table caption" });
+    act(() => {
+      fireEvent.change(field, { target: { value: "Rates" } });
+    });
+    act(() => {
+      fireEvent.keyDown(field, { key: "Enter" });
+    });
+    await act(async () => {
+      await useNotesStore.getState().flush(7);
+    });
+    const op = posted.flatMap((b) => b.ops).find((o) => o.block_id === "t");
+    expect(op?.block?.props).toEqual({ caption: "Rates", notes: "N" });
+    expect(propsOf(pm, "t").caption).toBe("Rates");
+    // Removing the notes sends no empty prop.
+    posted.length = 0;
+    const again = await openTableMenu(pm);
+    act(() => {
+      fireEvent.click(within(again).getByText("Remove notes"));
+    });
+    await act(async () => {
+      await useNotesStore.getState().flush(7);
+    });
+    expect(posted.flatMap((b) => b.ops).find((o) => o.block_id === "t")?.block?.props).toEqual({ caption: "Rates" });
+  });
+
+  it("an empty caption or notes part takes no room and draws nothing", async () => {
+    seed([seededTable]);
+    mountEditor();
+    await waitFor(() => expect(part("t", "caption")).not.toBeNull());
+    for (const which of ["caption", "notes"] as const) {
+      const el = part("t", which)!;
+      expect(el).toHaveAttribute("data-state", "closed");
+      expect(el.textContent).toBe("");
+      expect(el.className).toContain("motion-reduce:transition-none");
+    }
+  });
+});
