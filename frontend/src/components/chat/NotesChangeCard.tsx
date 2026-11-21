@@ -118,14 +118,26 @@ export function NotesChangeCard({ data }: { data: NotesChangedData }) {
 
   const s = data.summary;
   const parts: { key: string; text: string; amber?: boolean }[] = [];
-  if (s.added > 0) {
+  // A table is named by its size; the other added blocks are counted.
+  const tables = s.tables_added ?? [];
+  const added = s.added - tables.length;
+  if (added > 0) {
     parts.push({
       key: "added",
       text: s.section
-        ? t("notes:card.addedUnder", { count: s.added, section: sectionLabel(s.section) })
-        : t("notes:card.added", { count: s.added }),
+        ? t("notes:card.addedUnder", { count: added, section: sectionLabel(s.section) })
+        : t("notes:card.added", { count: added }),
     });
   }
+  tables.forEach((table, i) => {
+    parts.push({
+      key: `table-${i}`,
+      text: t("notes:card.addedTable", "Added a table ({{rows}} rows × {{cols}} columns)", {
+        rows: table.rows,
+        cols: table.cols,
+      }),
+    });
+  });
   if (s.updated > 0) {
     parts.push({
       key: "updated",

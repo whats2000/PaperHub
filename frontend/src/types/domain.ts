@@ -330,6 +330,8 @@ export interface NotesChangeSummary {
   rejected: number;
   /** The paper section the change landed under, if one. */
   section: string | null;
+  /** Each table the change added (header counted as a row); absent when none. */
+  tables_added?: { rows: number; cols: number }[];
 }
 
 /** H5b: the agent changed a note (SSE `notes_changed`, replayed). */

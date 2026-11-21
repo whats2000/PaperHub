@@ -21,6 +21,8 @@ from typing import Any
 
 import aiosqlite
 
+from paperhub.notes.models import table_rows
+
 # Blocks that own a ``note_marks`` row (the mark follows the block).
 MARK_BLOCK_TYPES = frozenset(
     {"paperQuote", "paperFigure", "paperEquation", "paperRegion"})
@@ -92,14 +94,24 @@ def read_text(block_type: str, props: dict[str, Any], content: Any,
         return str(props.get("title") or "")
     if block_type == "paperQuote":
         return str(props.get("quote") or "")
+    if block_type == "table" and isinstance(content, dict):
+        from paperhub.notes.gfm_table import table_to_gfm
+        return table_to_gfm(content, quotes)
     if block_type == "codeBlock":
         return read_runs(content, quotes) or str(props.get("code") or "")
     return read_runs(content, quotes)
 
 
 def cite_ids(content: Any) -> set[str]:
-    """The mark ids the block's inline citations name."""
+    """The mark ids the block's inline citations name (in every cell of a
+    table)."""
     ids: set[str] = set()
+    if isinstance(content, dict) and content.get("type") == "tableContent":
+        try:
+            rows = table_rows(content)
+        except ValueError:
+            return ids
+        return ids.union(*(cite_ids(c) for row in rows for c in row))
     if not isinstance(content, list):
         return ids
     for run in content:

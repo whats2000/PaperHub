@@ -280,6 +280,7 @@
     "added_other": "ノートを {{count}} 件追加しました",
     "addedUnder_one": "{{section}} にノートを {{count}} 件追加しました",
     "addedUnder_other": "{{section}} にノートを {{count}} 件追加しました",
+    "addedTable": "表を追加しました（{{rows}} 行 × {{cols}} 列）",
     "updated_one": "ノートを {{count}} 件更新しました",
     "updated_other": "ノートを {{count}} 件更新しました",
     "deleted_one": "ノートを {{count}} 件削除しました",

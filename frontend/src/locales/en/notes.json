@@ -280,6 +280,7 @@
     "added_other": "Added {{count}} notes",
     "addedUnder_one": "Added {{count}} note under {{section}}",
     "addedUnder_other": "Added {{count}} notes under {{section}}",
+    "addedTable": "Added a table ({{rows}} rows × {{cols}} columns)",
     "updated_one": "Updated {{count}} note",
     "updated_other": "Updated {{count}} notes",
     "deleted_one": "Removed {{count}} note",

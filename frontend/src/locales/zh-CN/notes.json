@@ -280,6 +280,7 @@
     "added_other": "新增了 {{count}} 条笔记",
     "addedUnder_one": "在 {{section}} 下新增了 {{count}} 条笔记",
     "addedUnder_other": "在 {{section}} 下新增了 {{count}} 条笔记",
+    "addedTable": "添加了一个表格（{{rows}} 行 × {{cols}} 列）",
     "updated_one": "更新了 {{count}} 条笔记",
     "updated_other": "更新了 {{count}} 条笔记",
     "deleted_one": "移除了 {{count}} 条笔记",

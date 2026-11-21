@@ -45,9 +45,10 @@ from paperhub.notes.agent_reads import (
     unseen_user_changes,
 )
 from paperhub.notes.comments import list_comments
-from paperhub.notes.inline_merge import cite_ids, cite_quotes, read_text
+from paperhub.notes.gfm_table import parse_gfm_table, table_to_gfm
+from paperhub.notes.inline_merge import cite_ids, cite_quotes, read_runs, read_text
 from paperhub.notes.marks import color_labels
-from paperhub.notes.models import Block, Note
+from paperhub.notes.models import Block, Note, table_rows
 from paperhub.notes.ops import BlockIn, Op, apply_ops
 from paperhub.notes.papers import _section_order
 from paperhub.notes.scope import note_ref, notes_in_scope, ref_of
@@ -82,10 +83,22 @@ def _level(b: Block) -> int | None:
     return None
 
 
+def _table_xml(content: dict[str, Any], quotes: dict[str, str] | None) -> str:
+    """A table as a GFM pipe table, each cell escaped and its inline
+    citations as ``<mark_cite>`` (as in a paragraph)."""
+    return table_to_gfm(content, quotes, cell=lambda runs: (
+        cite_runs_xml(runs, quotes)
+        or html.escape(read_runs(runs, quotes), quote=False)))
+
+
 def _block_xml(b: Block, labels: dict[str, str] | None = None,
                text: str | None = None,
                quotes: dict[str, str] | None = None) -> str:
-    cited = cite_runs_xml(b.content, quotes) if text is None else None
+    cited: str | None = None
+    if text is None and b.type == "table" and isinstance(b.content, dict):
+        cited = _table_xml(b.content, quotes)
+    elif text is None:
+        cited = cite_runs_xml(b.content, quotes)
     body = cited if cited is not None else html.escape(
         _text(b, quotes) if text is None else text, quote=False)
     if b.type in MARK_BLOCKS and b.props.get("markId"):
@@ -423,19 +436,51 @@ def _section_ops(
 
 
 def _summary(ops: list[Op], applied: list[str], suggested: int, rejected: int,
-             section: str | None, structural: set[str]) -> dict[str, Any]:
+             section: str | None, structural: set[str],
+             tables: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
     """Counts for the notes_changed card. ``added`` counts content blocks
-    only: dividers and sections (``structural``) are left out."""
+    only: dividers and sections (``structural``) are left out.
+    ``tables_added`` (only when a table was added) gives each new table's
+    size, the header counted as a row; ``tables`` maps the applied table
+    blocks to it."""
     done = set(applied)
     touched = [o for o in ops if o.op != "insert" and o.block_id in done]
     touched_ids = {o.block_id for o in touched}
-    return {
+    out: dict[str, Any] = {
         "added": sum(a not in touched_ids and a not in structural
                      for a in applied),
         "updated": sum(o.op in ("update", "move") for o in touched),
         "deleted": sum(o.op == "delete" for o in touched),
         "suggested": suggested, "rejected": rejected, "section": section,
     }
+    added_tables = [(tables or {})[a] for a in applied
+                    if a in (tables or {}) and a not in touched_ids]
+    if added_tables:
+        out["tables_added"] = added_tables
+    return out
+
+
+async def _table_sizes(conn: aiosqlite.Connection,
+                       ids: list[str]) -> dict[str, dict[str, int]]:
+    """``{rows, cols}`` of each table block among ``ids``."""
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
+    async with conn.execute(
+        f"SELECT id, payload_json FROM note_blocks WHERE id IN ({marks}) "  # noqa: S608
+        "AND type = 'table'", ids,
+    ) as cur:
+        rows = await cur.fetchall()
+    out: dict[str, dict[str, int]] = {}
+    for bid, raw in rows:
+        try:
+            content = json.loads(raw or "{}").get("content")
+            cells = table_rows(content) if isinstance(content, dict) else []
+        except (ValueError, AttributeError):
+            continue
+        out[str(bid)] = {"rows": len(cells),
+                         "cols": max((len(r) for r in cells), default=0)}
+    return out
 
 
 async def _structural_ids(conn: aiosqlite.Connection, ids: list[str]) -> set[str]:
@@ -465,6 +510,16 @@ def _check_runs(content: Any, check: Callable[[str], str]) -> Any:
     ``check`` applied to every piece of text."""
     if isinstance(content, str):
         return check(content)
+    if isinstance(content, dict) and content.get("type") == "tableContent":
+        rows = content.get("rows")
+        if not isinstance(rows, list):
+            return content
+        return {**content, "rows": [
+            {**row, "cells": [_check_runs(c, check) for c in row["cells"]]}
+            if isinstance(row, dict) and isinstance(row.get("cells"), list)
+            else row for row in rows]}
+    if isinstance(content, dict) and content.get("type") == "tableCell":
+        return {**content, "content": _check_runs(content.get("content"), check)}
     if not isinstance(content, list):
         return content
     out: list[Any] = []
@@ -499,6 +554,25 @@ def _check_citations(
         return text
 
     return block.model_copy(update={"content": _check_runs(block.content, check)})
+
+
+class _TableError(ValueError):
+    """A table block whose GFM content does not parse."""
+
+
+def _gfm_block(raw: Any) -> Any:
+    """The raw op with a table block's GFM string content parsed into a
+    ``tableContent`` object (raises ``_TableError`` with the reason)."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("block"), dict):
+        return raw
+    block = raw["block"]
+    if block.get("type") != "table" or not isinstance(block.get("content"), str):
+        return raw
+    try:
+        content = parse_gfm_table(block["content"])
+    except ValueError as exc:
+        raise _TableError(str(exc)) from exc
+    return {**raw, "block": {**block, "content": content}}
 
 
 def _hint(exc: ValidationError) -> str:
@@ -603,13 +677,15 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     invalid_raw: list[Any] = []
     for index, raw in enumerate(raw_ops):
         try:
-            ops.append((index, Op.model_validate(raw)))
-        except ValidationError as exc:
+            ops.append((index, Op.model_validate(_gfm_block(raw))))
+        except (ValidationError, _TableError) as exc:
             fields: dict[str, Any] = raw if isinstance(raw, dict) else {}
             label = next((str(fields[k]) for k in (
                 "block_id", "after", "before", "under_heading")
                 if isinstance(fields.get(k), str)), None)
-            rejected.append({**_invalid(label, _hint(exc)), "op": index})
+            hint = (f"block.content: {exc}" if isinstance(exc, _TableError)
+                    else _hint(exc))
+            rejected.append({**_invalid(label, hint), "op": index})
             if fields.get("op") == "insert" and isinstance(
                     fields.get("block_id"), str):
                 failed.add(fields["block_id"])
@@ -764,7 +840,8 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         record["note_title"] = note.title
         record["summary"] = _summary(
             valid, record["applied"], len(record["suggested"]), len(rejected),
-            section, await _structural_ids(ctx.conn, record["applied"]))
+            section, await _structural_ids(ctx.conn, record["applied"]),
+            await _table_sizes(ctx.conn, record["applied"]))
         events.append(("notes_changed", {
             "change_set_id": record["change_set_id"], "note_id": note.id,
             "note_title": note.title, "summary": record["summary"],
@@ -824,6 +901,9 @@ def register_note_tools(registry: ToolRegistry) -> None:
             "and a place: after / before a block id, or under_heading; an "
             "empty non-paper note needs no place}; `content` is the block's "
             "text as a string, `type` e.g. paragraph, bulletListItem, heading; "
+            "a table is one block of type table whose content is a GFM pipe "
+            "table, first row the header (\"| Model | Params |\n|---|---|\n"
+            "| A | 7B [chunk:12] |\"); "
             "math is LaTeX as typed, with single backslashes ($\\alpha$); "
             "update {block_id, block}; delete {block_id}; move {block_id, "
             "place}. `under_heading` is a heading or section block id, or on a "

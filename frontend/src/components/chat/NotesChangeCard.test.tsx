@@ -77,6 +77,26 @@ describe("NotesChangeCard", () => {
     expect(screen.getByText("2 suggestions on your text")).toBeInTheDocument();
   });
 
+  it("counts an added table by its size instead of as a note", () => {
+    server.use(http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => HttpResponse.json(detail())));
+    render(
+      <NotesChangeCard
+        data={{
+          ...data,
+          summary: {
+            ...data.summary,
+            added: 2,
+            suggested: 0,
+            section: null,
+            tables_added: [{ rows: 2, cols: 2 }],
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("Added a table (2 rows × 2 columns)")).toBeInTheDocument();
+    expect(screen.getByText(/^Added 1 note$/)).toBeInTheDocument();
+  });
+
   it("Undo turns into Apply again and back, each call on the set live at the time", async () => {
     server.use(
       http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => HttpResponse.json(detail())),

@@ -457,3 +457,42 @@ read by hand.
 No unsourced marks and no cut hit cited unread in any of the 24 runs. D6
 and D7 measure the same; **D6 shipped** because the flag does not ask the
 model to judge a block's length (a borderline 230 vs 250-character block).
+
+### H5b.1 Task 5: tables in `edit_note` (T1)
+
+`edit_note` now writes a `table` block from a GFM pipe-table string. Variants
+of the `edit_note` description (prompt unchanged, `core_agent_v9`; deploy
+model `gemini/gemini-pro-latest` from the scratch copy's settings), each
+inserted after "`type` e.g. paragraph, bulletListItem, heading; ":
+
+- T0 (baseline): nothing added.
+- T1: "a table is one block of type table whose content is a GFM pipe
+  table, first row the header ("| Model | Params |⏎|---|---|⏎| A | 7B
+  [chunk:12] |"); " (+47 tool tokens)
+- T2: T1's facts plus the alignment row (`:-:` / `--:`), citations in the
+  cells and "an update sends the whole table back, unchanged cells as
+  read" (+86 tool tokens)
+
+Setup: the real loop via the branch backend on a copy of the seeded
+scratch workspace (one fresh copy and server per run, own port, MCP
+loopback on that port, no web), a new chat with the papers attached per
+run; paper 48's note seeded with a 3 × 3 agent table (a bold cell, an
+inline formula). Cases: t1 "Make a table in my notes comparing how papers
+47 and 48 balance expert load.", t2 the same request in Chinese, t3 a
+hyperparameter table of paper 48 with right-aligned values, t4 "fix just
+that cell" in the seeded table; regression r1 note one sentence, r2
+summarise the Background section into the note, r3 compare without a
+note. 2 reps on t1–t4, 1 on r1–r3. Every edit_note call and answer read.
+
+| case | T0 | T1 | T2 |
+|---|---|---|---|
+| t1 table block | **0/2** (a Markdown table in a paragraph, twice per run) | 2/2 | 2/2 |
+| t2 (zh) table block | **0/2** (paragraphs) | 2/2 | 2/2 |
+| t3 table block, values `--:` | **0/2** (paragraphs) | 2/2 | 2/2 |
+| t4 update of one cell, bold + formula kept | 2/2 | 2/2 | 2/2 |
+| r1 / r2 / r3 | paragraph / bullets / no write | same | same |
+
+No rejected op, no unsourced cell citation in any run. T1 and T2 measure
+the same; **T1 shipped** (shorter). Open, shared by every variant and by
+paragraphs: the model writes `**bold**` inside cells as literal asterisks
+(strings are stored as plain text).

@@ -26,6 +26,7 @@ import aiosqlite
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from paperhub.db.connection import write_transaction
+from paperhub.notes.gfm_table import is_plain_table, merge_table
 from paperhub.notes.inline_merge import (
     MARK_BLOCK_TYPES,
     cite_ids,
@@ -475,6 +476,16 @@ async def _merged(ctx: _Ctx, row: _Row, blk: BlockIn) -> BlockIn:
         return blk.model_copy(update={"type": row.type, "props": props,
                                       "content": row.content})
     content = blk.content
+    if (row.type == "table" and blk.type == "table"
+            and isinstance(row.content, dict) and isinstance(content, dict)
+            and is_plain_table(content)):
+        # A table written as text (the agent's GFM), per cell: an unchanged
+        # cell keeps its runs, a changed one the runs its text did not change.
+        quotes = await cite_quotes(ctx.conn, cite_ids(row.content))
+        table, report = merge_table(row.content, content, quotes)
+        if report["kept"] or report["dropped"]:
+            ctx.inline.append({"block_id": row.id, **report})
+        return blk.model_copy(update={"props": props, "content": table})
     if (isinstance(content, str) and isinstance(row.content, list)
             and is_rich(row.content) and blk.type not in ("math", "codeBlock")):
         quotes = await cite_quotes(ctx.conn, cite_ids(row.content))
