@@ -499,11 +499,6 @@ describe("the [[ picker", () => {
     allOps()
       .flatMap((o) => (Array.isArray(o.block?.content) ? o.block.content : []))
       .filter((r) => (r as { type?: string }).type === "noteLink") as { props: Record<string, unknown> }[];
-  const sentText = () =>
-    allOps()
-      .flatMap((o) => (Array.isArray(o.block?.content) ? o.block.content : []))
-      .map((r) => (r as { text?: string }).text ?? "")
-      .join("");
 
   it("[[ opens a menu of notes (an icon per kind) and papers, with no create item", async () => {
     server.use(...searchHandlers());
@@ -536,10 +531,32 @@ describe("the [[ picker", () => {
       label: "見此",
       name: "RoboTTT",
     });
-    expect(sentText()).not.toContain("[[");
     const content = allOps().at(-1)!.block!.content as { type: string; text?: string }[];
-    const at = content.findIndex((r) => r.type === "noteLink");
-    expect(content[at + 1]).toMatchObject({ type: "text", text: " " });
+    expect(content.map((r) => r.type)).toEqual(["text", "noteLink", "text"]);
+    expect(content[0]!.text).toBe("see ");
+    expect(content[2]!.text).toBe(" ");
+  });
+
+  it("a third [ stays in the query: the pick leaves no stray bracket", async () => {
+    server.use(...searchHandlers());
+    await openAtEnd();
+    typeIn("[[[robo");
+    await screen.findByText("Robot idea");
+    pressInMenu("Enter");
+    await waitFor(() => expect(sentLink()).toHaveLength(1));
+    const content = allOps().at(-1)!.block!.content as { type: string; text?: string }[];
+    expect(content[0]!.text).toBe("see ");
+    expect(content[1]!.type).toBe("noteLink");
+  });
+
+  it("an empty display text after | leaves the label empty", async () => {
+    server.use(...searchHandlers());
+    await openAtEnd();
+    typeIn("[[robo|");
+    await screen.findByText("Robot idea");
+    pressInMenu("Enter");
+    await waitFor(() => expect(sentLink()).toHaveLength(1));
+    expect(sentLink()[0]!.props.label).toBe("");
   });
 
   it("[[name# lists that note's outline and links the heading", async () => {
@@ -548,14 +565,13 @@ describe("the [[ picker", () => {
       http.get(`${API_BASE_URL}/notes/12/outline`, () =>
         HttpResponse.json([{ block_id: "h1", type: "heading", text: "閘控", level: 2 }]),
       ),
-      http.get(`${API_BASE_URL}/papers/content/5/sections`, () => HttpResponse.json(["2 Method"])),
     );
     await openAtEnd();
     typeIn("[[RoboTTT#");
     await screen.findByText("閘控");
     expect(screen.getByText("Headings")).toBeInTheDocument();
-    // The best paper match's sections come too.
-    expect(screen.getByText("2 Method")).toBeInTheDocument();
+    // Only exact titles list headings: "Robots at scale" adds no sections.
+    expect(screen.queryByText("Paper sections")).toBeNull();
     pressInMenu("Enter");
     await waitFor(() => expect(sentLink()).toHaveLength(1));
     expect(sentLink()[0]!.props).toMatchObject({ targetId: 12, blockId: "h1", name: "RoboTTT › 閘控" });

@@ -28,9 +28,11 @@ export interface LinkQuery {
 }
 
 export function parseLinkQuery(q: string): LinkQuery {
-  const bar = q.indexOf("|");
-  const label = bar < 0 ? "" : q.slice(bar + 1).trim();
-  const rest = bar < 0 ? q : q.slice(0, bar);
+  // A third [ typed after [[ stays in the query (it never re-opens the menu).
+  const typed = q.replace(/^\[+/, "");
+  const bar = typed.indexOf("|");
+  const label = bar < 0 ? "" : typed.slice(bar + 1).trim();
+  const rest = bar < 0 ? typed : typed.slice(0, bar);
   if (rest.startsWith("##")) return { mode: "allHeadings", name: "", heading: rest.slice(2).trim(), label };
   if (rest.startsWith("#")) return { mode: "thisNote", name: "", heading: rest.slice(1).trim(), label };
   const hash = rest.indexOf("#");
@@ -38,6 +40,15 @@ export function parseLinkQuery(q: string): LinkQuery {
     return { mode: "noteHeadings", name: rest.slice(0, hash).trim(), heading: rest.slice(hash + 1).trim(), label };
   }
   return { mode: "targets", name: rest.trim(), heading: "", label };
+}
+
+/** BlockNote's `shouldOpen` for the `[[` menu: not when the [[ would be the
+ * tail of a longer bracket run (`[[[`), whose third [ belongs to the open
+ * query, so a pick removes the whole run and leaves no stray bracket. */
+export function opensLinkPicker(tr: { selection: { $from: { parent: { textBetween: (a: number, b: number, c?: string, d?: string) => string }; parentOffset: number } } }): boolean {
+  const $from = tr.selection.$from;
+  const at = $from.parentOffset;
+  return $from.parent.textBetween(Math.max(0, at - 2), at, undefined, String.fromCharCode(0xfffc)) !== "[[";
 }
 
 /** A `noteLink` node's props (see `blocks/NoteLink`). */
@@ -75,8 +86,9 @@ async function quietly<T>(p: () => Promise<T[]>): Promise<T[]> {
   }
 }
 
-const pick = <T extends { title: string }>(rows: T[], name: string): T | undefined =>
-  rows.find((r) => fold(r.title) === fold(name)) ?? rows[0];
+/** The row whose title is exactly `name` (case-folded), if any. */
+const exact = <T extends { title: string }>(rows: T[], name: string): T | undefined =>
+  rows.find((r) => fold(r.title) === fold(name));
 
 /** A block's inline text (chips by their shown text). */
 function inlineText(content: unknown): string {
@@ -114,70 +126,75 @@ const props = (over: Partial<NoteLinkProps> & Pick<NoteLinkProps, "targetKind" |
   ...over,
 });
 
+/** Notes and library papers whose title contains `name`. */
+async function targets(name: string, label: string, untitled: string): Promise<LinkItem[]> {
+  const [notes, papers] = await Promise.all([
+    quietly(() => searchNotes(name, LIMIT)),
+    quietly<LibraryItem>(() => listLibrary(0, name || undefined, LIMIT)),
+  ]);
+  return [
+    ...notes.map<LinkItem>((n) => ({
+      group: "notes",
+      icon: noteIcon(n.kind),
+      title: n.title || untitled,
+      props: props({ targetKind: "note", targetId: n.note_id, name: n.title || untitled, label }),
+    })),
+    ...papers.map<LinkItem>((p) => ({
+      group: "papers",
+      icon: "paper",
+      title: p.title || untitled,
+      subtext: p.year ? String(p.year) : undefined,
+      props: props({ targetKind: "paper", targetId: p.paper_content_id, name: p.title || untitled, label }),
+    })),
+  ];
+}
+
 /** The picker's rows for the query typed after `[[`. Never rejects: a
- * search that fails leaves the others. No "create a note" row (H5b.2). */
-export async function linkItems(editor: Ed, noteId: number, q: string): Promise<LinkItem[]> {
+ * search that fails leaves the others. `untitled` names a note without a
+ * title (rows and the link's saved name alike). No "create a note" row
+ * (H5b.2). */
+export async function linkItems(editor: Ed, noteId: number, q: string, untitled = "Untitled"): Promise<LinkItem[]> {
   const { mode, name, heading, label } = parseLinkQuery(q);
 
-  if (mode === "targets") {
-    const [notes, papers] = await Promise.all([
-      quietly(() => searchNotes(name, LIMIT)),
-      quietly<LibraryItem>(() => listLibrary(0, name || undefined, LIMIT)),
-    ]);
-    return [
-      ...notes.map<LinkItem>((n) => ({
-        group: "notes",
-        icon: noteIcon(n.kind),
-        title: n.title,
-        props: props({ targetKind: "note", targetId: n.note_id, name: n.title, label }),
-      })),
-      ...papers.map<LinkItem>((p) => ({
-        group: "papers",
-        icon: "paper",
-        title: p.title,
-        subtext: p.year ? String(p.year) : undefined,
-        props: props({ targetKind: "paper", targetId: p.paper_content_id, name: p.title, label }),
-      })),
-    ];
-  }
+  if (mode === "targets") return targets(name, label, untitled);
 
   if (mode === "allHeadings") {
     const hits = await quietly(() => searchNoteHeadings(heading, LIMIT * 2));
-    return hits.map((h) => ({
-      group: "headings",
-      icon: "heading",
-      title: h.text,
-      subtext: h.note_title,
-      props: props({
-        targetKind: "note",
-        targetId: h.note_id,
-        blockId: h.block_id,
-        name: h.note_title + SEP + h.text,
-        label,
-      }),
-    }));
+    return hits.map((h) => {
+      const title = h.note_title || untitled;
+      return {
+        group: "headings",
+        icon: "heading",
+        title: h.text,
+        subtext: title,
+        props: props({ targetKind: "note", targetId: h.note_id, blockId: h.block_id, name: title + SEP + h.text, label }),
+      };
+    });
   }
 
   if (mode === "thisNote") {
     const st = useNotesStore.getState().notes[noteId];
-    const title = st?.note.title || st?.defaultTitle || "";
+    const title = st?.note.title || st?.defaultTitle || untitled;
     return ownOutline(editor)
       .filter((o) => o.text && has(o.text, heading))
       .map((o) => ({
         group: "headings",
         icon: o.type,
         title: o.text,
-        props: props({ targetKind: "note", targetId: noteId, blockId: o.id, name: title ? title + SEP + o.text : o.text, label }),
+        props: props({ targetKind: "note", targetId: noteId, blockId: o.id, name: title + SEP + o.text, label }),
       }));
   }
 
-  // name#word: the named note's outline and the named paper's sections.
+  // name#word: the outline of the note titled exactly `name` and the
+  // sections of the paper titled so. With neither, the # may be part of a
+  // title (`C# notes`): list the targets holding the whole text instead.
   const [notes, papers] = await Promise.all([
     quietly(() => searchNotes(name, LIMIT)),
     quietly<LibraryItem>(() => listLibrary(0, name || undefined, LIMIT)),
   ]);
-  const note = pick(notes, name);
-  const paper = pick(papers, name);
+  const note = exact(notes, name);
+  const paper = exact(papers, name);
+  if (!note && !paper) return targets(q.replace(/^\[+/, "").split("|")[0]!.trim(), label, untitled);
   const [outline, sections] = await Promise.all([
     note ? quietly(() => getNoteOutline(note.note_id)) : Promise.resolve([]),
     paper ? quietly(() => getPaperSections(paper.paper_content_id)) : Promise.resolve([]),

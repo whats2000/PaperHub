@@ -51,7 +51,7 @@ import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { citationChips } from "./citationDecorations";
 import { EditorTip } from "./EditorTip";
 import { insertMention, parseMentionHref, type MentionTarget } from "./formatActions";
-import { insertNoteLink, linkItems, type LinkItem } from "./linkPicker";
+import { insertNoteLink, linkItems, opensLinkPicker, type LinkItem } from "./linkPicker";
 import { NoteFormattingBar } from "./FormattingBar";
 import { lostCommentBadges, useBadgeRefresh, useLostCommentBadges } from "./commentBadges";
 import { LostCommentBadges } from "./LostCommentBadges";
@@ -599,17 +599,18 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
         headings: t("notes:link.picker.headings", "Headings"),
         sections: t("notes:link.picker.sections", "Paper sections"),
       };
-      const rows = await linkItems(editor, noteId, query);
+      const untitled = t("notes:link.untitled", "Untitled");
+      const rows = await linkItems(editor, noteId, query, untitled);
       // BlockNote keys a menu row by its title, and a paper note shares its
       // paper's title: an invisible zero-width space keeps the keys apart.
       const seen = new Map<string, number>();
       return rows.map((r) => {
         const Icon = LINK_ICONS[r.icon];
-        const shown = r.title || t("notes:link.untitled", "Untitled");
+        const shown = r.title || untitled;
         const n = seen.get(shown) ?? 0;
         seen.set(shown, n + 1);
         return {
-          title: shown + "​".repeat(n),
+          title: shown + "\u200b".repeat(n),
           subtext: r.subtext,
           group: groups[r.group],
           icon: <Icon className="size-[18px]" />,
@@ -743,7 +744,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
           <SuggestionMenuController triggerCharacter="@" getItems={mentionItems} />
           {/* BlockNote opens a two-character trigger itself: the second [ after
               a [ opens it; a pick replaces "[[query", Esc leaves it as typed. */}
-          <SuggestionMenuController triggerCharacter="[[" getItems={pickerItems} />
+          <SuggestionMenuController triggerCharacter="[[" getItems={pickerItems} shouldOpen={opensLinkPicker} />
         </BlockNoteView>
         {comments.popover}
         {suggestionBars}

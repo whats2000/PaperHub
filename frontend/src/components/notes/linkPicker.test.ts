@@ -32,6 +32,13 @@ describe("parseLinkQuery", () => {
     expect(parseLinkQuery("robo|見此")).toEqual({ mode: "targets", name: "robo", heading: "", label: "見此" });
     expect(parseLinkQuery("robo#閘|see")).toMatchObject({ mode: "noteHeadings", heading: "閘", label: "see" });
   });
+  it("an empty or blank display text is no label", () => {
+    expect(parseLinkQuery("robo|").label).toBe("");
+    expect(parseLinkQuery("robo|   ").label).toBe("");
+  });
+  it("brackets typed beyond [[ are not part of the name", () => {
+    expect(parseLinkQuery("[robo")).toMatchObject({ mode: "targets", name: "robo" });
+  });
 });
 
 const hit = (note_id: number, kind: "paper" | "session" | "idea", title: string) => ({
@@ -167,6 +174,43 @@ describe("linkItems", () => {
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ group: "headings", title: "閘控", subtext: "RoboTTT" });
     expect(items[0]!.props).toMatchObject({ targetId: 12, blockId: "h1", name: "RoboTTT › 閘控" });
+  });
+
+  it("an untitled note's link is named Untitled (with › heading)", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/search`, () => HttpResponse.json([hit(12, "paper", "")])),
+      http.get(`${API_BASE_URL}/papers/library`, () => HttpResponse.json([])),
+    );
+    const items = await linkItems(editor(), 7, "", "未命名");
+    expect(items[0]).toMatchObject({ title: "未命名", props: { name: "未命名" } });
+    useNotesStore.setState({
+      notes: {
+        7: {
+          note: { id: 7, target_kind: "paper", target_id: "3", title: "", revision: 1, updated_at: "" },
+          blocks: [],
+          suggestions: [],
+          comments: [],
+          revision: 1,
+        },
+      },
+    });
+    const own = await linkItems(editor(), 7, "#動", "未命名");
+    expect(own[0]!.props.name).toBe("未命名 › 動機");
+  });
+
+  it("name# with no exact title lists the targets whose title holds the whole text", async () => {
+    const asked: string[] = [];
+    server.use(
+      http.get(`${API_BASE_URL}/notes/search`, ({ request }) => {
+        const q = new URL(request.url).searchParams.get("q") ?? "";
+        asked.push(q);
+        return HttpResponse.json(q === "C# notes" ? [hit(20, "session", "C# notes")] : [hit(21, "session", "C stuff")]);
+      }),
+      http.get(`${API_BASE_URL}/papers/library`, () => HttpResponse.json([])),
+    );
+    const items = await linkItems(editor(), 7, "C# notes");
+    expect(asked).toContain("C# notes");
+    expect(items.map((i) => [i.group, i.title, i.props.targetId, i.props.blockId])).toEqual([["notes", "C# notes", 20, ""]]);
   });
 
   it("a search that fails leaves the other list", async () => {
