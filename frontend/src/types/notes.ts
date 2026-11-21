@@ -18,10 +18,28 @@ export type NoteBlockType =
   | "paperQuote"
   | "paperFigure"
   | "paperEquation"
-  | "paperRegion";
+  | "paperRegion"
+  | "table";
 
-/** BlockNote inline content as stored: text runs, links, custom inline nodes. */
-export type NoteContent = Record<string, unknown>[] | string | null;
+/** A table cell: plain text, inline runs, or a `tableCell` node (only
+ * `textAlignment` may differ from the defaults, 1:1 with Markdown). */
+export type TableCell =
+  | string
+  | Record<string, unknown>[]
+  | { type: "tableCell"; props?: Record<string, unknown>; content: Record<string, unknown>[] | string };
+
+/** A `table` block's content (BlockNote 0.57 `tableContent`). */
+export interface TableContent {
+  type: "tableContent";
+  columnWidths: (number | null)[];
+  headerRows?: number;
+  headerCols?: number;
+  rows: { cells: TableCell[] }[];
+}
+
+/** BlockNote inline content as stored: text runs, links, custom inline nodes;
+ * a `table` block holds a `TableContent`. */
+export type NoteContent = Record<string, unknown>[] | TableContent | string | null;
 
 export interface NoteBlock {
   id: string;

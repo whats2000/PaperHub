@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyOpsLocally } from "@/lib/notes/ops";
+import { applyOpsLocally, blockText } from "@/lib/notes/ops";
 import type { NoteBlock } from "@/types/notes";
 
 function nb(id: string, parent: string | null, text = id, extra: Partial<NoteBlock> = {}): NoteBlock {
@@ -64,5 +64,20 @@ describe("applyOpsLocally keeps document order (depth-first, like the server's l
       ["c", "a2"],
       ["n", null],
     ]);
+  });
+});
+
+describe("blockText for a table", () => {
+  it("joins cells with ' | ' and rows with a newline, like the backend", () => {
+    const content = {
+      type: "tableContent",
+      columnWidths: [null, null],
+      headerRows: 1,
+      rows: [
+        { cells: ["指標", "值"] },
+        { cells: [[{ type: "text", text: "ORR", styles: { bold: true } }], { type: "tableCell", props: {}, content: [{ type: "text", text: "62%", styles: {} }] }] },
+      ],
+    };
+    expect(blockText("table", {}, content)).toBe("指標 | 值\nORR | 62%");
   });
 });

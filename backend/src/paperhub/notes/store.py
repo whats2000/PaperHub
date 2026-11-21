@@ -11,7 +11,7 @@ from typing import Any
 import aiosqlite
 
 from paperhub.db.connection import in_write_transaction, write_lock
-from paperhub.notes.models import Block, Note
+from paperhub.notes.models import Block, Note, table_rows
 
 _ALPHABET = string.digits + string.ascii_uppercase + string.ascii_lowercase
 
@@ -29,6 +29,8 @@ def _runs_text(content: Any) -> str:
         return ""
     if isinstance(content, str):
         return content
+    if not isinstance(content, list):
+        return ""
     out: list[str] = []
     for run in content:
         if not isinstance(run, dict):
@@ -52,6 +54,9 @@ def block_text(type: str, props: dict[str, Any], content: Any) -> str:
         return str(props.get("quote") or "")
     if type == "math":
         return str(props.get("latex") or "")
+    if type == "table" and isinstance(content, dict):
+        return "\n".join(" | ".join(_runs_text(c) for c in row)
+                         for row in table_rows(content))
     if type == "codeBlock":
         return _runs_text(content) or str(props.get("code") or "")
     return _runs_text(content)

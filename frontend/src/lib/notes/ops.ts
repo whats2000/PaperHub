@@ -15,6 +15,21 @@ function runsText(content: unknown): string {
     .join("");
 }
 
+function cellText(cell: unknown): string {
+  if (cell && typeof cell === "object" && !Array.isArray(cell)) {
+    return runsText((cell as { content?: unknown }).content);
+  }
+  return runsText(cell);
+}
+
+function tableText(content: unknown): string {
+  const rows = (content as { rows?: unknown } | null)?.rows;
+  if (!Array.isArray(rows)) return "";
+  return rows
+    .map((row: { cells?: unknown[] }) => (row.cells ?? []).map(cellText).join(" | "))
+    .join("\n");
+}
+
 /** A prop as text ("" for anything that is not a string or number). */
 export function propText(v: unknown): string {
   return typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
@@ -25,6 +40,7 @@ export function blockText(type: string, props: Record<string, unknown>, content:
   if (type === "section") return propText(props.title);
   if (type === "paperQuote") return propText(props.quote);
   if (type === "math") return propText(props.latex);
+  if (type === "table") return tableText(content);
   if (type === "codeBlock") return runsText(content) || propText(props.code);
   return runsText(content);
 }

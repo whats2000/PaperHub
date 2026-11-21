@@ -35,7 +35,13 @@ from paperhub.notes.inline_merge import (
     preserve_runs,
 )
 from paperhub.notes.mark_pieces import revive_latest
-from paperhub.notes.models import BLOCK_ID_PATTERN, Block, BlockType, check_inline
+from paperhub.notes.models import (
+    BLOCK_ID_PATTERN,
+    Block,
+    BlockType,
+    check_inline,
+    check_table,
+)
 from paperhub.notes.order import key_between
 from paperhub.notes.store import (
     block_text,
@@ -53,10 +59,20 @@ RejectReason = Literal["changed_since_base", "missing", "invalid", "stale",
 class BlockIn(BaseModel):
     type: BlockType
     props: dict[str, Any] = {}
-    content: list[dict[str, Any]] | str | None = None
+    content: list[dict[str, Any]] | dict[str, Any] | str | None = None
     section_key: str | None = None
 
     _inline = field_validator("content")(check_inline)
+
+    @model_validator(mode="after")
+    def _table_shape(self) -> BlockIn:
+        if self.type == "table":
+            if not isinstance(self.content, dict):
+                raise ValueError("a table block's content must be an object")
+            check_table(self.content)
+        elif isinstance(self.content, dict):
+            raise ValueError("only a table block has object content")
+        return self
 
     @model_validator(mode="after")
     def _math_from_string(self) -> BlockIn:
@@ -126,7 +142,7 @@ class _Row(BaseModel):
     order_key: str
     type: BlockType
     props: dict[str, Any]
-    content: list[dict[str, Any]] | str | None
+    content: list[dict[str, Any]] | dict[str, Any] | str | None
     text: str
     author: Literal["user", "ai"]
     section_key: str | None
