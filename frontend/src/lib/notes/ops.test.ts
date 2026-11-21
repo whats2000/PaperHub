@@ -81,3 +81,21 @@ describe("blockText for a table", () => {
     expect(blockText("table", {}, content)).toBe("指標 | 值\nORR | 62%");
   });
 });
+
+describe("blockText of inline nodes (the backend's _runs_text)", () => {
+  it("reads a [[ link as its label, else its saved name; math as LaTeX; a citation as its alias", () => {
+    const link = (label: string, name: string) => ({
+      type: "noteLink",
+      props: { targetKind: "note", targetId: 1, blockId: "", sectionKey: "", label, name },
+    });
+    const content = [
+      { type: "text", text: "see ", styles: {} },
+      link("this", "RoboTTT"),
+      { type: "text", text: " and ", styles: {} },
+      link("", "RoboTTT › 閘控"),
+      { type: "inlineMath", props: { latex: "x^2" } },
+      { type: "markCite", props: { markId: "m", text: "62%", paperId: 0 } },
+    ];
+    expect(blockText("paragraph", {}, content)).toBe("see this and RoboTTT › 閘控x^262%");
+  });
+});

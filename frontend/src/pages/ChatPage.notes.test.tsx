@@ -349,6 +349,14 @@ describe("ChatPage Notes pane", () => {
     }
   });
 
+  it("drops a request for another chat's note: the pane stays on what it shows", async () => {
+    useCanvasStore.setState({ open: true, width: 600, activePaperId: 7 });
+    render(<ChatPage />);
+    act(() => useNotesPaneStore.getState().openAt({ kind: "session", id: 999, noteId: 50, blockId: "b50" }));
+    await waitFor(() => expect(useNotesPaneStore.getState().request).toBeNull());
+    expect(await screen.findByText("note 11")).toBeInTheDocument();
+  });
+
   it("drops an Open in notes request that never shows its note, and an idea's at once", async () => {
     useCanvasStore.setState({ open: true, width: 600, activePaperId: 7 });
     render(<ChatPage />);

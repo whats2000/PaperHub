@@ -21,6 +21,7 @@ import { createJSONStorage, persist, type StateStorage } from "zustand/middlewar
 import {
   ApiError,
   createNoteComment,
+  getDocumentInfo,
   getNote,
   getNoteForTarget,
   listMarkColors,
@@ -162,6 +163,11 @@ interface NotesStore {
   /** `deleted` drops the thread from the list; `open` lists it again. */
   setCommentStatus: (noteId: number, commentId: string, status: NoteCommentStatus) => Promise<void>;
 
+  /** `[[` link targets looked up this session, by `linkTargetKey`. */
+  linkTargets: Record<string, LinkTargetInfo>;
+  /** Looks a link's target up once a session (again after a failure). */
+  resolveLinkTarget: (kind: "note" | "paper", id: number) => Promise<void>;
+
   /** Accepts or rejects one of the agent's suggestions (edits queued
    * before it are sent first), then shows the saved note — after `exit`
    * (the change animating out, told the server's result), when given. */
@@ -172,6 +178,23 @@ interface NotesStore {
     exit?: (res: ApplyResult) => Promise<void>,
   ) => Promise<ApplyResult>;
 }
+
+/** What a `[[` link's target looked like when last looked up: a note's
+ * name, kind and lines, or only that a paper is still there. `dead`: deleted
+ * (or never there); `failed`: the lookup failed, nothing is known. */
+export interface LinkTargetInfo {
+  status: "ok" | "dead" | "failed";
+  /** A note's target kind and id. */
+  noteKind?: NoteTargetKind;
+  targetId?: number;
+  /** A note's display title ("" when it has none). */
+  name?: string;
+  /** A note's blocks, in document order. */
+  blocks?: { id: string; type: string; text: string }[];
+}
+
+/** The `linkTargets` key of a link's target. */
+export const linkTargetKey = (kind: "note" | "paper", id: number) => `${kind}:${id}`;
 
 /** localStorage that never throws (private windows, blocked site data). */
 const safeStorage: StateStorage = {
@@ -214,6 +237,38 @@ interface Burst {
 }
 const inRetry = new Map<number, Burst>();
 let colorsRequest: Promise<void> | null = null;
+
+/** Link target lookups in flight, by `linkTargetKey`. */
+const linkRequests = new Map<string, Promise<void>>();
+
+/** Forgets every link target lookup (tests). */
+export function resetLinkTargets(): void {
+  linkRequests.clear();
+  useNotesStore.setState({ linkTargets: {} });
+}
+
+const isGone = (err: unknown) => err instanceof ApiError && err.status === 404;
+
+/** A link target as the server has it: never rejects. */
+async function lookUpLinkTarget(kind: "note" | "paper", id: number): Promise<LinkTargetInfo> {
+  try {
+    if (kind === "paper") {
+      await getDocumentInfo(id);
+      return { status: "ok" };
+    }
+    const d = await getNote(id);
+    if (d.note.deleted_at) return { status: "dead" };
+    return {
+      status: "ok",
+      noteKind: d.note.target_kind,
+      targetId: Number(d.note.target_id),
+      name: d.note.title || d.default_title || "",
+      blocks: d.blocks.map((b) => ({ id: b.id, type: b.type, text: b.text })),
+    };
+  } catch (err) {
+    return { status: isGone(err) ? "dead" : "failed" };
+  }
+}
 
 /** Who keeps the reader's marks in step with notes (the marks store). */
 type MarkBlocksListener = (noteId: number, change: { deleted: string[]; revived: boolean } | null) => void;
@@ -1029,6 +1084,22 @@ export const useNotesStore = create<NotesStore>()(
           await exit?.(res);
           await reload(noteId);
           return res;
+        },
+
+        linkTargets: {},
+        resolveLinkTarget: (kind, id) => {
+          const key = linkTargetKey(kind, id);
+          const known = get().linkTargets[key];
+          if (known && known.status !== "failed") return Promise.resolve();
+          const inflight = linkRequests.get(key);
+          if (inflight) return inflight;
+          const req: Promise<void> = lookUpLinkTarget(kind, id)
+            .then((info) => {
+              set((s) => ({ linkTargets: { ...s.linkTargets, [key]: info } }));
+            })
+            .finally(() => linkRequests.delete(key));
+          linkRequests.set(key, req);
+          return req;
         },
 
         colorNames: {},

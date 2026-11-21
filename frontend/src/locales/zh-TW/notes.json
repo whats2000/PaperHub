@@ -84,6 +84,25 @@
     "sections": "這篇論文的章節",
     "papers": "文獻庫中的論文"
   },
+  "link": {
+    "open": "開啟",
+    "openNamed": "開啟 {{name}}",
+    "edit": "編輯顯示文字",
+    "text": "顯示文字",
+    "keys": "Enter：完成 · Esc · 留空：使用目標名稱",
+    "untitled": "未命名",
+    "empty": "這裡還沒有內容",
+    "noteGone": "這則筆記已刪除",
+    "headingGone": "這個標題已刪除",
+    "paperGone": "這篇論文已不在你的文獻庫中",
+    "kind": {
+      "paper": "論文",
+      "paperNote": "論文筆記",
+      "chatNote": "對話筆記",
+      "ideaNote": "點子筆記",
+      "note": "筆記"
+    }
+  },
   "draft": {
     "notSaved": "未儲存",
     "hint": "只保留在這個畫面。編輯後會再試一次。",

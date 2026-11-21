@@ -3,7 +3,7 @@
 import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { prefersReducedMotion } from "@/lib/motion";
+import { REVEAL_GIVE_UP_MS, revealBlock, unfoldInNote } from "@/lib/notes/reveal";
 import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
@@ -23,8 +23,10 @@ interface Props {
 
 type Target = { kind: "paper" | "session"; id: number };
 
-/** How long "Open in notes" waits for its note and block to show. */
-const REVEAL_GIVE_UP_MS = 5000;
+/** A chat's note request shows only while that chat is on screen. */
+function requestShowsHere(request: { kind: string; id: number }, backendSessionId: number | null): boolean {
+  return request.kind !== "session" || request.id === backendSessionId;
+}
 
 export function NotesPane({ onClose }: Props) {
   const { t } = useTranslation("notes");
@@ -53,7 +55,9 @@ export function NotesPane({ onClose }: Props) {
   const [seenRequest, setSeenRequest] = useState(0);
   if (request && request.seq !== seenRequest) {
     setSeenRequest(request.seq);
-    if (request.kind === "session") setChosen("chat");
+    if (request.kind === "session") {
+      if (requestShowsHere(request, backendSessionId)) setChosen("chat");
+    }
     else if (request.kind === "paper") setChosen("paper");
   }
   const tab: NoteTab = paperId === null ? "chat" : session === null ? "paper" : chosen;
@@ -129,8 +133,10 @@ export function NotesPane({ onClose }: Props) {
   // ... and its changed block is brought into view once the note shows.
   useEffect(() => {
     if (!request || !panel) return;
-    // An idea's note has no tab here: the pane just opens.
-    if (request.blockId === null || request.kind === "idea") {
+    // An idea's note has no tab here: the pane just opens. A chat's note
+    // shows only for the chat on screen (a link to another chat switches
+    // chats first).
+    if (request.blockId === null || request.kind === "idea" || !requestShowsHere(request, backendSessionId)) {
       consumeRequest(request.seq);
       return;
     }
@@ -138,31 +144,13 @@ export function NotesPane({ onClose }: Props) {
     // appears) drops the request after a while.
     const giveUp = setTimeout(() => consumeRequest(request.seq), REVEAL_GIVE_UP_MS);
     if (noteId !== request.noteId) return () => clearTimeout(giveUp);
-    const selector = `.bn-block-outer[data-id="${CSS.escape(request.blockId)}"]`;
-    const reveal = (): boolean => {
-      const el = panel.querySelector<HTMLElement>(selector);
-      if (!el) return false;
-      el.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
-      el.setAttribute("data-flash", "");
-      // Outlives this effect (consuming the request re-runs it).
-      setTimeout(() => el.removeAttribute("data-flash"), 1600);
-      consumeRequest(request.seq);
-      return true;
-    };
-    if (reveal()) {
-      clearTimeout(giveUp);
-      return;
-    }
-    // The editor mounts after the note loads: wait for the block.
-    const observer = new MutationObserver(() => {
-      if (reveal()) observer.disconnect();
+    clearTimeout(giveUp);
+    const ctrl = new AbortController();
+    void revealBlock(panel, request.blockId, { unfold: unfoldInNote(noteId), signal: ctrl.signal }).then(() => {
+      if (!ctrl.signal.aborted) consumeRequest(request.seq);
     });
-    observer.observe(panel, { childList: true, subtree: true });
-    return () => {
-      observer.disconnect();
-      clearTimeout(giveUp);
-    };
-  }, [request, panel, noteId, consumeRequest]);
+    return () => ctrl.abort();
+  }, [request, panel, noteId, backendSessionId, consumeRequest]);
 
   const sharedBy = useNotesStore((s) => (noteId === null ? null : (s.notes[noteId]?.sharedBy ?? null)));
   const { onExport, docxReason } = useNoteExport(noteId);

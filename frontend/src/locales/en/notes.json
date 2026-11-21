@@ -84,6 +84,25 @@
     "sections": "Sections of this paper",
     "papers": "Papers in your library"
   },
+  "link": {
+    "open": "Open",
+    "openNamed": "Open {{name}}",
+    "edit": "Edit display text",
+    "text": "Display text",
+    "keys": "Enter: done · Esc · empty: the target's name",
+    "untitled": "Untitled",
+    "empty": "Nothing written here yet",
+    "noteGone": "This note was deleted",
+    "headingGone": "This heading was deleted",
+    "paperGone": "This paper is no longer in your library",
+    "kind": {
+      "paper": "Paper",
+      "paperNote": "Paper note",
+      "chatNote": "Chat note",
+      "ideaNote": "Idea note",
+      "note": "Note"
+    }
+  },
   "draft": {
     "notSaved": "Not saved",
     "hint": "Kept on this screen only. Edit it to try again.",

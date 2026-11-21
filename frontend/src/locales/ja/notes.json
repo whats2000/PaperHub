@@ -84,6 +84,25 @@
     "sections": "この論文のセクション",
     "papers": "ライブラリの論文"
   },
+  "link": {
+    "open": "開く",
+    "openNamed": "{{name}} を開く",
+    "edit": "表示テキストを編集",
+    "text": "表示テキスト",
+    "keys": "Enter：完了 · Esc · 空欄：リンク先の名前",
+    "untitled": "無題",
+    "empty": "まだ何も書かれていません",
+    "noteGone": "このノートは削除されました",
+    "headingGone": "この見出しは削除されました",
+    "paperGone": "この論文はライブラリにありません",
+    "kind": {
+      "paper": "論文",
+      "paperNote": "論文ノート",
+      "chatNote": "チャットノート",
+      "ideaNote": "アイデアノート",
+      "note": "ノート"
+    }
+  },
   "draft": {
     "notSaved": "未保存",
     "hint": "この画面にだけ残っています。編集すると再試行します。",

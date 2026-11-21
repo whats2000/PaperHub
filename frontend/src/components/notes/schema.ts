@@ -24,6 +24,7 @@ import { inlineMath } from "./blocks/InlineMath";
 import { markCite } from "./blocks/MarkCite";
 import { mathBlock } from "./blocks/MathBlock";
 import { mentionInline } from "./blocks/MentionChip";
+import { noteLink } from "./blocks/NoteLink";
 import { paperEquationBlock } from "./blocks/PaperEquationBlock";
 import { paperFigureBlock } from "./blocks/PaperFigureBlock";
 import { paperQuoteBlock } from "./blocks/PaperQuoteBlock";
@@ -61,7 +62,7 @@ export const noteSchema = BlockNoteSchema.create({
     paperEquation: paperEquationBlock(),
     paperRegion: paperRegionBlock(),
   },
-  inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionInline, inlineMath, markCite },
+  inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionInline, inlineMath, markCite, noteLink },
   styleSpecs: { ...defaultStyleSpecs, hidden: hiddenStyle, comment: commentStyle },
 });
 

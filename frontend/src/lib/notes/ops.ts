@@ -2,6 +2,18 @@
  * of ops, and a block's plain text (the backend's `block_text` rule). */
 import type { NoteBlock, NoteOp } from "@/types/notes";
 
+/** A run's own text (the backend's `_runs_text`): text, an inline
+ * equation's LaTeX, an inline citation's alias, a `[[` link's label or
+ * else its target's saved name. */
+function nodeText(r: { type?: unknown; text?: unknown; props?: Record<string, unknown> }): string {
+  if (typeof r.text === "string") return r.text;
+  const p = r.props ?? {};
+  if (r.type === "inlineMath") return propText(p.latex);
+  if (r.type === "markCite") return propText(p.text);
+  if (r.type === "noteLink") return propText(p.label) || propText(p.name);
+  return "";
+}
+
 function runsText(content: unknown): string {
   if (content === null || content === undefined) return "";
   if (typeof content === "string") return content;
@@ -9,8 +21,8 @@ function runsText(content: unknown): string {
   return content
     .map((run: unknown) => {
       if (!run || typeof run !== "object") return "";
-      const r = run as { text?: unknown; content?: unknown };
-      return (typeof r.text === "string" ? r.text : "") + (r.content !== undefined ? runsText(r.content) : "");
+      const r = run as { type?: unknown; text?: unknown; props?: Record<string, unknown>; content?: unknown };
+      return nodeText(r) + (r.content !== undefined && r.content !== null ? runsText(r.content) : "");
     })
     .join("");
 }

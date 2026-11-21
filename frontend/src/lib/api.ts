@@ -1296,6 +1296,46 @@ export async function getNoteBlockPlace(
   return apiFetch(`/notes/blocks/${encodeURIComponent(blockId)}`);
 }
 
+/** A note a `[[` link can point at (its display title and target). */
+export interface NoteSearchHit {
+  note_id: number;
+  kind: "paper" | "session" | "idea";
+  target_id: number;
+  title: string;
+}
+
+/** A heading in some live note (a `[[##` link). */
+export interface NoteHeadingHit {
+  note_id: number;
+  note_title: string;
+  block_id: string;
+  text: string;
+  level: number;
+}
+
+/** A heading or paper section of a note, in document order. */
+export interface NoteOutlineItem {
+  block_id: string;
+  type: "heading" | "section";
+  text: string;
+  level: number;
+}
+
+/** Live notes whose display title contains `q` (the `[[` picker). */
+export async function searchNotes(q: string, limit = 20): Promise<NoteSearchHit[]> {
+  return apiFetch<NoteSearchHit[]>(`/notes/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+}
+
+/** Live headings whose text contains `q`, across notes. */
+export async function searchNoteHeadings(q: string, limit = 20): Promise<NoteHeadingHit[]> {
+  return apiFetch<NoteHeadingHit[]>(`/notes/headings/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+}
+
+/** A live note's headings and sections (404 once the note is deleted). */
+export async function getNoteOutline(noteId: number): Promise<NoteOutlineItem[]> {
+  return apiFetch<NoteOutlineItem[]>(`/notes/${noteId}/outline`);
+}
+
 /** One burst of block ops. Conflicts come back in `rejected`, never a 409. */
 export async function postNoteOps(noteId: number, body: NoteOpsBody): Promise<ApplyResult> {
   return apiFetch<ApplyResult>(`/notes/${noteId}/ops`, {

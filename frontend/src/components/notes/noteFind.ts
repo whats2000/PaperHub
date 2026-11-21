@@ -3,7 +3,8 @@
  *
  * Matching is case-insensitive over each text block's words. An inline node
  * counts as one unit (an inline equation by its LaTeX, a mention by its
- * label, an inline citation by its words): a match touching it covers the
+ * label, an inline citation by its words, a `[[` link by its display text
+ * or, without one, its target's saved name): a match touching it covers the
  * whole node. A paper reference block matches by its quote and is one unit
  * too. Matches never cross blocks.
  */
@@ -57,6 +58,8 @@ function inlineText(node: PMNode, quotes: Map<string, string>): string {
       return str(a.label);
     case "markCite":
       return str(a.text) || citeDefaultText(quotes.get(str(a.markId)) ?? "");
+    case "noteLink":
+      return str(a.label) || str(a.name);
     default:
       return "";
   }

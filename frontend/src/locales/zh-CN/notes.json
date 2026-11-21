@@ -84,6 +84,25 @@
     "sections": "这篇论文的章节",
     "papers": "文献库中的论文"
   },
+  "link": {
+    "open": "打开",
+    "openNamed": "打开 {{name}}",
+    "edit": "编辑显示文字",
+    "text": "显示文字",
+    "keys": "Enter：完成 · Esc · 留空：使用目标名称",
+    "untitled": "未命名",
+    "empty": "这里还没有内容",
+    "noteGone": "这条笔记已删除",
+    "headingGone": "这个标题已删除",
+    "paperGone": "这篇论文已不在你的文献库中",
+    "kind": {
+      "paper": "论文",
+      "paperNote": "论文笔记",
+      "chatNote": "对话笔记",
+      "ideaNote": "想法笔记",
+      "note": "笔记"
+    }
+  },
   "draft": {
     "notSaved": "未保存",
     "hint": "只保留在这个界面。编辑后会再试一次。",
