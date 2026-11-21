@@ -1114,7 +1114,13 @@ export const useNotesStore = create<NotesStore>()(
           if (inflight) return inflight;
           const req: Promise<void> = lookUpLinkTarget(kind, id)
             .then((info) => {
-              set((s) => ({ linkTargets: { ...s.linkTargets, [key]: info } }));
+              // A re-check lost in transit says nothing new: what was
+              // known stays (only a 404 makes a known target dead).
+              set((s) =>
+                info.status === "failed" && s.linkTargets[key]?.status === "ok"
+                  ? s
+                  : { linkTargets: { ...s.linkTargets, [key]: info } },
+              );
             })
             .finally(() => linkRequests.delete(key));
           linkRequests.set(key, req);

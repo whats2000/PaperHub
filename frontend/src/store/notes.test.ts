@@ -5,7 +5,7 @@ import { waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 
 import { API_BASE_URL } from "@/lib/api";
-import { CARET_GIVE_UP_MS, clearPendingNoteOps, pendingNoteOps, useNotesStore } from "@/store/notes";
+import { CARET_GIVE_UP_MS, clearPendingNoteOps, pendingNoteOps, resetLinkTargets, useNotesStore } from "@/store/notes";
 import type { ApplyResult, NoteBlock, NoteOpsBody } from "@/types/notes";
 
 const { toastFn } = vi.hoisted(() => ({ toastFn: vi.fn() }));
@@ -900,5 +900,26 @@ describe("caretAfter", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("resolveLinkTarget", () => {
+  it("keeps a known target when a stale re-check fails in transit", async () => {
+    resetLinkTargets();
+    const known = { status: "ok" as const, checkedAt: Date.now() - 61_000, name: "RoboTTT", blocks: [] };
+    useNotesStore.setState({ linkTargets: { "note:12": known } });
+    server.use(http.get(`${API_BASE_URL}/notes/12`, () => HttpResponse.error()));
+    await useNotesStore.getState().resolveLinkTarget("note", 12, { maxAgeMs: 60_000 });
+    expect(useNotesStore.getState().linkTargets["note:12"]).toEqual(known);
+  });
+
+  it("still marks a stale target dead when the re-check finds it deleted", async () => {
+    resetLinkTargets();
+    useNotesStore.setState({
+      linkTargets: { "note:12": { status: "ok", checkedAt: Date.now() - 61_000, name: "RoboTTT" } },
+    });
+    server.use(http.get(`${API_BASE_URL}/notes/12`, () => new HttpResponse(null, { status: 404 })));
+    await useNotesStore.getState().resolveLinkTarget("note", 12, { maxAgeMs: 60_000 });
+    expect(useNotesStore.getState().linkTargets["note:12"]?.status).toBe("dead");
   });
 });
