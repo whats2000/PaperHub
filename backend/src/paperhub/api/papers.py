@@ -487,6 +487,51 @@ async def list_paper_sections(paper_content_id: int) -> list[str]:
     return [str(r[0]) for r in rows]
 
 
+class PaperInfo(BaseModel):
+    id: int
+    title: str
+
+
+@router.get("/content/{paper_content_id}/info", response_model=PaperInfo)
+async def paper_info(paper_content_id: int) -> PaperInfo:
+    """A library paper's current title (a note's ``[[`` link follows it);
+    404 once the paper is gone from the library."""
+    async with (
+        open_db(load_settings().db_path) as conn,
+        conn.execute(
+            "SELECT title FROM paper_content WHERE id = ?", (paper_content_id,)
+        ) as cur,
+    ):
+        row = await cur.fetchone()
+    if row is None:
+        raise HTTPException(404, f"paper_content {paper_content_id} not found")
+    return PaperInfo(id=paper_content_id, title=str(row[0] or ""))
+
+
+class SectionRange(BaseModel):
+    first_chunk_id: int
+    last_chunk_id: int
+
+
+@router.get("/content/{paper_content_id}/section-range", response_model=SectionRange)
+async def section_range(paper_content_id: int, section: str) -> SectionRange:
+    """The first and last chunk of a section (named as ``/sections`` lists
+    them), in document order: the reader opens a ``[[`` / ``@`` link to
+    the section as a citation of that range. 404 for an unknown section."""
+    async with (
+        open_db(load_settings().db_path) as conn,
+        conn.execute(
+            "SELECT id FROM chunks WHERE paper_content_id = ? AND section = ? "
+            "ORDER BY char_start, id",
+            (paper_content_id, section),
+        ) as cur,
+    ):
+        ids = [int(r[0]) for r in await cur.fetchall()]
+    if not ids:
+        raise HTTPException(404, f"section {section!r} not found")
+    return SectionRange(first_chunk_id=ids[0], last_chunk_id=ids[-1])
+
+
 class ChunkAnchor(BaseModel):
     id: int
     dom_id: str
