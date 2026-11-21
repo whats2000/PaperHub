@@ -60,7 +60,25 @@
     "inlineEquation": "行內公式",
     "inlineEquationHint": "句子中的 LaTeX · $x$",
     "turnIntoEquation": "區塊公式 · 轉換",
-    "turnIntoEquationHint": "這一行的文字變成 LaTeX"
+    "turnIntoEquationHint": "這一行的文字變成 LaTeX",
+    "table": "表格",
+    "tableHint": "3 × 3，第一列為標題列 · 也可直接貼上表格"
+  },
+  "table": {
+    "rowOptions": "列選項",
+    "columnOptions": "欄選項",
+    "options": "表格選項",
+    "insertAbove": "在上方插入",
+    "insertBelow": "在下方插入",
+    "insertLeft": "在左側插入",
+    "insertRight": "在右側插入",
+    "alignLeft": "靠左對齊",
+    "alignCenter": "置中對齊",
+    "alignRight": "靠右對齊",
+    "deleteRow": "刪除列",
+    "deleteColumn": "刪除欄",
+    "headerRow": "標題列",
+    "headerColumn": "標題欄"
   },
   "mention": {
     "sections": "這篇論文的章節",
@@ -147,7 +165,8 @@
       "plusSpace": "+ 空白鍵",
       "plusEnter": "+ Enter",
       "onEmptyItem": "在空白項目上",
-      "atStart": "在開頭"
+      "atStart": "在開頭",
+      "inLastCell": "在最後一格"
     },
     "left": {
       "select": "選取文字",
@@ -161,7 +180,8 @@
       "highlighter": "螢光筆",
       "box": "框選",
       "clickMark": "點選標記",
-      "inlineCite": "標記一小段"
+      "inlineCite": "標記一小段",
+      "tableHandles": "游標移到表格上"
     },
     "rows": {
       "bold": "粗體",
@@ -209,7 +229,10 @@
       "inlineMath": "行內公式（LaTeX），點一下即可編輯",
       "mathDone": "在公式中：完成（Shift+Enter 換行）",
       "find": "在筆記中尋找（Enter：下一個，Shift+Enter：上一個）",
-      "inlineCite": "以行內引用插在游標處；滑過引用可切換形式"
+      "inlineCite": "以行內引用插在游標處；滑過引用可切換形式",
+      "tableTab": "在表格中：下一格／上一格",
+      "tableNewRow": "在表格中：在下方新增一列",
+      "tableHandles": "⠿ 插入、對齊、刪除或拖曳 · ⋯ 標題列／欄 · + 新增"
     }
   },
   "code": {

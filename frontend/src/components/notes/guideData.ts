@@ -1,7 +1,7 @@
 /** The rows of the shortcuts guide, in the sections of the approved prototype. */
 
 export type SectionId = "marks" | "lineStart" | "anywhere" | "lists" | "moving" | "keys" | "pane" | "paper";
-export type Suffix = "plusSpace" | "plusEnter" | "onEmptyItem" | "atStart";
+export type Suffix = "plusSpace" | "plusEnter" | "onEmptyItem" | "atStart" | "inLastCell";
 export type Sample = "bold" | "italic" | "underline" | "strike" | "code" | "hidden";
 
 export interface Row {
@@ -56,6 +56,11 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
       { id: "at", keys: ["@"], right: "Link a paper or section" },
       { id: "select", plainLeft: "Select text", right: "Toolbar: bold … hide, link, comment" },
       { id: "hover", plainLeft: "Hover a block", right: "+ add · ⋮⋮ drag or menu" },
+      {
+        id: "tableHandles",
+        plainLeft: "Hover a table",
+        right: "⠿ insert, align, delete or drag · ⋯ header row / column · + add",
+      },
     ],
   },
   {
@@ -76,6 +81,8 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
       { id: "backspace", keys: ["Backspace"], suffix: "atStart", right: "Join with the line above" },
       { id: "arrows", keys: ["↑", "↓"], right: "Move between blocks, incl. references" },
       { id: "altMove", keys: ["Alt+↑", "Alt+↓"], right: "Move the block (or the selected blocks) up or down" },
+      { id: "tableTab", keys: ["Tab", "Shift+Tab"], right: "In a table: next / previous cell" },
+      { id: "tableNewRow", keys: ["Tab"], suffix: "inLastCell", right: "In a table: a new row below" },
       { id: "clickRef", plainLeft: "Click a reference, heading or divider, then Enter", right: "New line below it" },
     ],
   },
@@ -125,4 +132,5 @@ export const SUFFIX_EN: Record<Suffix, string> = {
   plusEnter: "+ Enter",
   onEmptyItem: "on an empty item",
   atStart: "at the start",
+  inLastCell: "in the last cell",
 };

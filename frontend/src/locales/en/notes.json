@@ -60,7 +60,25 @@
     "inlineEquation": "Inline equation",
     "inlineEquationHint": "LaTeX inside the sentence · $x$",
     "turnIntoEquation": "Block equation · Turn into",
-    "turnIntoEquationHint": "This line's text becomes the LaTeX"
+    "turnIntoEquationHint": "This line's text becomes the LaTeX",
+    "table": "Table",
+    "tableHint": "3 × 3, first row a header · paste one to bring it in"
+  },
+  "table": {
+    "rowOptions": "Row options",
+    "columnOptions": "Column options",
+    "options": "Table options",
+    "insertAbove": "Insert above",
+    "insertBelow": "Insert below",
+    "insertLeft": "Insert left",
+    "insertRight": "Insert right",
+    "alignLeft": "Align left",
+    "alignCenter": "Align centre",
+    "alignRight": "Align right",
+    "deleteRow": "Delete row",
+    "deleteColumn": "Delete column",
+    "headerRow": "Header row",
+    "headerColumn": "Header column"
   },
   "mention": {
     "sections": "Sections of this paper",
@@ -147,7 +165,8 @@
       "plusSpace": "+ space",
       "plusEnter": "+ Enter",
       "onEmptyItem": "on an empty item",
-      "atStart": "at the start"
+      "atStart": "at the start",
+      "inLastCell": "in the last cell"
     },
     "left": {
       "select": "Select text",
@@ -161,7 +180,8 @@
       "highlighter": "Highlighter",
       "box": "Box",
       "clickMark": "Click a mark",
-      "inlineCite": "Mark a short passage"
+      "inlineCite": "Mark a short passage",
+      "tableHandles": "Hover a table"
     },
     "rows": {
       "bold": "bold",
@@ -209,7 +229,10 @@
       "inlineMath": "Inline equation (LaTeX); click it to edit",
       "mathDone": "In an equation: done (Shift+Enter: new line)",
       "find": "Find in the note (Enter: next, Shift+Enter: previous)",
-      "inlineCite": "It lands inline at the caret; hover a citation to switch form"
+      "inlineCite": "It lands inline at the caret; hover a citation to switch form",
+      "tableTab": "In a table: next / previous cell",
+      "tableNewRow": "In a table: a new row below",
+      "tableHandles": "⠿ insert, align, delete or drag · ⋯ header row / column · + add"
     }
   },
   "code": {

@@ -60,7 +60,25 @@
     "inlineEquation": "インライン数式",
     "inlineEquationHint": "文中の LaTeX · $x$",
     "turnIntoEquation": "ブロック数式 · 変換",
-    "turnIntoEquationHint": "この行のテキストが LaTeX になる"
+    "turnIntoEquationHint": "この行のテキストが LaTeX になる",
+    "table": "表",
+    "tableHint": "3 × 3、1 行目は見出し · 表を貼り付けても作れます"
+  },
+  "table": {
+    "rowOptions": "行のオプション",
+    "columnOptions": "列のオプション",
+    "options": "表のオプション",
+    "insertAbove": "上に挿入",
+    "insertBelow": "下に挿入",
+    "insertLeft": "左に挿入",
+    "insertRight": "右に挿入",
+    "alignLeft": "左揃え",
+    "alignCenter": "中央揃え",
+    "alignRight": "右揃え",
+    "deleteRow": "行を削除",
+    "deleteColumn": "列を削除",
+    "headerRow": "見出し行",
+    "headerColumn": "見出し列"
   },
   "mention": {
     "sections": "この論文のセクション",
@@ -147,7 +165,8 @@
       "plusSpace": "+ スペース",
       "plusEnter": "+ Enter",
       "onEmptyItem": "空の項目で",
-      "atStart": "先頭で"
+      "atStart": "先頭で",
+      "inLastCell": "最後のセルで"
     },
     "left": {
       "select": "文字を選択",
@@ -161,7 +180,8 @@
       "highlighter": "蛍光ペン",
       "box": "ボックス",
       "clickMark": "マークをクリック",
-      "inlineCite": "短い箇所をマーク"
+      "inlineCite": "短い箇所をマーク",
+      "tableHandles": "表にカーソルを合わせる"
     },
     "rows": {
       "bold": "太字",
@@ -209,7 +229,10 @@
       "inlineMath": "インライン数式（LaTeX）。クリックで編集",
       "mathDone": "数式内：完了（Shift+Enter で改行）",
       "find": "ノート内を検索（Enter：次へ、Shift+Enter：前へ）",
-      "inlineCite": "カーソル位置にインライン引用として入る。引用にホバーで形式を切替"
+      "inlineCite": "カーソル位置にインライン引用として入る。引用にホバーで形式を切替",
+      "tableTab": "表の中：次／前のセル",
+      "tableNewRow": "表の中：下に行を追加",
+      "tableHandles": "⠿ 挿入・揃え・削除・ドラッグ · ⋯ 見出し行／列 · + 追加"
     }
   },
   "code": {
