@@ -126,8 +126,34 @@ def test_math_pipes_in_text_and_urls() -> None:
         [_math(r"\text{a|b} |x|")], [_math(r"\href{http://a.b/c}{u} http://x.y")]]]))
     rows = _cells(md)
     assert [len(r) for r in rows] == [2, 2]
-    assert rows[1][0] == r"$\text{a\textbar{}b} \vert{}x\vert{}$"
+    assert rows[1][0] == r"$\text{a}\vert{}\text{b} \vert{}x\vert{}$"
     assert rows[1][1] == r"$\href{http://a.b/c}{u} http:/{}/x.y$"
+
+
+def test_pipe_in_other_text_commands_and_nested_braces() -> None:
+    md = _md(_table([["h", "h2"], [
+        [_math(r"\textbf{a|b}")], [_math(r"\text{a{b|c}d} \\ |")]]]))
+    rows = _cells(md)
+    assert [len(r) for r in rows] == [2, 2]
+    assert rows[1][0] == r"$\textbf{a}\vert{}\textbf{b}$"
+    assert rows[1][1] == r"$\text{a{b}}\vert{}\text{{c}d} \\ \vert{}$"
+
+
+@pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not installed")
+def test_pandoc_reads_text_mode_pipe_as_math_without_warning() -> None:
+    import subprocess
+
+    from paperhub.notes.pandoc import _READER
+    md = _md(_table([["h", "h2"], [[_math(r"\text{a|b}")], "z"]]))
+    out = subprocess.run(["pandoc", "--from", _READER, "--to", "native"],
+                         input=md, capture_output=True, text=True,
+                         encoding="utf-8", check=True)
+    assert out.stdout.count("Math InlineMath") == 1
+    assert "Could not convert" not in out.stderr
+    docx = subprocess.run(["pandoc", "--from", _READER, "--to", "docx",
+                           "--output", "-"], input=md.encode("utf-8"),
+                          capture_output=True, check=True)
+    assert b"Could not convert" not in docx.stderr
 
 
 def test_code_span_with_backslash_pipe_keeps_its_spaces() -> None:

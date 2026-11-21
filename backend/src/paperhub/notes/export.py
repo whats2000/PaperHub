@@ -395,17 +395,58 @@ def _code_span(code: str) -> str:
 # A held code span's placeholder: private-use delimiters (which
 # ``_user_text`` drops from every user string, so note text can never hold
 # one) around a per-export random nonce and the span's index.
-# A pipe in math: ``\|`` or ``|``. A ``\\`` and a ``\text{…}`` group are
-# matched first: the first is kept, a pipe in the second is text.
-_MATH_BAR = re.compile(r"\\text\{[^{}]*\}|\\\\|\\\||\|")
+# A pipe in math: ``\|`` or ``|``. A text-mode command (``\text{``) is
+# matched first, and a ``\\`` kept.
+_MATH_BAR = re.compile(
+    r"(\\(?:text|textbf|textit|textrm|textsf|texttt|mbox)\{)|\\\\|\\\||\|")
 
 
-def _math_bar(m: re.Match[str]) -> str:
-    t = m[0]
-    if t.startswith("\\text"):
-        return t.replace("|", "\\textbar{}")
-    # ``{}`` ends the command: math may not end in a space before ``$``.
-    return {"\\\\": t, "\\|": "\\Vert{}"}.get(t, "\\vert{}")
+def _text_group(latex: str, start: int, opener: str) -> tuple[str, int]:
+    r"""The text-mode group opened at ``start`` (just after its ``{``) with
+    each pipe written as ``}\vert{}<opener>`` (text mode has no pipe that
+    texmath reads), and where it ends. Braces nested in the group are
+    closed and reopened around the pipe."""
+    out: list[str] = []
+    depth = 1
+    i = start
+    while i < len(latex) and depth:
+        c = latex[i]
+        if c == "\\" and i + 1 < len(latex):
+            out.append(latex[i:i + 2])
+            i += 2
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        elif c == "|":
+            out.append("}" * depth + "\\vert{}" + opener + "{" * (depth - 1))
+            i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out), i
+
+
+def _math_bars(latex: str) -> str:
+    r"""``latex`` with every pipe a command, so no table reader splits a
+    cell on it: ``\vert{}`` / ``\Vert{}`` (``{}`` ends the command: math
+    may not end in a space before ``$``)."""
+    out: list[str] = []
+    pos = 0
+    while True:
+        m = _MATH_BAR.search(latex, pos)
+        if m is None:
+            out.append(latex[pos:])
+            return "".join(out)
+        out.append(latex[pos:m.start()])
+        t = m[0]
+        pos = m.end()
+        if m[1]:
+            body, pos = _text_group(latex, pos, t)
+            out.append(t + body)
+        else:
+            out.append({"\\\\": t, "\\|": "\\Vert{}"}.get(t, "\\vert{}"))
 
 
 # A URL argument of ``\href`` / ``\url``: left as written.
@@ -679,7 +720,7 @@ class _Writer:
                     self._held[token] = span.replace("|", "\\|")
             elif span.startswith("$"):
                 span = re.sub(r"\s*\n\s*", " ", span)
-                self._held[token] = _MATH_BAR.sub(_math_bar, span)
+                self._held[token] = _math_bars(span)
 
     def release(self, text: str) -> str:
         """``text`` with its held code spans put back, each at the one place
