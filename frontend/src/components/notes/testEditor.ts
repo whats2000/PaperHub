@@ -17,12 +17,18 @@ export function cleanupEditors() {
   mounted.splice(0).forEach((el) => el.remove());
 }
 
-/** An editor with the notes schema and the inline marks, caret in the first line. */
-export function makeEditor(extra: unknown[] = [], initialContent?: unknown[]): AnyEditor {
+/** An editor with the notes schema and the inline marks, caret in the first
+ * line (`options`: more editor options, e.g. a `pasteHandler`). */
+export function makeEditor(
+  extra: unknown[] = [],
+  initialContent?: unknown[],
+  options: Record<string, unknown> = {},
+): AnyEditor {
   const editor = BlockNoteEditor.create({
     schema: noteSchema,
     extensions: [inlineMarks, codeFence, ...extra] as never,
     initialContent: initialContent as never,
+    ...options,
   });
   const el = document.createElement("div");
   document.body.appendChild(el);

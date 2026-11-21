@@ -549,3 +549,52 @@
 [data-pen] .textLayer span::selection {
     background: color-mix(in srgb, var(--pen) 45%, transparent);
 }
+
+/* Notes: tables (tableMotion.ts, NoteTableHandles.tsx). A wide table scrolls
+   sideways in its own box (BlockNote's .tableWrapper), fading on the side it
+   runs past; the fade's width eases in and out. Header cells are tinted and
+   bold (never yellow: yellow means a citation). */
+@property --note-table-fade-l {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+}
+@property --note-table-fade-r {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+}
+.paperhub-notes .tableWrapper {
+    --note-table-fade-l: 0px;
+    --note-table-fade-r: 0px;
+    mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        #000 var(--note-table-fade-l),
+        #000 calc(100% - var(--note-table-fade-r)),
+        transparent 100%
+    );
+    transition: --note-table-fade-l 200ms ease-out, --note-table-fade-r 200ms ease-out;
+}
+.paperhub-notes .tableWrapper[data-clip-left] {
+    --note-table-fade-l: 28px;
+}
+.paperhub-notes .tableWrapper[data-clip-right] {
+    --note-table-fade-r: 28px;
+}
+.paperhub-notes [data-content-type="table"] th,
+.paperhub-notes [data-content-type="table"] td {
+    border-color: var(--border);
+}
+.paperhub-notes [data-content-type="table"] th {
+    background: color-mix(in oklab, var(--muted-foreground) 9%, transparent);
+    font-weight: 600;
+}
+/* The table's ⋯ sits with the grips, a touch apart from the column grip. */
+.note-table-more {
+    padding-inline: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+    .paperhub-notes .tableWrapper { transition: none; }
+    .bn-table-handle-menu { animation: none !important; }
+}

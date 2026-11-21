@@ -1,0 +1,337 @@
+/** Tables the Notion way, where BlockNote's own table falls short.
+ *
+ * - `/table` inserts a 3 × 3 table whose first row is a header
+ *   (`insertNoteTable`); BlockNote's inserts 3 × 2 with none.
+ * - Tab in the last cell adds a row (`tableKeys`); BlockNote's Tab stops there.
+ * - A pasted table keeps only what a GFM table can hold (`notePasteHandler`):
+ *   no cell colours, no merged cells, a header row.
+ */
+import { createExtension, getNodeById, insertOrUpdateBlockForSlashMenu } from "@blocknote/core";
+import { TextSelection } from "@tiptap/pm/state";
+import type { EditorView } from "@tiptap/pm/view";
+
+import type { TableCell, TableContent } from "@/types/notes";
+
+export type Alignment = "left" | "center" | "right";
+
+/** What these helpers use of a BlockNote editor. */
+interface TableEditor {
+  document: unknown[];
+  getTextCursorPosition: () => { block: { id: string; type: string; content?: unknown } };
+  updateBlock: (block: string, update: never) => unknown;
+  _tiptapEditor: { view: EditorView };
+}
+
+type FullCell = { type: "tableCell"; props: Record<string, unknown>; content: Record<string, unknown>[] | string };
+
+function asCell(cell: TableCell): FullCell {
+  if (typeof cell === "object" && !Array.isArray(cell) && cell.type === "tableCell") {
+    return { type: "tableCell", props: cell.props ?? {}, content: cell.content };
+  }
+  return { type: "tableCell", props: {}, content: cell as FullCell["content"] };
+}
+
+const emptyCell = (textAlignment?: unknown): FullCell => ({
+  type: "tableCell",
+  props: typeof textAlignment === "string" && textAlignment !== "left" ? { textAlignment } : {},
+  content: [],
+});
+
+/** A new table: `rows` × `cols` empty cells, the first row a header. */
+export function newTableContent(rows = 3, cols = 3): TableContent {
+  return {
+    type: "tableContent",
+    columnWidths: Array.from({ length: cols }, () => null),
+    headerRows: 1,
+    rows: Array.from({ length: rows }, () => ({ cells: Array.from({ length: cols }, () => emptyCell()) })),
+  };
+}
+
+/** `/table`: a 3 × 3 table with a header row, the caret in its first cell. */
+export function insertNoteTable(editor: unknown) {
+  insertOrUpdateBlockForSlashMenu(editor as never, { type: "table", content: newTableContent() } as never);
+}
+
+/** Run styles a table cell keeps: everything but colours. */
+function stripRuns<T>(content: T): T {
+  if (!Array.isArray(content)) return content;
+  return content.map((run: unknown) => {
+    if (!run || typeof run !== "object") return run;
+    const r = run as { styles?: Record<string, unknown>; content?: unknown };
+    let out = r as Record<string, unknown>;
+    if (r.styles && ("textColor" in r.styles || "backgroundColor" in r.styles)) {
+      const styles = { ...r.styles };
+      delete styles.textColor;
+      delete styles.backgroundColor;
+      out = { ...out, styles };
+    }
+    // A link holds its own runs.
+    if (Array.isArray(r.content)) out = { ...out, content: stripRuns(r.content) };
+    return out;
+  }) as T;
+}
+
+/** The cells of a table as a grid with no merged cells: a merged cell keeps
+ * its place and the places it covered get empty cells. Only `textAlignment`
+ * is kept of a cell's props; runs lose their colours. */
+function unmerge(content: TableContent): { rows: FullCell[][]; width: number } {
+  const grid: (FullCell | undefined)[][] = content.rows.map(() => []);
+  content.rows.forEach((row, r) => {
+    let c = 0;
+    for (const raw of row.cells) {
+      while (grid[r]![c]) c++;
+      const cell = asCell(raw);
+      const colspan = Math.max(1, Number(cell.props.colspan ?? 1) || 1);
+      const rowspan = Math.max(1, Number(cell.props.rowspan ?? 1) || 1);
+      const align = cell.props.textAlignment;
+      grid[r]![c] = {
+        type: "tableCell",
+        props: typeof align === "string" && align !== "left" ? { textAlignment: align } : {},
+        content: stripRuns(cell.content),
+      };
+      for (let dr = 0; dr < rowspan && r + dr < grid.length; dr++) {
+        for (let dc = 0; dc < colspan; dc++) {
+          if (dr || dc) grid[r + dr]![c + dc] = emptyCell();
+        }
+      }
+      c += colspan;
+    }
+  });
+  const width = Math.max(1, ...grid.map((r) => r.length));
+  return { rows: grid.map((r) => Array.from({ length: width }, (_, i) => r[i] ?? emptyCell())), width };
+}
+
+/** A pasted table as a GFM table can hold it: colours stripped, merged cells
+ * spread over empty ones (spans 1), and a header row when it had none. */
+export function cleanPastedTable(content: TableContent): TableContent {
+  const { rows, width } = unmerge(content);
+  const out: TableContent = {
+    type: "tableContent",
+    columnWidths: Array.from({ length: width }, (_, i) => content.columnWidths?.[i] ?? null),
+    headerRows: 1,
+    rows: rows.map((cells) => ({ cells: cells })),
+  };
+  if (content.headerCols) out.headerCols = 1;
+  return out;
+}
+
+/** True when a table holds something a GFM table cannot (colours, spans). */
+function needsCleaning(content: TableContent): boolean {
+  const colour = (v: unknown) => v !== undefined && v !== "default";
+  return content.rows.some((row) =>
+    row.cells.some((raw) => {
+      const { props, content: runs } = asCell(raw);
+      if (colour(props.backgroundColor) || colour(props.textColor)) return true;
+      if (Number(props.colspan ?? 1) > 1 || Number(props.rowspan ?? 1) > 1) return true;
+      return JSON.stringify(stripRuns(runs)) !== JSON.stringify(runs);
+    }),
+  );
+}
+
+function tables(blocks: unknown[], into: { id: string; content: TableContent }[] = []) {
+  for (const b of blocks as { id: string; type: string; content?: unknown; children?: unknown[] }[]) {
+    if (b.type === "table") into.push({ id: b.id, content: b.content as TableContent });
+    tables(b.children ?? [], into);
+  }
+  return into;
+}
+
+const ALIGN = new Set(["left", "center", "right"]);
+
+/** Column alignments of each GFM table in Markdown text (its delimiter rows). */
+function markdownAlignments(text: string): (Alignment | null)[][] {
+  const out: (Alignment | null)[][] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.includes("|") || !/^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line)) continue;
+    const cells = line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|");
+    out.push(
+      cells.map((c) => {
+        const t = c.trim();
+        const l = t.startsWith(":");
+        const r = t.endsWith(":");
+        return l && r ? "center" : r ? "right" : l ? "left" : null;
+      }),
+    );
+  }
+  return out;
+}
+
+/** Column alignments of each table in pasted HTML (`align` or
+ * `text-align` of its first row's cells; BlockNote drops `align`, and a
+ * Markdown table reaches it as HTML with `align`). */
+function htmlAlignments(html: string): (Alignment | null)[][] {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return [...doc.querySelectorAll("table")].map((table) => {
+    const row = table.querySelector("tr");
+    const out: (Alignment | null)[] = [];
+    for (const cell of row ? [...row.children] : []) {
+      const el = cell as HTMLElement;
+      const a = (el.getAttribute("align") || el.style.textAlign || "").toLowerCase();
+      const span = Math.max(1, Number(el.getAttribute("colspan") ?? 1) || 1);
+      for (let i = 0; i < span; i++) out.push(ALIGN.has(a) ? (a as Alignment) : null);
+    }
+    return out;
+  });
+}
+
+/** What a paste's tables were aligned as, one list per table: from the
+ * Markdown when BlockNote pastes it as Markdown, else from the HTML. */
+function pastedAlignments(event: unknown): (Alignment | null)[][] {
+  const data = (event as { clipboardData?: DataTransfer | null } | undefined)?.clipboardData;
+  if (!data) return [];
+  const types = [...(data.types ?? [])];
+  const md = types.includes("text/markdown") ? data.getData("text/markdown") : "";
+  if (md) return markdownAlignments(md);
+  const plain = types.includes("text/plain") ? data.getData("text/plain") : "";
+  const fromText = plain ? markdownAlignments(plain) : [];
+  if (fromText.length) return fromText;
+  const html = types.includes("text/html") ? data.getData("text/html") : "";
+  return html ? htmlAlignments(html) : [];
+}
+
+/** A table's columns given the pasted alignment where its cells have none. */
+function withAlignments(content: TableContent, aligns: (Alignment | null)[] | undefined): TableContent {
+  if (!aligns?.some((a) => a && a !== "left")) return content;
+  return {
+    ...content,
+    rows: content.rows.map((row) => ({
+      cells: row.cells.map((raw, i) => {
+        const want = aligns[i];
+        const cell = asCell(raw);
+        const have = cell.props.textAlignment;
+        if (!want || want === "left" || (have !== undefined && have !== "left")) return raw;
+        return { ...cell, props: { ...cell.props, textAlignment: want } };
+      }),
+    })),
+  };
+}
+
+/** The notes editor's paste: BlockNote's own (HTML, Markdown text, a GFM
+ * table as text), then a table it brought in is cleaned (`cleanPastedTable`)
+ * and given its columns' alignment (which BlockNote drops); cells pasted into
+ * a table already there only lose their colours and merges. */
+export function notePasteHandler(context: {
+  event?: unknown;
+  editor: unknown;
+  defaultPasteHandler: () => boolean | undefined;
+}): boolean | undefined {
+  const editor = context.editor as TableEditor;
+  const before = new Set(tables(editor.document).map((t) => t.id));
+  const aligns = pastedAlignments(context.event);
+  const handled = context.defaultPasteHandler();
+  let k = 0;
+  for (const t of tables(editor.document)) {
+    if (!before.has(t.id)) {
+      const content = cleanPastedTable(withAlignments(t.content, aligns[k++]));
+      editor.updateBlock(t.id, { type: "table", content } as never);
+    } else if (needsCleaning(t.content)) {
+      const { rows, width } = unmerge(t.content);
+      editor.updateBlock(t.id, {
+        type: "table",
+        content: {
+          ...t.content,
+          columnWidths: Array.from({ length: width }, (_, i) => t.content.columnWidths?.[i] ?? null),
+          rows: rows.map((cells) => ({ cells })),
+        },
+      } as never);
+    }
+  }
+  return handled;
+}
+
+/** The caret's cell: its row and column and the table's size, or null. */
+function caretCell(view: EditorView): { row: number; col: number; rows: number; cols: number } | null {
+  const { $from } = view.state.selection;
+  for (let d = $from.depth; d > 0; d--) {
+    if ($from.node(d).type.name !== "tableRow") continue;
+    const table = $from.node(d - 1);
+    return { row: $from.index(d - 1), col: $from.index(d), rows: table.childCount, cols: $from.node(d).childCount };
+  }
+  return null;
+}
+
+/** Tab in a table's last cell: a new row below (each cell keeping its
+ * column's alignment) and the caret in its first cell. False elsewhere. */
+export function addRowAfterLastCell(editor: unknown): boolean {
+  const e = editor as TableEditor;
+  const view = e._tiptapEditor.view;
+  if (!view.state.selection.empty) return false;
+  const at = caretCell(view);
+  if (!at || at.row !== at.rows - 1 || at.col !== at.cols - 1) return false;
+  const block = e.getTextCursorPosition().block;
+  if (block.type !== "table") return false;
+  const content = block.content as TableContent;
+  const last = content.rows[content.rows.length - 1]!;
+  const row = { cells: last.cells.map((c) => emptyCell(asCell(c).props.textAlignment)) };
+  e.updateBlock(block.id, { type: "table", content: { ...content, rows: [...content.rows, row] } } as never);
+  const info = getNodeById(block.id, view.state.doc);
+  if (!info) return true;
+  const table = info.node.firstChild!;
+  // Into the block container and the table, past every row but the new one,
+  // then into its row, its first cell and that cell's paragraph.
+  let pos = info.posBeforeNode + 2;
+  for (let i = 0; i < table.childCount - 1; i++) pos += table.child(i).nodeSize;
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos + 3)).scrollIntoView());
+  return true;
+}
+
+/** Sets the alignment of every cell of column `col` (GFM `:--` `:-:` `--:`). */
+export function setColumnAlignment(editor: unknown, blockId: string, col: number, align: Alignment) {
+  const e = editor as { getBlock: (id: string) => { content?: unknown } | undefined } & TableEditor;
+  const content = e.getBlock(blockId)?.content as TableContent | undefined;
+  if (!content) return;
+  const rows = content.rows.map((row) => ({
+    cells: row.cells.map((raw, i) => {
+      if (i !== col) return raw;
+      const cell = asCell(raw);
+      return { ...cell, props: { ...cell.props, textAlignment: align } };
+    }),
+  }));
+  e.updateBlock(blockId, { type: "table", content: { ...content, rows } } as never);
+}
+
+/** The alignment every cell of column `col` shares, or null when they differ. */
+export function columnAlignment(content: TableContent, col: number): Alignment | null {
+  const all = new Set(
+    content.rows.map((row) => {
+      const cell = row.cells[col];
+      const a = cell === undefined ? "left" : asCell(cell).props.textAlignment;
+      return typeof a === "string" ? a : "left";
+    }),
+  );
+  return all.size === 1 ? ([...all][0] as Alignment) : null;
+}
+
+/** Tab in the last cell adds a row (ahead of BlockNote's Tab, which stops
+ * there). Shift+Tab and Tab elsewhere are BlockNote's: the next / previous cell. */
+export const tableKeys = createExtension({
+  key: "tableKeys",
+  keyboardShortcuts: {
+    Tab: ({ editor }) => addRowAfterLastCell(editor),
+  },
+});
+
+/** Deletes row or column `index` of table `blockId`; the last one left takes
+ * the table with it. */
+export function deleteRowOrColumn(editor: unknown, blockId: string, orientation: "row" | "column", index: number) {
+  const e = editor as {
+    getBlock: (id: string) => { content?: unknown } | undefined;
+    removeBlocks: (ids: string[]) => unknown;
+  } & TableEditor;
+  const content = e.getBlock(blockId)?.content as TableContent | undefined;
+  if (!content) return;
+  const cols = content.rows[0]?.cells.length ?? 0;
+  if ((orientation === "row" ? content.rows.length : cols) <= 1) {
+    e.removeBlocks([blockId]);
+    return;
+  }
+  const next: TableContent =
+    orientation === "row"
+      ? { ...content, rows: content.rows.filter((_, i) => i !== index) }
+      : {
+          ...content,
+          columnWidths: content.columnWidths.filter((_, i) => i !== index),
+          rows: content.rows.map((row) => ({ cells: row.cells.filter((_, i) => i !== index) })),
+        };
+  e.updateBlock(blockId, { type: "table", content: next } as never);
+}

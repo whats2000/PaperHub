@@ -1,8 +1,9 @@
 /** The notes editor schema: BlockNote's text blocks plus PaperHub's.
  *
- * Only block types the notes API stores are in the schema (tables, files,
- * media and toggle lists are left out: an unknown type would fail a whole
- * burst of ops). Code blocks come from `@blocknote/code-block`.
+ * Only block types the notes API stores are in the schema (files, media and
+ * toggle lists are left out: an unknown type would fail a whole burst of
+ * ops). Tables are BlockNote's own (`tableKeys.ts` adds what Notion does).
+ * Code blocks come from `@blocknote/code-block`.
  */
 import {
   BlockNoteSchema,
@@ -36,6 +37,7 @@ const {
   numberedListItem,
   checkListItem,
   quote,
+  table,
 } = defaultBlockSpecs;
 
 export const noteSchema = BlockNoteSchema.create({
@@ -46,6 +48,7 @@ export const noteSchema = BlockNoteSchema.create({
     numberedListItem,
     checkListItem,
     quote,
+    table,
     divider: dividerBlock(),
     codeBlock: codeBlockWithCopy(),
     callout: calloutBlock(),

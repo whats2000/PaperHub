@@ -53,6 +53,9 @@ import { noteParts, refreshPartDecorations, type PartsView } from "./partsDecora
 import { NoteTitle } from "./NoteTitle";
 import { MATH_ALIASES, mathInput, slashLineText, turnIntoEquation } from "./mathInput";
 import { noteSchema, paperhubKeys } from "./schema";
+import { NoteTableHandles } from "./NoteTableHandles";
+import { insertNoteTable, notePasteHandler, tableKeys } from "./tableKeys";
+import { tableMotion } from "./tableMotion";
 import { UnsavedDrafts } from "./UnsavedDrafts";
 import {
   diffDocuments,
@@ -198,8 +201,12 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
         return tree.length ? (tree as never) : undefined;
       })(),
       dictionary: dictionaryFor(i18n.language),
+      // A pasted table keeps only what a GFM table holds (tableKeys.ts).
+      pasteHandler: notePasteHandler as never,
       extensions: [
         paperhubKeys,
+        tableKeys,
+        tableMotion,
         mathInput,
         atomCaret,
         commentKeys,
@@ -471,10 +478,23 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
           onItemClick: () => turnIntoEquation(editor),
         });
       }
+      // BlockNote's table item inserts 3 × 2 with no header; Notion's 3 × 3
+      // has its first row a header.
+      const withTable = defaults.map((i) =>
+        (i as { key?: string }).key === "table"
+          ? {
+              ...i,
+              title: t("notes:slash.table", "Table"),
+              subtext: t("notes:slash.tableHint", "3 × 3, first row a header · paste one to bring it in"),
+              aliases: ["table", "表格", "表", "grid"],
+              onItemClick: () => insertNoteTable(editor),
+            }
+          : i,
+      );
       const items: DefaultReactSuggestionItem[] = [
-        ...defaults.slice(0, basicEnd),
+        ...withTable.slice(0, basicEnd),
         ...basicItems,
-        ...defaults.slice(basicEnd),
+        ...withTable.slice(basicEnd),
         {
           title: t("notes:slash.quotePaper", "Quote from the paper"),
           subtext: t("notes:slash.quotePaperHint", "Select text in the reader; it lands here."),
@@ -656,11 +676,18 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
           theme={resolvedTheme === "dark" ? "dark" : "light"}
           slashMenu={false}
           formattingToolbar={false}
+          tableHandles={false}
           onChange={onChange}
           onSelectionChange={onSelectionChange}
         >
           <NoteFormattingBar onComment={comments.start} />
-          <SuggestionMenuController triggerCharacter="/" getItems={slashItems} />
+          <NoteTableHandles />
+          {/* No blocks inside a table cell (as BlockNote's own slash menu). */}
+          <SuggestionMenuController
+            triggerCharacter="/"
+            getItems={slashItems}
+            shouldOpen={(state) => !state.selection.$from.parent.type.isInGroup("tableContent")}
+          />
           <SuggestionMenuController triggerCharacter="@" getItems={mentionItems} />
         </BlockNoteView>
         {comments.popover}
