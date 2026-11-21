@@ -12,6 +12,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 
+import { blockIdInDoc } from "./blocks/citeForms";
 import { citeDefaultText } from "./blocks/markCiteText";
 
 export interface FindMatch {
@@ -72,7 +73,7 @@ export function findMatches(doc: PMNode, query: string): FindMatch[] {
   });
   const out: FindMatch[] = [];
   doc.descendants((node, pos) => {
-    const blockId = () => String(doc.resolve(pos).parent.attrs.id ?? "");
+    const blockId = () => blockIdInDoc(doc, pos) ?? "";
     if (REF_TYPES.has(node.type.name)) {
       for (let n = indexesOf(fold(String(node.attrs.quote ?? "")), q).length; n > 0; n--) {
         out.push({ from: pos, to: pos + node.nodeSize, kind: "block", blockId: blockId() });

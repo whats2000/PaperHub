@@ -4,6 +4,8 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NoteEditor } from "@/components/notes/NoteEditor";
+import { findMatches } from "@/components/notes/noteFind";
+import { cleanupEditors, makeEditor } from "@/components/notes/testEditor";
 import { API_BASE_URL } from "@/lib/api";
 import { clearPendingNoteOps, useNotesStore } from "@/store/notes";
 import type { NoteBlock } from "@/types/notes";
@@ -267,5 +269,55 @@ describe("find in a note", () => {
     });
     expect(notPrevented).toBe(true);
     expect(screen.queryByTestId("note-find")).toBeNull();
+  });
+  it("finds text inside a table cell and Enter selects it, with the table's block id", async () => {
+    seed([
+      para("p1", "needle first"),
+      blk("t", {
+        type: "table",
+        content: {
+          type: "tableContent",
+          columnWidths: [null, null],
+          headerRows: 1,
+          rows: [{ cells: ["head", "x"] }, { cells: ["a needle", "b"] }],
+        } as never,
+        text: "head | x\na needle | b",
+      }),
+    ]);
+    const pm = mount();
+    await screen.findByText("needle first");
+    act(() => {
+      ctrlF(pm);
+    });
+    typeQuery("needle");
+    expect(count()).toBe("1 / 2");
+    act(() => {
+      fireEvent.keyDown(findBox(), { key: "Enter" });
+    });
+    expect(count()).toBe("2 / 2");
+    act(() => {
+      fireEvent.keyDown(findBox(), { key: "Escape" });
+    });
+    act(() => {
+      fireEvent.animationEnd(screen.getByTestId("note-find"));
+    });
+    expect(selected(pm)).toBe("needle");
+    expect(blockAtCaret(pm)).toBe("t");
+  });
+});
+
+describe("findMatches in a table", () => {
+  it("gives a match inside a cell the table block's id", () => {
+    const editor = makeEditor([], [
+      { id: "p", type: "paragraph", content: "needle" },
+      {
+        id: "t",
+        type: "table",
+        content: { type: "tableContent", columnWidths: [null], headerRows: 1, rows: [{ cells: ["h"] }, { cells: ["a needle"] }] },
+      },
+    ]);
+    const hits = findMatches(editor.prosemirrorState.doc, "needle");
+    expect(hits.map((h) => h.blockId)).toEqual(["p", "t"]);
+    cleanupEditors();
   });
 });

@@ -4,6 +4,7 @@
  * deletes no mark, and is one editor transaction (one Ctrl+Z); the element
  * that goes collapses (~200 ms) and the new one flashes, both instant under
  * reduced motion. */
+import type { Node as PMNode } from "@tiptap/pm/model";
 import type { Transaction } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 
@@ -90,14 +91,19 @@ function flash(root: Element, selector: string): void {
 const blockSelector = (id: string) => `.bn-block-outer[data-id="${CSS.escape(id)}"]`;
 const citeSelector = (markId: string) => `[data-mark-cite="${CSS.escape(markId)}"]`;
 
-/** The id of the block whose text holds position `pos`. */
-function blockIdAt(view: EditorView, pos: number): string | null {
-  const $pos = view.state.doc.resolve(pos);
+/** The id of the block whose text holds position `pos` of `doc` (a table
+ * cell's text belongs to the table block). */
+export function blockIdInDoc(doc: PMNode, pos: number): string | null {
+  const $pos = doc.resolve(pos);
   for (let d = $pos.depth; d >= 0; d--) {
     const node = $pos.node(d);
     if (node.type.name === "blockContainer") return String(node.attrs.id);
   }
   return null;
+}
+
+function blockIdAt(view: EditorView, pos: number): string | null {
+  return blockIdInDoc(view.state.doc, pos);
 }
 
 /** The editor props of a mark's reference block (its server props). */
