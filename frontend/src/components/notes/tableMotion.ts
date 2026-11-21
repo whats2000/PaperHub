@@ -13,6 +13,8 @@ import type { EditorView } from "@tiptap/pm/view";
 
 import { prefersReducedMotion } from "@/lib/motion";
 
+import { changedRange, tablesIn } from "./tableKeys";
+
 const TIMING: KeyframeAnimationOptions = { duration: 200, easing: "ease-out" };
 
 function setFlag(el: Element, name: string, on: boolean) {
@@ -27,15 +29,13 @@ function markClipped(wrapper: HTMLElement) {
   setFlag(wrapper, "data-clip-right", scrollLeft + clientWidth < scrollWidth - 1);
 }
 
-/** Each table in a document by its block id. */
-function tablesOf(doc: PMNode): Map<string, PMNode> {
+/** The tables a change touched in `doc` (only the changed range is
+ * walked), by block id. */
+function touchedTables(doc: PMNode, from: number, to: number): Map<string, PMNode> {
   const out = new Map<string, PMNode>();
-  doc.descendants((node) => {
-    if (node.type.name === "table") return false;
-    const content = node.type.name === "blockContainer" ? node.firstChild : null;
-    if (content?.type.name === "table") out.set(String(node.attrs.id), content);
-    return true;
-  });
+  for (const { pos, node } of tablesIn(doc, from, to)) {
+    out.set(String(doc.resolve(pos).parent.attrs.id), node);
+  }
   return out;
 }
 
@@ -105,15 +105,21 @@ function play(frames: [HTMLElement, Keyframe[]][], reverse = false): Animation[]
     .map(([el, kf]) => el.animate(reverse ? [...kf].reverse() : kf, { ...TIMING, fill: reverse ? "forwards" : "none" }));
 }
 
-/** Rows and columns added to a table since `prev`, grown in. */
+/** Rows and columns added to a table since `prev`, grown in; the fades of
+ * the tables the change touched brought up to date. */
 function growAdded(view: EditorView, prevDoc: PMNode) {
-  if (prefersReducedMotion()) return;
-  const before = tablesOf(prevDoc);
-  for (const [id, next] of tablesOf(view.state.doc)) {
-    const prev = before.get(id);
-    if (!prev || prev.eq(next)) continue;
+  const range = changedRange(prevDoc, view.state.doc);
+  if (!range) return;
+  const now = touchedTables(view.state.doc, range.from, range.to);
+  if (!now.size) return;
+  const before = touchedTables(prevDoc, range.prevFrom, range.prevTo);
+  const reduced = prefersReducedMotion();
+  for (const [id, next] of now) {
     const table = tableElement(view, id);
-    if (!table) continue;
+    const wrapper = table?.closest<HTMLElement>(".tableWrapper");
+    if (wrapper) markClipped(wrapper);
+    const prev = before.get(id);
+    if (reduced || !table || !prev || prev.eq(next)) continue;
     const prevRows = children(prev);
     const nextRows = children(next);
     const added = nextRows.length - prevRows.length;
@@ -134,30 +140,41 @@ function growAdded(view: EditorView, prevDoc: PMNode) {
   }
 }
 
+/** Tables with a shrink running: a second delete waits for none. */
+const shrinking = new WeakSet<HTMLTableElement>();
+
 /** Shrinks row or column `index` of a table to nothing, then runs
- * `remove` (at once under reduced motion). The shrink is then let go: a
- * cell ProseMirror keeps for a neighbour shows at its size again. */
+ * `remove` with its index then (at once under reduced motion). The row or
+ * column is followed by its DOM (ProseMirror keeps an unchanged row's), so a
+ * change meanwhile can't make it delete another; gone by then, nothing is
+ * deleted. A delete asked for while one shrinks is ignored. The shrink is
+ * then let go: a cell ProseMirror keeps for a neighbour shows at its size. */
 export function shrinkAway(
   view: EditorView,
   blockId: string,
   orientation: "row" | "column",
   index: number,
-  remove: () => void,
+  remove: (index: number) => void,
 ) {
   const table = tableElement(view, blockId);
   if (!table || prefersReducedMotion()) {
-    remove();
+    remove(index);
     return;
   }
+  if (shrinking.has(table)) return;
+  const anchor = orientation === "row" ? table.rows[index] : table.rows[0]?.cells[index];
+  if (!anchor) return;
+  shrinking.add(table);
   const frames =
-    orientation === "row"
-      ? [...(table.rows[index]?.cells ?? [])].flatMap(rowFrames)
-      : columnFrames(table, index);
+    orientation === "row" ? [...(table.rows[index]?.cells ?? [])].flatMap(rowFrames) : columnFrames(table, index);
   const running = play(frames, true);
   void Promise.all(running.map((a) => a.finished))
     .catch(() => undefined)
     .then(() => {
-      remove();
+      shrinking.delete(table);
+      if (anchor.isConnected) {
+        remove(anchor instanceof HTMLTableRowElement ? anchor.rowIndex : (anchor).cellIndex);
+      }
       running.forEach((a) => a.cancel());
     });
 }
@@ -179,8 +196,7 @@ export const tableMotion = createExtension({
         markAll();
         return {
           update(v, prevState) {
-            if (v.state.doc.eq(prevState.doc)) return;
-            markAll();
+            if (v.state.doc === prevState.doc) return;
             growAdded(v, prevState.doc);
           },
           destroy() {

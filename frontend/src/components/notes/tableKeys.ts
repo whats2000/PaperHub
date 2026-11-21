@@ -3,11 +3,22 @@
  * - `/table` inserts a 3 × 3 table whose first row is a header
  *   (`insertNoteTable`); BlockNote's inserts 3 × 2 with none.
  * - Tab in the last cell adds a row (`tableKeys`); BlockNote's Tab stops there.
- * - A pasted table keeps only what a GFM table can hold (`notePasteHandler`):
- *   no cell colours, no merged cells, a header row.
+ * - A table keeps only what a GFM table can hold, whatever brought it in
+ *   (`tableClean`): no cell colours, no merged cells, whole-pixel widths; a
+ *   pasted one also gets a header row and its column alignment
+ *   (`notePasteHandler`).
  */
-import { createExtension, getNodeById, insertOrUpdateBlockForSlashMenu } from "@blocknote/core";
-import { TextSelection } from "@tiptap/pm/state";
+import {
+  contentNodeToTableContent,
+  type InlineContentSchema,
+  type StyleSchema,
+  createExtension,
+  getNodeById,
+  insertOrUpdateBlockForSlashMenu,
+  tableContentToNodes,
+} from "@blocknote/core";
+import type { Node as PMNode } from "@tiptap/pm/model";
+import { Plugin, TextSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 
 import type { TableCell, TableContent } from "@/types/notes";
@@ -101,33 +112,31 @@ function unmerge(content: TableContent): { rows: FullCell[][]; width: number } {
   return { rows: grid.map((r) => Array.from({ length: width }, (_, i) => r[i] ?? emptyCell())), width };
 }
 
-/** A pasted table as a GFM table can hold it: colours stripped, merged cells
- * spread over empty ones (spans 1), and a header row when it had none. */
-export function cleanPastedTable(content: TableContent): TableContent {
+/** A table as a GFM table holds it: merged cells spread over empty ones
+ * (spans 1), colours stripped, column widths whole pixels, header row /
+ * column 0 or 1. */
+function normaliseTable(content: TableContent): TableContent {
   const { rows, width } = unmerge(content);
   const out: TableContent = {
     type: "tableContent",
-    columnWidths: Array.from({ length: width }, (_, i) => content.columnWidths?.[i] ?? null),
-    headerRows: 1,
-    rows: rows.map((cells) => ({ cells: cells })),
+    columnWidths: Array.from({ length: width }, (_, i) => {
+      const w = content.columnWidths?.[i];
+      return typeof w === "number" ? Math.round(w) : null;
+    }),
+    rows: rows.map((cells) => ({ cells })),
   };
+  if (content.headerRows) out.headerRows = 1;
   if (content.headerCols) out.headerCols = 1;
   return out;
 }
 
-/** True when a table holds something a GFM table cannot (colours, spans). */
-function needsCleaning(content: TableContent): boolean {
-  const colour = (v: unknown) => v !== undefined && v !== "default";
-  return content.rows.some((row) =>
-    row.cells.some((raw) => {
-      const { props, content: runs } = asCell(raw);
-      if (colour(props.backgroundColor) || colour(props.textColor)) return true;
-      if (Number(props.colspan ?? 1) > 1 || Number(props.rowspan ?? 1) > 1) return true;
-      return JSON.stringify(stripRuns(runs)) !== JSON.stringify(runs);
-    }),
-  );
+/** A pasted table as a GFM table can hold it (`normaliseTable`), with a
+ * header row when it had none. */
+export function cleanPastedTable(content: TableContent): TableContent {
+  return { ...normaliseTable(content), headerRows: 1 };
 }
 
+/** Each table block of a document (nested ones too). */
 function tables(blocks: unknown[], into: { id: string; content: TableContent }[] = []) {
   for (const b of blocks as { id: string; type: string; content?: unknown; children?: unknown[] }[]) {
     if (b.type === "table") into.push({ id: b.id, content: b.content as TableContent });
@@ -136,13 +145,106 @@ function tables(blocks: unknown[], into: { id: string; content: TableContent }[]
   return into;
 }
 
+const COLOUR_MARKS = new Set(["textColor", "backgroundColor"]);
+
+/** True when a table node holds what a GFM table cannot: a merged or
+ * coloured cell, a coloured run, a fractional column width. */
+function needsNormalising(table: PMNode): boolean {
+  let bad = false;
+  table.descendants((node) => {
+    if (bad) return false;
+    const a = node.attrs as Record<string, unknown>;
+    if (node.type.name === "tableCell" || node.type.name === "tableHeader") {
+      const colour = (v: unknown) => v !== undefined && v !== null && v !== "default";
+      const widths = Array.isArray(a.colwidth) ? (a.colwidth as unknown[]) : [];
+      bad =
+        Number(a.colspan ?? 1) > 1 ||
+        Number(a.rowspan ?? 1) > 1 ||
+        colour(a.backgroundColor) ||
+        colour(a.textColor) ||
+        widths.some((w) => typeof w === "number" && !Number.isInteger(w));
+    } else if (node.isText) {
+      bad = node.marks.some((m) => COLOUR_MARKS.has(m.type.name));
+    }
+    return !bad;
+  });
+  return bad;
+}
+
+/** Where `next` differs from `prev`, in `next` (and in `prev`); null when equal. */
+export function changedRange(
+  prev: PMNode,
+  next: PMNode,
+): { from: number; to: number; prevFrom: number; prevTo: number } | null {
+  const from = next.content.findDiffStart(prev.content);
+  if (from === null || from === undefined) return null;
+  const end = next.content.findDiffEnd(prev.content) ?? { a: next.content.size, b: prev.content.size };
+  let to = end.a;
+  let prevTo = end.b;
+  const overlap = from - Math.min(to, prevTo);
+  if (overlap > 0) {
+    to += overlap;
+    prevTo += overlap;
+  }
+  return { from, to: Math.max(to, from), prevFrom: from, prevTo: Math.max(prevTo, from) };
+}
+
+/** Table nodes overlapping [from, to] of `doc`, with their positions. */
+export function tablesIn(doc: PMNode, from: number, to: number): { pos: number; node: PMNode }[] {
+  const out: { pos: number; node: PMNode }[] = [];
+  const end = Math.min(doc.content.size, Math.max(to, from + 1));
+  doc.nodesBetween(Math.min(from, end), end, (node, pos) => {
+    if (node.type.name === "table") {
+      out.push({ pos, node });
+      return false;
+    }
+    return true;
+  });
+  return out;
+}
+
+/** Every change that leaves a table holding what a GFM table cannot (a drop,
+ * a paste, an inserted block, a column drag) is followed by its normalised
+ * form, so no path can save a merged or coloured cell or a fractional width. */
+export const tableClean = createExtension(({ editor }) => ({
+  key: "tableClean",
+  prosemirrorPlugins: [
+    new Plugin({
+      appendTransaction(trs, oldState, state) {
+        if (!trs.some((t) => t.docChanged)) return null;
+        const range = changedRange(oldState.doc, state.doc);
+        if (!range) return null;
+        const bad = tablesIn(state.doc, range.from, range.to).filter((t) => needsNormalising(t.node));
+        if (!bad.length) return null;
+        const schema = editor.schema as { inlineContentSchema: InlineContentSchema; styleSchema: StyleSchema };
+        const tr = state.tr;
+        for (const { pos, node } of bad.reverse()) {
+          const content = contentNodeToTableContent(node, schema.inlineContentSchema, schema.styleSchema);
+          const rows = tableContentToNodes(
+            normaliseTable(content as unknown as TableContent) as never,
+            state.schema,
+            schema.styleSchema,
+          );
+          tr.replaceWith(pos + 1, pos + node.nodeSize - 1, rows);
+        }
+        return tr;
+      },
+    }),
+  ],
+}))();
+
 const ALIGN = new Set(["left", "center", "right"]);
 
-/** Column alignments of each GFM table in Markdown text (its delimiter rows). */
+const DELIMITER_ROW = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+
+/** Column alignments of each GFM table in Markdown text: a delimiter row
+ * right under a header row. */
 function markdownAlignments(text: string): (Alignment | null)[][] {
   const out: (Alignment | null)[][] = [];
-  for (const line of text.split(/\r?\n/)) {
-    if (!line.includes("|") || !/^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line)) continue;
+  const lines = text.split(/\r?\n/);
+  lines.forEach((line, i) => {
+    const header = lines[i - 1];
+    if (!line.includes("|") || !DELIMITER_ROW.test(line) || !header?.includes("|") || DELIMITER_ROW.test(header)) return;
     const cells = line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|");
     out.push(
       cells.map((c) => {
@@ -152,7 +254,7 @@ function markdownAlignments(text: string): (Alignment | null)[][] {
         return l && r ? "center" : r ? "right" : l ? "left" : null;
       }),
     );
-  }
+  });
   return out;
 }
 
@@ -174,19 +276,31 @@ function htmlAlignments(html: string): (Alignment | null)[][] {
   });
 }
 
-/** What a paste's tables were aligned as, one list per table: from the
- * Markdown when BlockNote pastes it as Markdown, else from the HTML. */
-function pastedAlignments(event: unknown): (Alignment | null)[][] {
+/** The alignment sources a paste may have used, in BlockNote's order of
+ * preference: Markdown, then plain text read as Markdown, then HTML. */
+function alignmentSources(event: unknown): (Alignment | null)[][][] {
   const data = (event as { clipboardData?: DataTransfer | null } | undefined)?.clipboardData;
   if (!data) return [];
   const types = [...(data.types ?? [])];
-  const md = types.includes("text/markdown") ? data.getData("text/markdown") : "";
-  if (md) return markdownAlignments(md);
-  const plain = types.includes("text/plain") ? data.getData("text/plain") : "";
-  const fromText = plain ? markdownAlignments(plain) : [];
-  if (fromText.length) return fromText;
-  const html = types.includes("text/html") ? data.getData("text/html") : "";
-  return html ? htmlAlignments(html) : [];
+  const get = (t: string) => (types.includes(t) ? data.getData(t) : "");
+  const out: (Alignment | null)[][][] = [];
+  if (get("text/markdown")) out.push(markdownAlignments(get("text/markdown")));
+  if (get("text/plain")) out.push(markdownAlignments(get("text/plain")));
+  if (get("text/html")) out.push(htmlAlignments(get("text/html")));
+  return out;
+}
+
+/** The first source whose tables match the pasted ones one to one (same
+ * number of tables, same column counts), or null: then no alignment is
+ * guessed. */
+export function pickAlignments(
+  pasted: TableContent[],
+  sources: (Alignment | null)[][][],
+): (Alignment | null)[][] | null {
+  const cols = pasted.map((t) => t.rows[0]?.cells.length ?? 0);
+  return (
+    sources.find((s) => s.length === pasted.length && s.every((aligns, i) => aligns.length === cols[i])) ?? null
+  );
 }
 
 /** A table's columns given the pasted alignment where its cells have none. */
@@ -207,9 +321,9 @@ function withAlignments(content: TableContent, aligns: (Alignment | null)[] | un
 }
 
 /** The notes editor's paste: BlockNote's own (HTML, Markdown text, a GFM
- * table as text), then a table it brought in is cleaned (`cleanPastedTable`)
- * and given its columns' alignment (which BlockNote drops); cells pasted into
- * a table already there only lose their colours and merges. */
+ * table as text; `tableClean` normalises what it brings), then each table
+ * the paste brought in gets a header row and its columns' alignment, which
+ * BlockNote drops. Tables already in the note are left alone. */
 export function notePasteHandler(context: {
   event?: unknown;
   editor: unknown;
@@ -217,25 +331,17 @@ export function notePasteHandler(context: {
 }): boolean | undefined {
   const editor = context.editor as TableEditor;
   const before = new Set(tables(editor.document).map((t) => t.id));
-  const aligns = pastedAlignments(context.event);
+  const sources = alignmentSources(context.event);
   const handled = context.defaultPasteHandler();
-  let k = 0;
-  for (const t of tables(editor.document)) {
-    if (!before.has(t.id)) {
-      const content = cleanPastedTable(withAlignments(t.content, aligns[k++]));
-      editor.updateBlock(t.id, { type: "table", content } as never);
-    } else if (needsCleaning(t.content)) {
-      const { rows, width } = unmerge(t.content);
-      editor.updateBlock(t.id, {
-        type: "table",
-        content: {
-          ...t.content,
-          columnWidths: Array.from({ length: width }, (_, i) => t.content.columnWidths?.[i] ?? null),
-          rows: rows.map((cells) => ({ cells })),
-        },
-      } as never);
-    }
-  }
+  const added = tables(editor.document).filter((t) => !before.has(t.id));
+  const aligns = pickAlignments(
+    added.map((t) => t.content),
+    sources,
+  );
+  added.forEach((t, i) => {
+    const content = cleanPastedTable(withAlignments(t.content, aligns?.[i]));
+    editor.updateBlock(t.id, { type: "table", content } as never);
+  });
   return handled;
 }
 
@@ -335,3 +441,4 @@ export function deleteRowOrColumn(editor: unknown, blockId: string, orientation:
         };
   e.updateBlock(blockId, { type: "table", content: next } as never);
 }
+

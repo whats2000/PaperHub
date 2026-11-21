@@ -2,15 +2,16 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { editorHasBlockWithType } from "@blocknote/core";
 import type { EditorView } from "@tiptap/pm/view";
 
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import { API_BASE_URL } from "@/lib/api";
 import { clearPendingNoteOps, useNotesStore } from "@/store/notes";
-import type { NoteBlock, TableContent } from "@/types/notes";
+import type { ApplyResult, NoteBlock, NoteOpsBody, TableContent } from "@/types/notes";
 
-import { cleanPastedTable, notePasteHandler, tableKeys } from "./tableKeys";
-import { tableMotion } from "./tableMotion";
+import { cleanPastedTable, notePasteHandler, pickAlignments, tableClean, tableKeys } from "./tableKeys";
+import { shrinkAway, tableMotion } from "./tableMotion";
 import { cleanupEditors, makeEditor, press, type AnyEditor } from "./testEditor";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }) }));
@@ -470,5 +471,186 @@ describe("table motion", () => {
       new Set(["col", 1]),
     );
     await waitFor(() => expect([...pm.querySelectorAll("tr")].map((r) => r.children.length)).toEqual([1, 1]));
+  });
+});
+
+// ---------------------------------------------------------------- review fixes
+
+describe("only what a GFM table holds, on every path", () => {
+  it("a table takes no colour (the ⋮⋮ menu's Colors item has nothing to set)", () => {
+    const editor = makeEditor([], grid());
+    expect(editorHasBlockWithType(editor, "table", { textColor: "string" })).toBe(false);
+    expect(editor.getBlock("t")!.props).not.toHaveProperty("textColor");
+  });
+
+  it("a table dropped or inserted as HTML loses its colours and merged cells", () => {
+    const editor = makeEditor([tableClean], [{ id: "p", type: "paragraph" }]);
+    // ProseMirror's own paste / drop, past BlockNote's paste handler.
+    editor._tiptapEditor.view.pasteHTML(
+      "<table><tr><td colspan='2' style='background-color: rgb(255, 0, 0)'>wide</td></tr><tr><td>x</td><td>y</td></tr></table>",
+    );
+    const t = tableOf(editor)!;
+    expect(t.rows.map((r) => r.cells.length)).toEqual([2, 2]);
+    for (const row of t.rows) {
+      for (const cell of row.cells) {
+        expect(cell.props.backgroundColor ?? "default").toBe("default");
+        expect(cell.props.colspan ?? 1).toBe(1);
+      }
+    }
+  });
+
+  it("a table block inserted with a merged, coloured cell is normalised", () => {
+    const editor = makeEditor([tableClean], [{ id: "p", type: "paragraph" }]);
+    editor.insertBlocks(
+      [
+        {
+          id: "t2",
+          type: "table",
+          content: {
+            type: "tableContent",
+            rows: [
+              { cells: [{ type: "tableCell", props: { colspan: 2, textColor: "red" }, content: "wide" }] },
+              { cells: ["x", "y"] },
+            ],
+          },
+        },
+      ] as never,
+      "p",
+      "after",
+    );
+    const t = tableOf(editor)!;
+    expect(t.rows.map((r) => r.cells.length)).toEqual([2, 2]);
+    expect(t.rows[0]!.cells.every((c) => (c.props.textColor ?? "default") === "default")).toBe(true);
+  });
+
+  it("a dragged column width is saved as a whole number", () => {
+    const editor = makeEditor([tableClean], grid());
+    const view = editor._tiptapEditor.view;
+    let cellPos = -1;
+    view.state.doc.descendants((node, pos) => {
+      if (cellPos < 0 && (node.type.name === "tableHeader" || node.type.name === "tableCell")) cellPos = pos;
+      return cellPos < 0;
+    });
+    // What prosemirror-tables' column resizing commits on mouse-up.
+    const cell = view.state.doc.nodeAt(cellPos)!;
+    view.dispatch(view.state.tr.setNodeMarkup(cellPos, undefined, { ...cell.attrs, colwidth: [120.6] }));
+    expect(tableOf(editor)!.columnWidths[0]).toBe(121);
+  });
+});
+
+describe("the note editor normalises tables", () => {
+  it("a merged, coloured table dropped into a note comes out with neither", async () => {
+    seed([blk("p0", { content: [] })]);
+    const pm = mountEditor();
+    act(() => {
+      pm.editor.view.pasteHTML("<table><tr><td colspan='2' style='color: red'>wide</td></tr><tr><td>x</td><td>y</td></tr></table>");
+    });
+    await waitFor(() => expect([...pm.querySelectorAll("tr")].map((r) => r.children.length)).toEqual([2, 2]));
+    expect(pm.querySelector("[colspan='2'], [data-text-color], [data-background-color]")).toBeNull();
+  });
+});
+
+describe("alignment of pasted tables", () => {
+  const two: TableContent = { type: "tableContent", columnWidths: [null, null], rows: [{ cells: ["a", "b"] }] };
+  it("applies a source's alignments only when they match the pasted tables one to one", () => {
+    expect(pickAlignments([two], [[["left", "right"]]])).toEqual([["left", "right"]]);
+    // A "|---|" line that is not a table: two lists for one table.
+    expect(pickAlignments([two], [[["left", "right"], [null]]])).toBeNull();
+    // Column counts differ.
+    expect(pickAlignments([two], [[[null, null, "right"]]])).toBeNull();
+    // The first source that fits wins.
+    expect(pickAlignments([two], [[[null]], [[null, "center"]]])).toEqual([[null, "center"]]);
+  });
+});
+
+describe("no op churn from tables", () => {
+  it("a stored table with plain-string cells sends nothing when a neighbouring line is edited", async () => {
+    const posted: NoteOpsBody[] = [];
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        const body = (await request.json()) as NoteOpsBody;
+        posted.push(body);
+        const res: ApplyResult = {
+          note_id: 7,
+          revision: body.base_revision + 1,
+          change_set_id: "cs",
+          applied: body.ops.map((o) => o.block_id ?? ""),
+          suggested: [],
+          rejected: [],
+          reparented: [],
+        };
+        return HttpResponse.json(res);
+      }),
+    );
+    seed([
+      blk("t", {
+        type: "table",
+        content: {
+          type: "tableContent",
+          columnWidths: [null, null],
+          headerRows: 1,
+          rows: [{ cells: ["指標", "值"] }, { cells: ["ORR", "62%"] }],
+        },
+        text: "指標 | 值\nORR | 62%",
+      }),
+      blk("p1", { content: [{ type: "text", text: "Mine", styles: {} }], text: "Mine" }),
+    ]);
+    const pm = mountEditor();
+    await screen.findByText("Mine");
+    act(() => {
+      (pm.editor.commands as unknown as { insertContentAt: (p: number, t: string) => boolean }).insertContentAt(
+        pm.editor.view.state.doc.content.size - 3,
+        "!",
+      );
+    });
+    await act(async () => {
+      await useNotesStore.getState().flush(7);
+    });
+    expect(posted.flatMap((b) => b.ops.map((o) => o.block_id))).toEqual(["p1"]);
+  });
+});
+
+describe("motion, robustly", () => {
+  afterEach(() => {
+    delete (Element.prototype as { animate?: unknown }).animate;
+  });
+
+  it("a delete finds its row again after the shrink, even if rows moved meanwhile; a second one is ignored", async () => {
+    reducedMotion(false);
+    let finish!: () => void;
+    const done = new Promise<void>((r) => (finish = r));
+    Object.defineProperty(Element.prototype, "animate", {
+      configurable: true,
+      writable: true,
+      value: () => ({ finished: done, cancel: () => {} }),
+    });
+    const editor = makeEditor([tableMotion], grid());
+    const view = editor._tiptapEditor.view;
+    const removed: number[] = [];
+    shrinkAway(view, "t", "row", 1, (i) => removed.push(i));
+    shrinkAway(view, "t", "row", 0, (i) => removed.push(i));
+    // A row lands above while the shrink runs.
+    const t = tableOf(editor)!;
+    editor.updateBlock("t", { type: "table", content: { ...t, rows: [{ cells: ["new", "row"] }, ...t.rows] } } as never);
+    finish();
+    await waitFor(() => expect(removed).toEqual([2]));
+  });
+
+  it("a change in a note with no table touches no table", () => {
+    const editor = makeEditor([tableMotion], [{ id: "p", type: "paragraph", content: "x" }]);
+    const view = editor._tiptapEditor.view;
+    const spy = vi.spyOn(view.dom, "querySelectorAll");
+    view.dispatch(view.state.tr.insertText("y", 2));
+    expect(spy.mock.calls.filter(([sel]) => String(sel).includes("tableWrapper"))).toHaveLength(0);
+  });
+
+  it("the row / column grips and the + buttons are outside the faded scroll box", async () => {
+    seed([seededTable]);
+    const pm = mountEditor();
+    hoverCell(pm, 1, 1);
+    const grip = await screen.findByRole("button", { name: "Column options" });
+    expect(grip.closest(".tableWrapper")).toBeNull();
+    expect(tableOptions().closest(".tableWrapper")).toBeNull();
+    expect(document.querySelector(".bn-extend-button")!.closest(".tableWrapper")).toBeNull();
   });
 });

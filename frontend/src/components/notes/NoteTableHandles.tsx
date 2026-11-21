@@ -55,8 +55,8 @@ function NoteTableHandleMenu({ orientation }: { orientation: "row" | "column" })
   if (!block || index === undefined) return null;
   // The row / column shrinks away, then goes (BlockNote's delete is instant).
   const remove = () =>
-    shrinkAway(editor.prosemirrorView, block.id, orientation, index, () =>
-      deleteRowOrColumn(editor, block.id, orientation, index),
+    shrinkAway(editor.prosemirrorView, block.id, orientation, index, (at) =>
+      deleteRowOrColumn(editor, block.id, orientation, at),
     );
 
   if (orientation === "row") {

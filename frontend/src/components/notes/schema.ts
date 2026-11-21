@@ -48,7 +48,9 @@ export const noteSchema = BlockNoteSchema.create({
     numberedListItem,
     checkListItem,
     quote,
-    table,
+    // No colour on a table: a GFM table holds none (the ⋮⋮ menu's Colors
+    // item shows only for blocks with a textColor prop).
+    table: { ...table, config: { ...table.config, propSchema: {} } },
     divider: dividerBlock(),
     codeBlock: codeBlockWithCopy(),
     callout: calloutBlock(),

@@ -54,7 +54,7 @@ import { NoteTitle } from "./NoteTitle";
 import { MATH_ALIASES, mathInput, slashLineText, turnIntoEquation } from "./mathInput";
 import { noteSchema, paperhubKeys } from "./schema";
 import { NoteTableHandles } from "./NoteTableHandles";
-import { insertNoteTable, notePasteHandler, tableKeys } from "./tableKeys";
+import { insertNoteTable, notePasteHandler, tableClean, tableKeys } from "./tableKeys";
 import { tableMotion } from "./tableMotion";
 import { UnsavedDrafts } from "./UnsavedDrafts";
 import {
@@ -206,6 +206,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
       extensions: [
         paperhubKeys,
         tableKeys,
+        tableClean,
         tableMotion,
         mathInput,
         atomCaret,
