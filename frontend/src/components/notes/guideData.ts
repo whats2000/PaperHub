@@ -111,7 +111,7 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
     rows: [
       { id: "following", plainLeft: "Following §2", right: "Click to stop the note scrolling with the paper" },
       { id: "focus", plainLeft: "Focus", right: "Fade the other notes and their marks", rightKey: "Esc", rightAfter: "stops" },
-      { id: "fold", plainLeft: "⌄ on a divider", right: "Fold the note below it" },
+      { id: "fold", plainLeft: "⌄ by a heading or list item", right: "Fold what is under it (Ctrl+Shift+[ / ])" },
       { id: "trash", plainLeft: "Trash on a block", right: "Delete, with Undo" },
       { id: "tocRail", plainLeft: "Lines at the right edge", right: "Table of contents: hover to open, click to jump" },
       { id: "tableStyle", plainLeft: "⋯ › Table style", right: "Three-line (paper style) or grid, for every table" },

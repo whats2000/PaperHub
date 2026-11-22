@@ -1,13 +1,10 @@
 import { useEditorChange } from "@blocknote/react";
-import { ChevronDown, ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 
-import { cn } from "@/lib/utils";
 import { useMarkNavStore } from "@/store/markNav";
 import { useNotesStore } from "@/store/notes";
 
-import { foldLine, foldSummary, partsOfNote, type PartBlock } from "../parts";
+import { partsOfNote, type PartBlock } from "../parts";
 import { useNoteEditorContext } from "./markProps";
 
 type AnyEditor = NonNullable<Parameters<typeof useEditorChange>[1]>;
@@ -25,73 +22,33 @@ function flatten(list: DocBlock[], out: PartBlock[] = []): PartBlock[] {
   return out;
 }
 
-/** A divider's line: its fold chevron at the content edge (centred on a
- * reference's bar, so it reaches into the side menu's column: it sits above
- * BlockNote's side menu, z-20, or the drag handle would take its clicks),
- * the rule darkened when it frames the part you're in (or, while the
- * pointer is over a mark on the paper, the part quoting it), and the folded
- * part's one-line summary, which unfolds it. The parts come from the
- * editor's own document, so a divider just typed is right before its sync
- * reaches the store. */
+/** A divider's line: the rule, darkened when it frames the part you're in
+ * (or, while the pointer is over a mark on the paper, the part quoting it).
+ * A divider only bounds "one note" (parts.ts); it folds nothing (folds.ts).
+ * The parts come from the editor's own document, so a divider just typed is
+ * right before its sync reaches the store. */
 export function DividerView({ id, editor }: { id: string; editor: AnyEditor }) {
-  const { t } = useTranslation();
   const { noteId } = useNoteEditorContext();
   const [blocks, setBlocks] = useState(() => flatten(editor.document as unknown as DocBlock[]));
   useEditorChange(() => setBlocks(flatten(editor.document)), editor);
-  const folded = useNotesStore((s) => (s.folded[noteId] ?? []).includes(id));
   const active = useNotesStore((s) => s.activePart[noteId] ?? null);
-  const toggleFold = useNotesStore((s) => s.toggleFold);
   const hovered = useMarkNavStore((s) => s.hovered);
 
-  const { summary, edge } = useMemo(() => {
+  const edge = useMemo(() => {
     const parts = partsOfNote(blocks);
-    const mine = parts.find((p) => p.id === id);
     const hot = hovered === null ? -1 : parts.findIndex((p) => p.blocks.some((b) => b.props?.markId === hovered));
     const at = hot >= 0 ? hot : active === null ? -1 : parts.findIndex((p) => p.id === active);
     // The dividers just above and below the active part frame it.
-    const framing = at >= 0 && (parts[at]!.dividerId === id || parts[at + 1]?.dividerId === id);
-    return { summary: mine ? foldSummary(mine) : { blocks: 0, marks: 0 }, edge: framing };
+    return at >= 0 && (parts[at]!.dividerId === id || parts[at + 1]?.dividerId === id);
   }, [blocks, active, hovered, id]);
-
-  const line = foldLine(t, summary);
 
   return (
     <div className="note-divider w-full" contentEditable={false} data-testid={`divider-${id}`}>
-      <div className="flex h-[26px] items-center gap-[2px]">
-        <button
-          type="button"
-          aria-expanded={!folded}
-          aria-label={t("notes:fold.fold", "Fold the part below this divider")}
-          title={t("notes:fold.foldTitle", "Fold the part below")}
-          onClick={() => toggleFold(noteId, id)}
-          className={cn(
-            "note-fold relative z-[21] -ml-2 inline-flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-[opacity,rotate] duration-200 ease-out hover:bg-accent hover:text-foreground motion-reduce:transition-none",
-            folded && "-rotate-90",
-          )}
-        >
-          <ChevronDown className="size-3" aria-hidden />
-        </button>
+      <div className="flex h-[26px] items-center">
         <hr
           data-edge={edge ? "true" : undefined}
           className="note-divider-rule m-0 flex-1 border-0 border-t border-t-[color-mix(in_srgb,var(--foreground)_28%,transparent)] transition-[border-color,box-shadow] duration-200 ease-out motion-reduce:transition-none data-[edge=true]:border-t-[color-mix(in_srgb,var(--foreground)_70%,transparent)] data-[edge=true]:shadow-[0_1px_0_color-mix(in_srgb,var(--foreground)_35%,transparent)]"
         />
-      </div>
-      <div
-        data-state={folded ? "open" : "closed"}
-        className="grid grid-rows-[1fr] transition-[grid-template-rows,opacity] duration-200 ease-out data-[state=closed]:grid-rows-[0fr] data-[state=closed]:opacity-0 motion-reduce:transition-none"
-      >
-        <div className="min-h-0 overflow-hidden">
-          <button
-            type="button"
-            tabIndex={folded ? 0 : -1}
-            aria-hidden={!folded}
-            onClick={() => toggleFold(noteId, id)}
-            className="-ml-[44px] inline-flex items-center gap-[5px] border-0 bg-transparent pt-0.5 pr-1.5 pb-1 pl-[46px] text-xs text-muted-foreground hover:text-foreground"
-          >
-            <ChevronRight className="size-3" aria-hidden />
-            {line}
-          </button>
-        </div>
       </div>
     </div>
   );

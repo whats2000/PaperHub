@@ -256,10 +256,12 @@ describe("find in a note", () => {
     expect(count()).toBe("1 / 2");
   });
 
-  it("unfolds a folded part when its match becomes the current one", async () => {
-    const d1 = blk("d1", { type: "divider" });
-    seed([para("p1", "first needle"), d1, para("p2", "hidden needle")]);
-    useNotesStore.setState({ folded: { 7: ["d1"] } });
+  it("unfolds the folds hiding a match when it becomes the current one", async () => {
+    const h = blk("h", { type: "heading", props: { level: 2 }, content: [{ type: "text", text: "Sub", styles: {} }], text: "Sub" });
+    const li = blk("li", { type: "bulletListItem", content: [{ type: "text", text: "Item", styles: {} }], text: "Item" });
+    const li1 = blk("p2", { type: "bulletListItem", parent_id: "li", content: [{ type: "text", text: "hidden needle", styles: {} }], text: "hidden needle" });
+    seed([para("p1", "first needle"), h, li, li1]);
+    useNotesStore.setState({ folded: { 7: ["h", "li"] } });
     const pm = mount();
     await screen.findByText("hidden needle");
     act(() => {
@@ -267,7 +269,7 @@ describe("find in a note", () => {
     });
     typeQuery("needle");
     expect(count()).toBe("1 / 2");
-    expect(useNotesStore.getState().folded[7]).toEqual(["d1"]);
+    expect(useNotesStore.getState().folded[7]).toEqual(["h", "li"]);
     act(() => {
       fireEvent.keyDown(findBox(), { key: "Enter" });
     });

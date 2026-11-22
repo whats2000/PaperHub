@@ -2,11 +2,13 @@
  * "Follow reading"). Right: Find (opens the find strip under the toolbar, as
  * Ctrl+F does), Focus (their labels hide in a narrow pane) and the
  * ⋯ menu with the rarely needed items: the note's details, Export as Markdown
- * or Word, Show table of contents, Table style (three-line or grid, for every
+ * or Word, Fold all / Unfold all, Show table of contents, Table style (three-line or grid, for every
  * table), and Shortcuts (the guide grows from the ⋯ button). */
 import { Menu } from "@base-ui/react/menu";
 import {
   Check,
+  ChevronDown,
+  ChevronRight,
   Ellipsis,
   FileDown,
   FileText,
@@ -27,6 +29,7 @@ import { hasOpenLayer } from "@/lib/openLayer";
 import { cn } from "@/lib/utils";
 import { useNotesStore, type TableStyle } from "@/store/notes";
 
+import { foldOwners, treeFromRows } from "./folds";
 import { partsOfNote } from "./parts";
 import { ShortcutsGuide } from "./ShortcutsGuide";
 
@@ -126,6 +129,12 @@ export function NotesToolbar({
     noteId === null ? null : (s.notes[noteId]?.note.revision ?? null),
   );
   const moreRef = useRef<HTMLButtonElement>(null);
+  // Fold all / Unfold all: every heading, § section and list item that folds.
+  const foldAll = (on: boolean) => {
+    if (noteId === null) return;
+    const s = useNotesStore.getState();
+    s.setFolded(noteId, on ? [...foldOwners(treeFromRows(s.notes[noteId]?.blocks ?? [])).keys()] : []);
+  };
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState<ExportFormat | null>(null);
 
@@ -315,6 +324,15 @@ export function NotesToolbar({
                   }
                   onClick={runExport && (() => runExport("docx"))}
                 />
+                <Menu.Separator className="mx-1 my-[3px] h-px bg-border" />
+                <Menu.Item className={ITEM} disabled={noteId === null} onClick={() => foldAll(true)}>
+                  <ChevronRight className="size-3 shrink-0" aria-hidden />
+                  {t("notes:toolbar.foldAll", "Fold all")}
+                </Menu.Item>
+                <Menu.Item className={ITEM} disabled={noteId === null} onClick={() => foldAll(false)}>
+                  <ChevronDown className="size-3 shrink-0" aria-hidden />
+                  {t("notes:toolbar.unfoldAll", "Unfold all")}
+                </Menu.Item>
                 <Menu.Separator className="mx-1 my-[3px] h-px bg-border" />
                 <Menu.CheckboxItem
                   className={ITEM}

@@ -1,0 +1,161 @@
+/* The notes editor's left gutter (H5b.1 folding, user 2026-11-22; Notion's
+   toggle heading): 52 px holding, right to left, the fold toggle right
+   against the text, ⋮⋮ and +. Every control is one size: 16 x 24 with a
+   16 px icon at stroke 2, the same colour and hover (14 x 24 / 14 px in a
+   narrow pane). Each is centred on its block's first line, as BlockNote
+   centres its side menu. The block's text never moves: the toggle hangs in
+   the gutter; on a bullet item it stands where the bullet is. */
+
+.note-gutter-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  min-width: 16px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-foreground);
+  transition: opacity 0.12s, background-color 0.12s, color 0.12s;
+}
+/* (BlockNote's `.bn-shadcn svg` reverts icon sizes: outranked here.) */
+.paperhub-notes .note-gutter-btn svg.lucide {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2;
+}
+.note-gutter-btn:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+/* BlockNote's side menu: + and ⋮⋮, 2 px apart, ending one toggle (and a
+   2 px gap) left of the block. */
+.paperhub-notes .bn-side-menu {
+  gap: 2px;
+  translate: -18px 0;
+}
+
+/* The toggle: a widget inside the block (partsDecorations.ts), placed on
+   the block's first line by its kind (the same offsets as the side menu;
+   a line of text and a § section's title: 3 px). */
+.paperhub-notes .bn-block:has(> .note-fold-host) {
+  position: relative;
+}
+.paperhub-notes .note-fold-host {
+  position: absolute;
+  left: -16px;
+  top: 3px;
+  z-index: 21;
+  display: block;
+  width: 16px;
+  height: 24px;
+}
+/* (An H1 carries no data-level: BlockNote leaves a default prop out.) */
+.paperhub-notes .bn-block:has(> .bn-block-content[data-content-type="heading"]:is([data-level="1"], :not([data-level]))) > .note-fold-host {
+  top: 42px;
+}
+.paperhub-notes .bn-block:has(> .bn-block-content[data-content-type="heading"][data-level="2"]) > .note-fold-host {
+  top: 30px;
+}
+.paperhub-notes .bn-block:has(> .bn-block-content[data-content-type="heading"][data-level="3"]) > .note-fold-host {
+  top: 21.6px;
+}
+/* A bullet item: the toggle stands on the bullet, which steps aside. */
+.paperhub-notes .bn-block:has(> .bn-block-content[data-content-type="bulletListItem"]) > .note-fold-host {
+  left: 2px;
+}
+.paperhub-notes .bn-block > .bn-block-content[data-content-type="bulletListItem"]::before {
+  transition: opacity 0.12s;
+}
+.paperhub-notes .bn-block:has(> .note-fold-host .note-fold-toggle:is([data-hover], [aria-expanded="false"], :focus-visible, :hover))
+  > .bn-block-content[data-content-type="bulletListItem"]::before {
+  opacity: 0;
+}
+
+/* Shown while the block is the side menu's, focused, or folded. ▸ folded,
+   ⌄ open, turning in 200 ms. */
+.paperhub-notes .note-fold-toggle {
+  opacity: 0;
+}
+.paperhub-notes .note-fold-toggle:is([data-hover], [aria-expanded="false"], :focus-visible, :hover) {
+  opacity: 1;
+}
+.paperhub-notes .note-fold-toggle svg {
+  transition: transform 0.2s ease-out;
+}
+.paperhub-notes .note-fold-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+/* A folded block's chip after its text: "… 4 blocks · 2 marks". It fades
+   in, and out when unfolded. */
+@keyframes note-fold-chip-in {
+  from { opacity: 0; }
+}
+.paperhub-notes .note-fold-chip-host {
+  display: inline;
+}
+.paperhub-notes .note-fold-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 18px;
+  letter-spacing: 0;
+  vertical-align: middle;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  animation: note-fold-chip-in 0.2s ease-out;
+  transition: opacity 0.2s ease-out, background-color 0.12s, color 0.12s;
+}
+.paperhub-notes .note-fold-chip[data-state="closed"] {
+  opacity: 0;
+  pointer-events: none;
+}
+.paperhub-notes .note-fold-chip:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+/* A narrow pane: 14 x 24 controls, 14 px icons, 1 px apart. */
+@container (max-width: 560px) {
+  .note-gutter-btn {
+    width: 14px;
+    min-width: 14px;
+  }
+  .paperhub-notes .note-gutter-btn svg.lucide {
+    width: 14px;
+    height: 14px;
+  }
+  .paperhub-notes .bn-side-menu {
+    gap: 1px;
+    translate: -15px 0;
+  }
+  .paperhub-notes .note-fold-host {
+    left: -14px;
+    width: 14px;
+  }
+  .paperhub-notes .bn-block:has(> .bn-block-content[data-content-type="bulletListItem"]) > .note-fold-host {
+    left: 3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .note-gutter-btn,
+  .paperhub-notes .note-fold-toggle svg,
+  .paperhub-notes .bn-block > .bn-block-content[data-content-type="bulletListItem"]::before,
+  .paperhub-notes .note-fold-chip {
+    transition: none;
+    animation: none;
+  }
+}

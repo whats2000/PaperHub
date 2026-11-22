@@ -70,8 +70,18 @@ import { noteSuggestionMarks, useNoteSuggestions, useSuggestionHosts } from "./n
 import { codeFence, dividerRule, inlineMarks } from "./inlineMarks";
 import { isFindKey, noteFind } from "./noteFind";
 import { NoteFindBar } from "./NoteFindBar";
+import { caretFoldOwner, foldOwners } from "./folds";
+import { FoldControls } from "./FoldControls";
+import "./gutter.css";
+import { NoteSideMenu } from "./NoteSideMenu";
 import { partOf } from "./parts";
-import { noteParts, refreshPartDecorations, type PartsView } from "./partsDecorations";
+import {
+  createFoldHosts,
+  noteParts,
+  refreshPartDecorations,
+  type FoldHosts,
+  type PartsView,
+} from "./partsDecorations";
 import { NoteTitle } from "./NoteTitle";
 import { MATH_ALIASES, mathInput, slashLineText, turnIntoEquation } from "./mathInput";
 import { noteSchema, paperhubKeys } from "./schema";
@@ -124,10 +134,17 @@ export interface NoteEditorProps {
 
 const DICTIONARIES = { en, ja, "zh-TW": zhTW, "zh-CN": zh } as const;
 
-/** What the part decorations draw for a note (Focus fades, folds). */
-function partsViewOf(noteId: number): PartsView {
+/** What the part decorations draw for a note (Focus fades, folds; a chip
+ * fading out after its unfold stays drawn until it is gone). */
+function partsViewOf(noteId: number, hosts: FoldHosts): PartsView {
   const s = useNotesStore.getState();
-  return { focusOn: s.focusOn, activePart: s.activePart[noteId] ?? null, folded: new Set(s.folded[noteId] ?? []) };
+  const folded = new Set(s.folded[noteId] ?? []);
+  return {
+    focusOn: s.focusOn,
+    activePart: s.activePart[noteId] ?? null,
+    folded,
+    chips: hosts.chips(folded),
+  };
 }
 
 function dictionaryFor(lang: string) {
@@ -248,6 +265,8 @@ function LoadedNoteEditor({
   const lostBadges = useLostCommentBadges(noteId);
   // Tables' captions and notes are rendered into these hosts.
   const [captionHosts] = useState(createCaptionHosts);
+  // Fold toggles and chips are rendered into these hosts.
+  const [foldHosts] = useState(createFoldHosts);
   // The note card shows one part, and nothing else.
   const cardPart = card?.partId ?? null;
   // The editor outlives a placeholder's save (its id changes): what it
@@ -277,7 +296,7 @@ function LoadedNoteEditor({
         codeFence,
         dividerRule,
         syntaxHighlighter,
-        noteParts(() => partsViewOf(savedNoteId(editorKey)), cardPart),
+        noteParts(() => partsViewOf(savedNoteId(editorKey), foldHosts), cardPart, foldHosts),
         noteSuggestionMarks(() => ({
           suggestions: useNotesStore.getState().notes[savedNoteId(editorKey)]?.suggestions ?? [],
           host: suggestionHost,
@@ -300,16 +319,10 @@ function LoadedNoteEditor({
     synced.current = pruneUnsavedEmpty(doc(), known);
   }
 
-  // A fold outlives its divider only as a stale id: forget it.
+  // A fold outlives its block (or what it folded) only as a stale id: forget it.
   const keepFolds = useCallback(() => {
-    const dividers = new Set<string>();
-    const walk = (list: EditorBlock[]) =>
-      list.forEach((b) => {
-        if (b.type === "divider") dividers.add(b.id);
-        walk(b.children);
-      });
-    walk(doc());
-    useNotesStore.getState().keepFolds(noteId, dividers);
+    if (!(useNotesStore.getState().folded[noteId] ?? []).length) return;
+    useNotesStore.getState().keepFolds(noteId, new Set(foldOwners(doc()).keys()));
   }, [doc, noteId]);
 
   // This editor, among the editors open on the note (the card and the pane).
@@ -755,6 +768,40 @@ function LoadedNoteEditor({
   }
   const onFindGone = useCallback(() => setFindMounted(false), []);
 
+  // Ctrl+Shift+[ / ] (⌘⇧[ / ] on a Mac): fold / unfold the caret's heading
+  // (or list item): the block itself, else the fold the caret is in.
+  const onFoldKey = useCallback(
+    (e: KeyboardEvent) => {
+      const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+      if (variant !== "pane" || !e.shiftKey || e.altKey || !(mac ? e.metaKey : e.ctrlKey)) return;
+      if (e.code !== "BracketLeft" && e.code !== "BracketRight") return;
+      e.preventDefault();
+      e.stopPropagation();
+      let blockId: string;
+      try {
+        blockId = editor.getTextCursorPosition().block.id;
+      } catch {
+        return;
+      }
+      const owner = caretFoldOwner(editor.document, blockId);
+      if (!owner) {
+        toast(t("notes:fold.noHeading", "Put the caret in a heading or under one first"));
+        return;
+      }
+      const store = useNotesStore.getState();
+      const cur = store.folded[noteId] ?? [];
+      const fold = e.code === "BracketLeft";
+      if (fold === cur.includes(owner)) return;
+      // Folding from inside it: the caret goes to the end of the heading.
+      if (fold && owner !== blockId) {
+        const block = editor.getBlock(owner);
+        if (block && Array.isArray(block.content)) editor.setTextCursorPosition(block, "end");
+      }
+      store.toggleFold(noteId, owner);
+    },
+    [editor, noteId, t, variant],
+  );
+
   const defaultTitle = useNotesStore((s) => s.notes[noteId]?.defaultTitle);
   const cardMarkId = card?.markId ?? null;
   const onJump = card?.onJump;
@@ -781,7 +828,10 @@ function LoadedNoteEditor({
         data-testid="note-editor"
         data-variant={variant}
         onClick={comments.onEditorClick}
-        onKeyDownCapture={onFindKey}
+        onKeyDownCapture={(e) => {
+          onFindKey(e);
+          if (!e.defaultPrevented) onFoldKey(e);
+        }}
         onClickCapture={(e) => {
           // A paper link made from selected words opens the paper, like its chip.
           const a = (e.target as HTMLElement).closest?.("a[href^='paperhub://']");
@@ -828,12 +878,15 @@ function LoadedNoteEditor({
           editor={editor}
           theme={resolvedTheme === "dark" ? "dark" : "light"}
           slashMenu={false}
+          sideMenu={false}
           formattingToolbar={false}
           tableHandles={false}
           onChange={onChange}
           onSelectionChange={onSelectionChange}
         >
           <NoteFormattingBar onComment={comments.start} hidden={findOpen} />
+          <NoteSideMenu />
+          {variant === "pane" && <FoldControls editor={editor as never} noteId={noteId} hosts={foldHosts} />}
           <NoteTableHandles />
           <TableCaptions hosts={captionHosts} />
           {/* No blocks inside a table cell (as BlockNote's own slash menu). */}

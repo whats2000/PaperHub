@@ -6,7 +6,6 @@ import type { NoteBlock } from "@/types/notes";
 import {
   activePartFor,
   focusedMarkIds,
-  foldSummary,
   marksInPart,
   partsOfNote,
   partsOfSection,
@@ -112,12 +111,6 @@ describe("activePartFor and marksInPart", () => {
   it("lists the mark ids quoted in a part, once each", () => {
     const parts = partsOfSection([s2, q1, q1, d1, q2, p3, q3], "s2");
     expect(parts.map(marksInPart)).toEqual([["mk_1"], ["mk_2", "mk_3"]]);
-  });
-
-  it("summarises a part for its fold line: blocks without the heading, and marks", () => {
-    const [first, second] = partsOfSection(NOTE, "s2");
-    expect(foldSummary(first!)).toEqual({ blocks: 3, marks: 1 });
-    expect(foldSummary(second!)).toEqual({ blocks: 3, marks: 2 });
   });
 });
 

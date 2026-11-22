@@ -148,17 +148,8 @@ export function marksInPart(part: Part): string[] {
   return out;
 }
 
-/** What a folded part's line says: its blocks (without the section heading)
- * and the marks it quotes. */
-export function foldSummary(part: Part): { blocks: number; marks: number } {
-  return {
-    blocks: part.blocks.filter((b) => b.type !== "section").length,
-    marks: marksInPart(part).length,
-  };
-}
-
-/** A folded part's line, one translated sentence: "4 blocks · 2 marks", or
- * "4 blocks" when it quotes no mark. */
+/** A fold's chip, one translated sentence: "4 blocks · 2 marks", or
+ * "4 blocks" when it quotes no mark (folds.ts `foldSummaryOf`). */
 export function foldLine(
   t: (key: string, fallback: string, options: Record<string, unknown>) => string,
   summary: { blocks: number; marks: number },

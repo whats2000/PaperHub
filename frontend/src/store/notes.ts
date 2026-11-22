@@ -155,12 +155,15 @@ interface NotesStore {
    * viewer's preference, not note content (the Markdown never changes). */
   tableStyle: TableStyle;
   setTableStyle: (style: TableStyle) => void;
-  /** Folded divider ids per note. */
+  /** The folded blocks per note (headings, § sections, list items; see
+   * components/notes/folds.ts): the viewer's, kept in this browser. */
   folded: Record<number, string[]>;
-  toggleFold: (noteId: number, dividerId: string) => void;
-  /** Forgets the folds of dividers no longer in the note (deleted, or turned
-   * back into text). */
-  keepFolds: (noteId: number, dividerIds: ReadonlySet<string>) => void;
+  toggleFold: (noteId: number, blockId: string) => void;
+  /** Sets a note's folded blocks (Fold all / Unfold all, a reveal). */
+  setFolded: (noteId: number, blockIds: string[]) => void;
+  /** Forgets the folds of blocks that no longer fold (deleted, turned into
+   * a paragraph, nothing left under them). */
+  keepFolds: (noteId: number, blockIds: ReadonlySet<string>) => void;
   quoteTarget: QuoteTarget | null;
   setQuoteTarget: (target: QuoteTarget | null) => void;
   /** The block the caret was last in, per note (the notes pane or the note
@@ -1438,22 +1441,21 @@ export const useNotesStore = create<NotesStore>()(
         tableStyle: "threeLine",
         setTableStyle: (style) => set({ tableStyle: style }),
         folded: {},
-        toggleFold: (noteId, dividerId) =>
+        toggleFold: (noteId, blockId) =>
           set((s) => {
             const cur = s.folded[noteId] ?? [];
             return {
               folded: {
                 ...s.folded,
-                [noteId]: cur.includes(dividerId)
-                  ? cur.filter((d) => d !== dividerId)
-                  : [...cur, dividerId],
+                [noteId]: cur.includes(blockId) ? cur.filter((d) => d !== blockId) : [...cur, blockId],
               },
             };
           }),
-        keepFolds: (rawId, dividerIds) => {
+        setFolded: (noteId, blockIds) => set((s) => ({ folded: { ...s.folded, [noteId]: [...new Set(blockIds)] } })),
+        keepFolds: (rawId, blockIds) => {
           const noteId = savedNoteId(rawId);
           const cur = get().folded[noteId] ?? [];
-          const kept = cur.filter((d) => dividerIds.has(d));
+          const kept = cur.filter((d) => blockIds.has(d));
           if (kept.length !== cur.length) set((s) => ({ folded: { ...s.folded, [noteId]: kept } }));
         },
         quoteTarget: null,

@@ -2,7 +2,7 @@ import { createReactBlockSpec } from "@blocknote/react";
 
 import { DividerView } from "./DividerView";
 
-/** The note's divider: it splits a section into notes and folds the one below. */
+/** The note's divider: it splits a section into notes (it folds nothing). */
 export const dividerBlock = createReactBlockSpec(
   { type: "divider", propSchema: {}, content: "none" },
   {

@@ -92,8 +92,8 @@ function useScrollSpy(root: HTMLElement | null, outline: OutlineEntry[], active:
     let found: string | null = null;
     for (const e of outline) {
       const el = blockEl(root, e.blockId);
-      // A folded part's heading has no place on screen.
-      if (!el || el.getAttribute("data-folded") === "true") continue;
+      // A folded heading (or one under a fold) has no place on screen.
+      if (!el || el.closest('[data-folded="true"]')) continue;
       if (el.getBoundingClientRect().top <= line) found = e.blockId;
       else break;
     }

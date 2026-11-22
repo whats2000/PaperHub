@@ -24,7 +24,7 @@ import { useNotesStore } from "@/store/notes";
 
 import { setAtomCaret } from "./atomCaret";
 import { findMatches, setFindMatches, type FindMatch } from "./noteFind";
-import { partOf, type PartBlock } from "./parts";
+import { foldersHiding, type FoldNode } from "./folds";
 import { foldedRanges } from "./partsDecorations";
 import { partRequests } from "./tableCaptions";
 
@@ -49,17 +49,6 @@ export interface NoteFindBarProps {
   host?: HTMLElement | null;
   /** The note card's smaller strip. */
   compact?: boolean;
-}
-
-function flatBlocks(doc: unknown[]): PartBlock[] {
-  const out: PartBlock[] = [];
-  const walk = (list: unknown[]) =>
-    (list as (PartBlock & { children: unknown[] })[]).forEach((b) => {
-      out.push(b);
-      walk(b.children ?? []);
-    });
-  walk(doc);
-  return out;
 }
 
 export function NoteFindBar({
@@ -101,9 +90,9 @@ export function NoteFindBar({
       const v = view();
       const m = list[i];
       if (m && cardPart === null) {
-        const part = partOf(flatBlocks(editor.document), m.blockId);
         const folded = useNotesStore.getState().folded[noteId] ?? [];
-        if (part?.dividerId && folded.includes(part.dividerId)) useNotesStore.getState().toggleFold(noteId, part.dividerId);
+        const hiding = foldersHiding(editor.document as unknown as FoldNode[], m.blockId, new Set(folded));
+        if (hiding.length) useNotesStore.getState().setFolded(noteId, folded.filter((id) => !hiding.includes(id)));
       }
       setFindMatches(v, list, m ? i : -1);
       if (!m) return;

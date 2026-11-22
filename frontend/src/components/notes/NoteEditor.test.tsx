@@ -5,6 +5,7 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { BlockNoteEditor } from "@blocknote/core";
+import type { EditorView } from "@tiptap/pm/view";
 
 import { setAtomCaret } from "@/components/notes/atomCaret";
 import { NoteEditor } from "@/components/notes/NoteEditor";
@@ -849,6 +850,11 @@ describe("dividers, Focus and folding", () => {
   const d2 = blk("d2", { type: "divider" });
   const q2 = blk("q2", { ...quote, id: "q2", props: { ...quote.props, markId: "mk_2" } });
   const p3 = blk("p3", { content: [{ type: "text", text: "Third", styles: {} }], text: "Third" });
+  const heading = (id: string, level: number, text: string) =>
+    blk(id, { type: "heading", props: { level }, content: [{ type: "text", text, styles: {} }], text });
+  const h2a = heading("ha", 2, "Sub A");
+  const h2b = heading("hb", 2, "Sub B");
+  const h3 = heading("h3", 3, "Deeper");
   it.each([["space", " "], ["Enter", "Enter"]])("typing $$ + %s at a line start puts the caret in the new equation's LaTeX", (_key, last) => {
     seed([blk("p0", { content: [] })]);
     mount();
@@ -1136,7 +1142,7 @@ describe("dividers, Focus and folding", () => {
     expect(rule("d2")).not.toHaveAttribute("data-edge");
   });
 
-  it("a divider just typed frames the part and counts its blocks from the editor, before the store has it", async () => {
+  it("a divider just typed frames the part from the editor, before the store has it", async () => {
     const pe = blk("pe", { content: [] });
     seed([section, quote, d1, q2, p3, pe]);
     // The sync has not landed: the store keeps the line as it was.
@@ -1161,9 +1167,9 @@ describe("dividers, Focus and folding", () => {
     });
     const rule = (await screen.findByTestId("divider-pe")).querySelector("hr")!;
     expect(rule).toHaveAttribute("data-edge", "true");
-    // d1's part (q2, p3) as the editor has it.
-    act(() => useNotesStore.getState().toggleFold(7, "d1"));
-    expect(within(screen.getByTestId("divider-d1")).getByRole("button", { name: "2 blocks · 1 mark" })).toBeInTheDocument();
+    // A divider folds nothing (folds.ts): it has no toggle.
+    expect(within(screen.getByTestId("divider-d1")).queryByRole("button")).toBeNull();
+    expect(outer("d1")).not.toHaveAttribute("data-fold-owner");
   });
 
   it.each([
@@ -1179,9 +1185,9 @@ describe("dividers, Focus and folding", () => {
     expect(foldLine(t, { blocks: 1, marks: 3 })).toBe(plural);
   });
 
-  it("the caret never lands in a folded part: moving down skips past it, moving up stops at its divider", async () => {
-    seed([section, quote, d1, q2, p3, d2, p4]);
-    useNotesStore.setState({ folded: { 7: ["d1"] } });
+  it("the caret never lands in a fold: moving down skips past it, moving up stops at its heading", async () => {
+    seed([section, quote, h2a, q2, p3, h2b, p4]);
+    useNotesStore.setState({ folded: { 7: ["ha"] } });
     mount();
     await screen.findByText("Fourth");
     type Node = { attrs: { id?: string }; type: { name: string }; nodeSize: number };
@@ -1217,70 +1223,44 @@ describe("dividers, Focus and folding", () => {
     act(() => {
       pm.editor.commands.setTextSelection(posIn("p3"));
     });
-    expect(["d2", "p4"]).toContain(blockAtCaret());
-    // Up from the last part: onto the folded part's divider.
+    expect(["hb", "p4"]).toContain(blockAtCaret());
+    // Up from the last part: onto the folded heading (or above it).
     act(() => {
       pm.editor.commands.setTextSelection(posIn("p4"));
     });
     act(() => {
       pm.editor.commands.setTextSelection(posIn("p3"));
     });
-    expect(["d1", "q1", "s1"]).toContain(blockAtCaret());
+    expect(["ha", "q1", "s1"]).toContain(blockAtCaret());
     // Unfolded, the caret goes in.
-    act(() => useNotesStore.getState().toggleFold(7, "d1"));
+    act(() => useNotesStore.getState().toggleFold(7, "ha"));
     act(() => {
       pm.editor.commands.setTextSelection(posIn("p3"));
     });
     expect(blockAtCaret()).toBe("p3");
   });
 
-  it("forgets a fold when its divider is deleted or turned back into ---", async () => {
-    const dx = blk("dx", { type: "divider" });
-    seed([section, quote, d1, q2, dx, p3]);
-    useNotesStore.setState({ folded: { 7: ["d1", "dx"] } });
+  it("forgets a fold when its block no longer folds (nothing under it, or no longer a heading)", async () => {
+    seed([h2a, p3, h2b, p4]);
+    useNotesStore.setState({ folded: { 7: ["ha", "hb"] } });
     mount();
-    await screen.findByTestId("divider-dx");
-    type Node = { attrs: { id?: string }; type: { name: string }; nodeSize: number };
-    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
-      editor: {
-        view: {
-          state: {
-            doc: { descendants: (f: (n: Node, pos: number) => boolean | void) => void };
-            tr: { delete: (a: number, b: number) => unknown };
-          };
-          dispatch: (tr: unknown) => void;
-        };
-      };
+    await screen.findByText("Fourth");
+    const view = (document.querySelector(".ProseMirror") as HTMLElement & { editor: { view: EditorView } }).editor.view;
+    const rangeOf = (id: string): [number, number] => {
+      let r: [number, number] | null = null;
+      view.state.doc.descendants((n, pos) => {
+        if (n.type.name === "blockContainer" && n.attrs.id === id) r = [pos, pos + n.nodeSize];
+        return r === null;
+      });
+      return r!;
     };
-    const view = pm.editor.view;
-    let range: [number, number] | null = null;
-    view.state.doc.descendants((n, pos) => {
-      if (n.type.name === "blockContainer" && n.attrs.id === "dx") range = [pos, pos + n.nodeSize];
-      return range === null;
-    });
-    act(() => view.dispatch(view.state.tr.delete(range![0], range![1])));
-    await waitFor(() => expect(useNotesStore.getState().folded[7]).toEqual(["d1"]));
-
-    // d1 turned back into the --- line (what the toast's Undo does): fold gone.
-    type View = {
-      state: {
-        doc: { descendants: (f: (n: Node, pos: number) => boolean | void) => void };
-        schema: { nodes: { paragraph: { create: (a: null, c: unknown) => unknown } }; text: (t: string) => unknown };
-        tr: { replaceWith: (a: number, b: number, n: unknown) => unknown };
-      };
-      dispatch: (tr: unknown) => void;
-    };
-    const v = view as unknown as View;
-    let content: [number, number] | null = null;
-    v.state.doc.descendants((n, pos) => {
-      if (n.type.name === "divider") {
-        content = [pos, pos + n.nodeSize];
-        return false;
-      }
-      return content === null;
-    });
-    const para = v.state.schema.nodes.paragraph.create(null, v.state.schema.text("---"));
-    act(() => v.dispatch(v.state.tr.replaceWith(content![0], content![1], para)));
+    // hb loses the one block under it.
+    const [a, b] = rangeOf("p4");
+    act(() => view.dispatch(view.state.tr.delete(a, b)));
+    await waitFor(() => expect(useNotesStore.getState().folded[7]).toEqual(["ha"]));
+    // ha turned into a paragraph.
+    const [c] = rangeOf("ha");
+    act(() => view.dispatch(view.state.tr.setNodeMarkup(c + 1, view.state.schema.nodes.paragraph)));
     await waitFor(() => expect(useNotesStore.getState().folded[7]).toEqual([]));
   });
 
@@ -1384,38 +1364,99 @@ describe("dividers, Focus and folding", () => {
     expect(useNotesStore.getState().focusOn).toBe(false);
   });
 
-  it("the chevron sits above BlockNote's side menu (z-20), whose drag handle it overlaps", async () => {
-    seed([section, quote, d1, q2]);
+  it("a heading's toggle hangs in the gutter, before its text, and folds to the next heading of its level", async () => {
+    seed([section, quote, h2a, q2, h3, p3, h2b, p4]);
     mount();
-    const fold = within(await screen.findByTestId("divider-d1")).getByRole("button", {
-      name: "Fold the part below this divider",
-    });
-    // jsdom cannot hit-test: the stacking is the classes (verified live).
-    expect(fold.className.split(" ")).toEqual(expect.arrayContaining(["relative", "z-[21]"]));
-    // A click on the chevron reaches it and folds the part.
+    await screen.findByText("Fourth");
+    const host = await waitFor(() => outer("ha").querySelector<HTMLElement>(":scope > .bn-block > .note-fold-host")!);
+    // A widget inside the block, before its content: the text is untouched.
+    expect(host.nextElementSibling).toHaveClass("bn-block-content");
+    expect(outer("ha").querySelector(".bn-inline-content")?.textContent).toBe("Sub A");
+    const fold = await within(host).findByRole("button", { name: "Fold the blocks under this" });
+    expect(fold).toHaveClass("note-gutter-btn");
+    expect(fold).toHaveAttribute("aria-expanded", "true");
+    expect(fold.title).toBe("Fold · Ctrl+Shift+[");
     fireEvent.click(fold);
-    expect(fold).toHaveAttribute("aria-expanded", "false");
-    expect(useNotesStore.getState().folded[7]).toEqual(["d1"]);
+    expect(useNotesStore.getState().folded[7]).toEqual(["ha"]);
+    await waitFor(() => expect(outer("q2")).toHaveAttribute("data-folded", "true"));
+    expect(outer("h3")).toHaveAttribute("data-folded", "true");
+    expect(outer("p3")).toHaveAttribute("data-folded", "true");
+    expect(outer("hb")).not.toHaveAttribute("data-folded");
+    expect(outer("p4")).not.toHaveAttribute("data-folded");
+    expect(outer("ha")).toHaveAttribute("data-fold-owner", "folded");
+    expect(within(host).getByRole("button", { name: "Unfold" })).toHaveAttribute("aria-expanded", "false");
+    // The chip after the heading's text says what is folded; it unfolds.
+    const chip = await within(outer("ha") as HTMLElement).findByRole("button", { name: "… 3 blocks · 1 mark" });
+    expect(chip.closest(".bn-inline-content")).not.toBeNull();
+    const saved = JSON.parse(localStorage.getItem("paperhub-notes-v1") ?? "{}") as { state: { folded: unknown } };
+    expect(saved.state.folded).toEqual({ 7: ["ha"] });
+    fireEvent.click(chip);
+    await waitFor(() => expect(outer("q2")).not.toHaveAttribute("data-folded"));
+    expect(useNotesStore.getState().folded[7]).toEqual([]);
   });
 
-  it("the chevron folds the part below to a line that unfolds it, and the fold is kept", async () => {
-    seed([section, quote, d1, q2, p3, d2, p4]);
-    mount();
-    const fold = within(await screen.findByTestId("divider-d1")).getByRole("button", {
-      name: "Fold the part below this divider",
+  it("a § section folds like an H1 and draws its own chip; a list item folds its nested items", async () => {
+    const s2 = blk("s2", { type: "section", props: { title: "3 Results" }, text: "3 Results", section_key: "3 Results" });
+    const li = blk("li", { type: "bulletListItem", content: [{ type: "text", text: "Item", styles: {} }], text: "Item" });
+    const li1 = blk("li1", {
+      type: "bulletListItem",
+      parent_id: "li",
+      content: [{ type: "text", text: "Child", styles: {} }],
+      text: "Child",
     });
-    expect(fold).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(fold);
-    expect(useNotesStore.getState().folded[7]).toEqual(["d1"]);
-    expect(fold).toHaveAttribute("aria-expanded", "false");
-    await waitFor(() => expect(outer("q2")).toHaveAttribute("data-folded", "true"));
+    seed([section, quote, h2a, p3, s2, li, li1, p4]);
+    useNotesStore.setState({ folded: { 7: ["s1", "li"] } });
+    mount();
+    await screen.findByText("Fourth");
+    await waitFor(() => expect(outer("q1")).toHaveAttribute("data-folded", "true"));
+    expect(outer("ha")).toHaveAttribute("data-folded", "true");
     expect(outer("p3")).toHaveAttribute("data-folded", "true");
+    expect(outer("s2")).not.toHaveAttribute("data-folded");
+    expect(await within(outer("s1") as HTMLElement).findByRole("button", { name: "… 3 blocks · 1 mark" })).toBeInTheDocument();
+    // The list item: only its nested item.
+    expect(outer("li1")).toHaveAttribute("data-folded", "true");
+    expect(outer("li")).not.toHaveAttribute("data-folded");
     expect(outer("p4")).not.toHaveAttribute("data-folded");
-    const line = within(screen.getByTestId("divider-d1")).getByRole("button", { name: "2 blocks · 1 mark" });
-    const saved = JSON.parse(localStorage.getItem("paperhub-notes-v1") ?? "{}") as { state: { folded: unknown } };
-    expect(saved.state.folded).toEqual({ 7: ["d1"] });
-    fireEvent.click(line);
-    await waitFor(() => expect(outer("q2")).not.toHaveAttribute("data-folded"));
+    await waitFor(() =>
+      expect(outer("li").querySelector(":scope > .bn-block > .note-fold-host button")).toHaveAttribute("aria-expanded", "false"),
+    );
+    // A plain paragraph has no toggle.
+    expect(outer("p4").querySelector(".note-fold-host")).toBeNull();
+  });
+
+  it("Ctrl+Shift+[ folds the caret's heading and ] unfolds it", async () => {
+    seed([h2a, q2, p3, h2b, p4]);
+    mount();
+    await screen.findByText("Fourth");
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { view: EditorView; commands: { setTextSelection: (pos: number) => boolean } };
+    };
+    let at = -1;
+    pm.editor.view.state.doc.descendants((n, pos) => {
+      if (n.type.name === "blockContainer" && n.attrs.id === "p3") at = pos + 3;
+      return at < 0;
+    });
+    act(() => {
+      pm.editor.commands.setTextSelection(at);
+    });
+    fireEvent.keyDown(pm, { key: "[", code: "BracketLeft", ctrlKey: true, shiftKey: true });
+    expect(useNotesStore.getState().folded[7]).toEqual(["ha"]);
+    await waitFor(() => expect(outer("p3")).toHaveAttribute("data-folded", "true"));
+    fireEvent.keyDown(pm, { key: "]", code: "BracketRight", ctrlKey: true, shiftKey: true });
+    expect(useNotesStore.getState().folded[7]).toEqual([]);
+  });
+
+  it("the notes menu folds and unfolds every heading, section and list item at once", async () => {
+    const { NotesToolbar } = await import("./NotesToolbar");
+    seed([section, quote, h2a, p3, h2b, p4, d1, q2]);
+    act(() => {
+      render(<NotesToolbar noteId={7} followLabel={null} guideOpen={false} onGuideOpenChange={() => {}} />);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Fold all" }));
+    expect([...(useNotesStore.getState().folded[7] ?? [])].sort()).toEqual(["ha", "hb", "s1"]);
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Unfold all" }));
     expect(useNotesStore.getState().folded[7]).toEqual([]);
   });
 });
