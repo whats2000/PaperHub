@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import secrets
 import string
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -232,9 +232,11 @@ async def find_note(conn: aiosqlite.Connection, *, target_kind: str,
 
 async def list_live_notes(
     conn: aiosqlite.Connection, query: str = "", *, limit: int | None = None,
+    note_ids: Collection[int] | None = None,
 ) -> list[tuple[Note, str]]:
     """Live notes of the owner as ``(note, display title)``, most recently
-    updated first, whose title contains ``query`` (case-insensitive).
+    updated first, whose title contains ``query`` (case-insensitive);
+    only those in ``note_ids`` when given.
 
     Left out: an orphan (target gone, no title of its own), an empty note
     (no title, no live block with text) and the note of a chat the sidebar
@@ -243,7 +245,9 @@ async def list_live_notes(
     async with conn.execute(
         f"SELECT {_NOTE_COLS}, {NOTE_HAS_CONTENT_SQL}, {_HIDDEN_CHAT_SQL} "  # noqa: S608
         "FROM notes n WHERE owner_id = 1 AND deleted_at IS NULL "
-        "ORDER BY updated_at DESC, id DESC"
+        + ("" if note_ids is None else
+           f"AND id IN ({','.join(str(int(i)) for i in note_ids) or 'NULL'}) ")
+        + "ORDER BY updated_at DESC, id DESC"
     ) as cur:
         rows = await cur.fetchall()
     linked: set[int] | None = None

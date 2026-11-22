@@ -230,6 +230,38 @@ async def test_heading_search_returns_headings_only(
 
 
 @pytest.mark.asyncio
+async def test_heading_search_follows_the_outline_rules(
+    client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The heading picker offers what a note's outline offers: no empty
+    heading, none below level 3; and it reads only the notes that hold a
+    matching heading."""
+    from paperhub.api import notes as notes_api
+    nid1, nid2 = await _seed(tmp_path, client)
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        async with conn.execute("SELECT revision FROM notes WHERE id = ?",
+                                (nid1,)) as cur:
+            rev = (await cur.fetchone())[0]
+        await apply_ops(conn, nid1, base_revision=rev, actor="user", ops=[
+            Op(op="insert", block_id="b_e", block=_h("  ")),
+            Op(op="insert", block_id="b_4", block=_h("Deep gate", 4))])
+    outline = {o["block_id"] for o in
+               (await client.get(f"/notes/{nid1}/outline")).json()}
+    heads = (await client.get("/notes/headings/search")).json()
+    assert {h["block_id"] for h in heads if h["note_id"] == nid1} == outline
+    read: list[int] = []
+    real = notes_api.list_blocks
+
+    async def spy(conn, note_id):  # type: ignore[no-untyped-def]
+        read.append(note_id)
+        return await real(conn, note_id)
+    monkeypatch.setattr(notes_api, "list_blocks", spy)
+    got = (await client.get("/notes/headings/search", params={"q": "other"})).json()
+    assert [h["block_id"] for h in got] == ["b_o"]
+    assert read == [nid2]
+
+
+@pytest.mark.asyncio
 async def test_outline_follows_document_order_with_nested_children(
     client: AsyncClient, tmp_path: Path,
 ) -> None:

@@ -337,6 +337,20 @@ def _level(props: dict[str, Any]) -> int:
     return lv if isinstance(lv, int) and not isinstance(lv, bool) and lv > 0 else 1
 
 
+def _link_heading(type_: str, text: str, props: dict[str, Any]) -> bool:
+    """A heading a ``[[`` link may target: named and level 1-3 (the note's
+    outline, its table of contents and their export list the same ones)."""
+    return type_ == "heading" and bool(text.strip()) and _level(props) <= 3
+
+
+def _props_of(payload: str) -> dict[str, Any]:
+    try:
+        props = json.loads(payload).get("props")
+    except (ValueError, AttributeError):
+        return {}
+    return props if isinstance(props, dict) else {}
+
+
 @router.get("/search", response_model=list[NoteHit])
 async def search_notes(q: str = "", limit: int = Query(20, ge=1, le=100)
                        ) -> list[NoteHit]:
@@ -357,9 +371,24 @@ async def search_headings(q: str = "", limit: int = Query(20, ge=1, le=100)
     needle = q.strip().casefold()
     out: list[HeadingHit] = []
     async with open_db(load_settings().db_path) as conn:
-        for note, note_title in await list_live_notes(conn):
+        # One pass over the heading rows; only the notes holding a match
+        # are then named and read (in document order).
+        async with conn.execute(
+            "SELECT b.note_id, b.text, b.payload_json FROM note_blocks b "
+            "JOIN notes n ON n.id = b.note_id WHERE b.type = 'heading' "
+            "AND b.deleted_at IS NULL AND n.deleted_at IS NULL "
+            "AND n.owner_id = 1"
+        ) as cur:
+            rows = await cur.fetchall()
+        holding = {int(nid) for nid, text, payload in rows
+                   if needle in text.casefold() and _link_heading(
+                       "heading", text, _props_of(payload))}
+        if not holding:
+            return out
+        for note, note_title in await list_live_notes(conn, note_ids=holding):
             for b in await list_blocks(conn, note.id):
-                if b.type != "heading" or needle not in b.text.casefold():
+                if (not _link_heading(b.type, b.text, b.props)
+                        or needle not in b.text.casefold()):
                     continue
                 out.append(HeadingHit(
                     note_id=note.id, note_title=note_title, block_id=b.id,
@@ -386,8 +415,7 @@ async def note_outline(note_id: int) -> list[OutlineItem]:
         for b in await list_blocks(conn, note_id):
             # An unnamed entry is no link target: left out, as in the
             # in-note table of contents and its export.
-            if (b.type == "heading" and b.text.strip()
-                    and _level(b.props) <= 3):
+            if _link_heading(b.type, b.text, b.props):
                 out.append(OutlineItem(block_id=b.id, type="heading",
                                        text=b.text, level=_level(b.props)))
             elif b.type == "section":
