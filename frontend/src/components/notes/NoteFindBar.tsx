@@ -94,13 +94,18 @@ export function NoteFindBar({ editor, noteId, cardPart, focusSeq, open, onClose,
         v.dispatch(v.state.tr.setSelection(sel));
       }
       // A table's caption / notes draws its own highlight after this render:
-      // the part itself is scrolled to (the caret stays where it was).
-      const el = inPart
-        ? v.dom.querySelector(`[data-id="${m.blockId}"] [data-table-caption="${m.kind}"]`)
-        : v.dom.querySelector(".ph-find-current");
-      if (el && typeof el.scrollIntoView === "function") {
-        el.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
-      }
+      // the part itself is scrolled to (the caret stays where it was). The
+      // scroll waits a frame: Chrome cancels a smooth scroll started inside
+      // the find field's typing event, so typing never brought a match into
+      // view (only Enter did).
+      requestAnimationFrame(() => {
+        const el = inPart
+          ? v.dom.querySelector(`[data-id="${m.blockId}"] [data-table-caption="${m.kind}"]`)
+          : v.dom.querySelector(".ph-find-current");
+        if (el && typeof el.scrollIntoView === "function") {
+          el.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+        }
+      });
     },
     [view, editor, noteId, cardPart],
   );

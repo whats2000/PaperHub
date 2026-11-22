@@ -190,6 +190,39 @@ describe("find in a note", () => {
     expect(document.querySelectorAll(".ph-find").length).toBe(0);
   });
 
+  it("scrolls to the match a frame after the keystroke (a scroll inside the typing event is cancelled)", async () => {
+    seed([para("p1", "Alpha"), para("p2", "needle here")]);
+    const pm = mount();
+    await screen.findByText("needle here");
+    const calls: Element[] = [];
+    const spy = vi
+      .spyOn(Element.prototype, "scrollIntoView")
+      .mockImplementation(function (this: Element) {
+        calls.push(this);
+      });
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      frames.push(cb);
+      return frames.length;
+    });
+    try {
+      act(() => {
+        ctrlF(pm);
+      });
+      typeQuery("needle");
+      expect(calls.filter((e) => e.classList.contains("ph-find-current"))).toHaveLength(0);
+      act(() => {
+        frames.splice(0).forEach((cb) => cb(0));
+      });
+      const scrolled = calls.filter((e) => e.classList.contains("ph-find-current"));
+      expect(scrolled).toHaveLength(1);
+      expect(scrolled[0]!.textContent).toBe("needle");
+    } finally {
+      spy.mockRestore();
+      raf.mockRestore();
+    }
+  });
+
   it("finds CJK text", async () => {
     seed([para("p1", "注意力機制很重要"), para("p2", "自注意力")]);
     const pm = mount();
