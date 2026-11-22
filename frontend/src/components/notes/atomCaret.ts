@@ -6,7 +6,9 @@
  * always a way to write before a reference, even at the very top of the note.
  *
  * The block is node-selected (so the keys reach the editor and the browser
- * draws no text caret elsewhere); a node decoration marks it
+ * draws no text caret elsewhere); a node decoration marks the whole block
+ * (its .bn-block-outer, which holds every part of it: a table's caption and
+ * notes sit beside its .bn-block-content) as selected
  * (`data-object-selected`: a light tint, no frame) and draws the caret line
  * (`data-atom-caret`), both styled in index.css. */
 import { createExtension } from "@blocknote/core";
@@ -150,13 +152,31 @@ function leave(view: EditorView, caret: AtomCaret, dir: "up" | "down"): boolean 
   return true;
 }
 
+/** The parts a block draws beside its .bn-block-content (its siblings in
+ * the .bn-block): a table's caption above it and notes below it. */
+const OWN_PARTS = ":scope > .note-table-part-host";
+
+/** The block's whole extent: its content and its own parts. */
+function extentOf(content: HTMLElement): { left: number; right: number; top: number; bottom: number } {
+  const { left, right, top, bottom } = content.getBoundingClientRect();
+  const out = { left, right, top, bottom };
+  for (const part of content.closest(".bn-block")?.querySelectorAll<HTMLElement>(OWN_PARTS) ?? []) {
+    const p = part.getBoundingClientRect();
+    if (p.height <= 0) continue;
+    out.top = Math.min(out.top, p.top);
+    out.bottom = Math.max(out.bottom, p.bottom);
+  }
+  return out;
+}
+
 /** The object block whose gutter (the strip ATOM_GUTTER_PX wide left or
- * right of its content) holds this point, and the side. */
+ * right of it, beside its content and its own parts) holds this point, and
+ * the side. */
 function inGutter(view: EditorView, x: number, y: number): { content: HTMLElement; side: CaretSide } | null {
   let hit: { content: HTMLElement; side: CaretSide } | null = null;
   for (const content of view.dom.querySelectorAll<HTMLElement>(".bn-block-content[data-content-type]")) {
     if (!ATOM_CARET_TYPES.has(content.getAttribute("data-content-type") ?? "")) continue;
-    const r = content.getBoundingClientRect();
+    const r = extentOf(content);
     if (y < r.top || y > r.bottom) continue;
     // The innermost (a nested block comes later in the document) wins.
     if (x < r.left && x >= r.left - ATOM_GUTTER_PX) hit = { content, side: "before" };
@@ -397,17 +417,19 @@ export const atomCaret = createExtension({
       },
       props: {
         // A selected object block is tinted (no frame), with the caret
-        // beside it when there is one (index.css).
+        // beside it when there is one (index.css). The mark goes on the
+        // block (its blockContainer), which holds all its parts.
         decorations: (state) => {
           const sel = state.selection;
           const caret = atomCaretKey.getState(state);
           const pos = caret?.pos ?? (sel instanceof NodeSelection ? sel.from : -1);
-          const node = pos >= 0 ? caretAt(state, pos) : null;
-          if (!node) return null;
+          if (pos < 1 || !caretAt(state, pos)) return null;
+          const container = state.doc.nodeAt(pos - 1);
+          if (container?.type.name !== "blockContainer") return null;
           const attrs: Record<string, string> = {};
           if (selectsBlock(sel, pos)) attrs["data-object-selected"] = "";
           if (caret) attrs["data-atom-caret"] = caret.side;
-          return DecorationSet.create(state.doc, [Decoration.node(pos, pos + node.nodeSize, attrs)]);
+          return DecorationSet.create(state.doc, [Decoration.node(pos - 1, pos - 1 + container.nodeSize, attrs)]);
         },
         handleDOMEvents: {
           // Ahead of BlockNote's own keymap, whose Delete / Backspace would

@@ -1559,7 +1559,7 @@ describe("the insertion caret beside a block", () => {
   const content = (id: string) =>
     document.querySelector(`.bn-block-outer[data-id="${id}"] .bn-block-content`) as HTMLElement;
   const caretOf = (id: string) =>
-    document.querySelector(`.bn-block-outer[data-id="${id}"] [data-atom-caret]`)?.getAttribute("data-atom-caret") ??
+    document.querySelector(`.bn-block-outer[data-id="${id}"][data-atom-caret]`)?.getAttribute("data-atom-caret") ??
     null;
   const clickSide = (id: string, side: "left" | "right", target?: HTMLElement) => {
     const el = content(id);
@@ -1653,7 +1653,7 @@ describe("Delete and Backspace next to a reference", () => {
   const types = () =>
     [...document.querySelectorAll(".bn-block-content")].map((e) => e.getAttribute("data-content-type"));
   const caretOf = (id: string) =>
-    document.querySelector(`.bn-block-outer[data-id="${id}"] [data-atom-caret]`)?.getAttribute("data-atom-caret") ??
+    document.querySelector(`.bn-block-outer[data-id="${id}"][data-atom-caret]`)?.getAttribute("data-atom-caret") ??
     null;
   /** Puts the text caret in block `id` at its start or end, then presses `key`. */
   const press = (id: string, at: "start" | "end", key: string) => {

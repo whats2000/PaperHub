@@ -414,61 +414,74 @@
    or math block, …) as in Notion: a light tint over the block and its
    gutter (ATOM_GUTTER_PX = 8px each side), no frame. BlockNote's thick inset
    ring is turned off; a table's caret holds all its cells selected, drawn
-   as the block's tint rather than as selected cells. */
+   as the block's tint rather than as selected cells.
+   The mark is on the whole block (.bn-block-outer): the tint and the caret
+   are drawn on its .bn-block, a one-column grid, over the rows of the
+   block's own parts only — its content, and a table's caption above and
+   notes below it — never over what follows them (a suggestion bar, a
+   comment badge, nested blocks, which keep their own marks). */
 .paperhub-notes {
   --note-select: oklch(0.55 0.12 250);
 }
 .dark .paperhub-notes {
   --note-select: oklch(0.7 0.12 250);
 }
-.paperhub-notes [data-object-selected] {
+.paperhub-notes .bn-block-outer[data-object-selected] > .bn-block,
+.paperhub-notes .bn-block-outer[data-atom-caret] > .bn-block {
+  /* Lays out as BlockNote's flex column does (rows in order, full width). */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   position: relative;
 }
-.paperhub-notes [data-object-selected].ProseMirror-selectednode,
-.paperhub-notes [data-object-selected] .ProseMirror-selectednode,
-.paperhub-notes [data-object-selected] > .bn-block-content {
+.paperhub-notes .bn-block-outer[data-object-selected] > .bn-block > :is(.bn-block-content, .react-renderer),
+.paperhub-notes .bn-block-outer[data-object-selected] > .bn-block > :is(.bn-block-content, .react-renderer) .ProseMirror-selectednode,
+.paperhub-notes .bn-block-outer[data-object-selected] > .bn-block > .react-renderer > .bn-block-content {
   outline: none;
 }
-.paperhub-notes [data-object-selected]::before {
+.paperhub-notes .bn-block-outer[data-object-selected] > .bn-block::before {
   content: "";
   position: absolute;
+  /* The grid area of the block's content (a table: rows 1 to 3, below). */
+  grid-area: 1 / 1;
   inset: 0 -8px;
-  /* A table or code block is marked on BlockNote's own .bn-block-content,
-     whose ::before BlockNote sets to height 0 with a 0.2s transition: the
-     tint takes the block's full height and appears at once. */
-  height: auto;
-  margin: 0;
-  transition: none;
   /* Over the block's own positioned parts (a code block's box, a table). */
   z-index: 1;
   border-radius: 6px;
   background: color-mix(in oklch, var(--note-select) 7%, transparent);
   pointer-events: none;
 }
-.paperhub-notes [data-object-selected].bn-block-content > *::after,
-.paperhub-notes [data-object-selected] > .bn-block-content > *::after,
-.paperhub-notes [data-object-selected] .selectedCell::after {
+.paperhub-notes .bn-block-outer[data-object-selected] > .bn-block > .bn-block-content > *::after,
+.paperhub-notes .bn-block-outer[data-object-selected] > .bn-block > .react-renderer > .bn-block-content > *::after,
+.paperhub-notes .bn-block-outer[data-object-selected] > .bn-block > .bn-block-content .selectedCell::after {
   content: none;
 }
 /* The insertion caret beside it: a text caret's 2px line the block's full
    height (6px in from its top and bottom) in its gutter, at the left or
    right edge, blinking like one (steady under reduced motion). */
-.paperhub-notes [data-atom-caret]::after {
+.paperhub-notes .bn-block-outer[data-atom-caret] > .bn-block::after {
   content: "";
   position: absolute;
+  grid-area: 1 / 1;
   top: 6px;
   bottom: 6px;
   width: 2px;
+  z-index: 2;
   border-radius: 1px;
   background: var(--foreground);
   pointer-events: none;
   animation: paperhub-caret-blink 1.05s steps(1, end) infinite;
 }
-.paperhub-notes [data-atom-caret="before"]::after {
+.paperhub-notes .bn-block-outer[data-atom-caret="before"] > .bn-block::after {
   left: -5px;
 }
-.paperhub-notes [data-atom-caret="after"]::after {
+.paperhub-notes .bn-block-outer[data-atom-caret="after"] > .bn-block::after {
   right: -5px;
+}
+/* A table's caption host, the table and its notes host are rows 1 to 3
+   (tableCaptions.ts); a closed caption or notes is 0 high. */
+.paperhub-notes .bn-block-outer > .bn-block:has(> .note-table-part-host)::before,
+.paperhub-notes .bn-block-outer > .bn-block:has(> .note-table-part-host)::after {
+  grid-row: 1 / 4;
 }
 @keyframes paperhub-caret-blink {
   0% {
@@ -479,7 +492,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .paperhub-notes [data-atom-caret]::after {
+  .paperhub-notes .bn-block-outer[data-atom-caret] > .bn-block::after {
     animation: none;
   }
 }

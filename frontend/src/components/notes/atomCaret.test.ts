@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import indexCss from "@/index.css?raw";
 
-import { ATOM_CARET_TYPES, ATOM_GUTTER_PX, atomCaret, atomCaretKey } from "./atomCaret";
+import { ATOM_CARET_TYPES, ATOM_GUTTER_PX, atomCaret, atomCaretKey, setAtomCaret } from "./atomCaret";
+import { createCaptionHosts, tableCaptions } from "./tableCaptions";
 import { cleanupEditors, makeEditor, press, type AnyEditor } from "./testEditor";
 
 afterEach(cleanupEditors);
@@ -23,9 +24,11 @@ const box = (left: number, right: number, top = 0, bottom = 40) =>
 
 const contentOf = (id: string) =>
   document.querySelector<HTMLElement>(`.bn-block-outer[data-id="${id}"] .bn-block-content`)!;
-const caretOf = (id: string) =>
-  document.querySelector(`.bn-block-outer[data-id="${id}"] [data-atom-caret]`)?.getAttribute("data-atom-caret") ?? null;
-const selectedOf = (id: string) => document.querySelector(`.bn-block-outer[data-id="${id}"] [data-object-selected]`);
+/** The element carrying `attr` for block `id` (the block itself or one inside it, not a nested block). */
+const markOf = (id: string, attr: string) =>
+  [...document.querySelectorAll<HTMLElement>(`[${attr}]`)].find((el) => el.closest(".bn-block-outer")?.getAttribute("data-id") === id) ?? null;
+const caretOf = (id: string) => markOf(id, "data-atom-caret")?.getAttribute("data-atom-caret") ?? null;
+const selectedOf = (id: string) => markOf(id, "data-object-selected");
 
 /** The content node of block `id` (its position in the document). */
 function posOf(editor: AnyEditor, id: string): number {
@@ -146,26 +149,92 @@ describe("every object block takes the caret", () => {
   });
 });
 
+/** The declarations of the index.css rule whose selector list holds `selector`. */
+function cssRule(selector: string): string {
+  for (const m of indexCss.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    const sels = m[1]!.split(",").map((s) => s.trim().replace(/\s+/g, " "));
+    if (sels.includes(selector)) return m[2]!;
+  }
+  return "";
+}
+
 describe("the selected object block's tint", () => {
-  // A table or code block has no React wrapper: the mark lands on BlockNote's
-  // own .bn-block-content, whose ::before BlockNote sets to height 0 (and a
-  // 0.2s transition), which collapsed the tint to nothing.
+  const captioned = { ...table, props: { caption: "Results", notes: "* p < 0.05" } };
+
+  // The mark is on the whole block (.bn-block-outer), not on the content
+  // node: a table's caption (above) and notes (below) are drawn outside
+  // its .bn-block-content, so a tint on the content missed them.
   it.each([
     ["table", table],
     ["code block", code],
-  ])("a selected %s is marked on its .bn-block-content", (_name, block) => {
+  ])("a selected %s is marked on its block", (_name, block) => {
     const editor = makeEditor([atomCaret], [line, block]);
     contentOf(block.id).getBoundingClientRect = () => box(100, 500, 50, 150);
     act(() => {
       fireEvent.click(editor._tiptapEditor.view.dom, { clientX: 503, clientY: 90 });
     });
-    expect(selectedOf(block.id)?.classList.contains("bn-block-content")).toBe(true);
+    const marked = selectedOf(block.id);
+    expect(marked?.classList.contains("bn-block-outer")).toBe(true);
+    expect(marked?.getAttribute("data-id")).toBe(block.id);
+    expect(marked?.getAttribute("data-atom-caret")).toBe("after");
   });
 
-  it("the tint takes the block's full height over BlockNote's ::before", () => {
-    const rule = /\.paperhub-notes \[data-object-selected\]::before\s*\{([^}]*)\}/.exec(indexCss)?.[1] ?? "";
-    expect(rule).toMatch(/inset:\s*0 -8px/);
-    expect(rule).toMatch(/height:\s*auto/);
-    expect(rule).toMatch(/transition:\s*none/);
+  it("a captioned table's mark holds its caption above and its notes below", () => {
+    const editor = makeEditor([atomCaret, tableCaptions(createCaptionHosts())], [line, captioned]);
+    contentOf("t1").getBoundingClientRect = () => box(100, 500, 50, 150);
+    act(() => {
+      fireEvent.click(editor._tiptapEditor.view.dom, { clientX: 503, clientY: 90 });
+    });
+    const marked = selectedOf("t1")!;
+    const block = marked.querySelector(":scope > .bn-block")!;
+    const parts = [...block.children].map((el) =>
+      el.classList.contains("note-table-part-host") ? "host" : el.classList.contains("bn-block-content") ? "table" : "other",
+    );
+    // The tint's three rows: caption host, table, notes host.
+    expect(parts.slice(0, 3)).toEqual(["host", "table", "host"]);
+    expect(marked.getAttribute("data-atom-caret")).toBe("after");
+  });
+
+  it("a nested block under a selected table is not marked (no doubled tint)", () => {
+    const editor = makeEditor([atomCaret], [line, { ...table, children: [{ id: "k1", type: "paragraph", content: "child" }] }]);
+    const view = editor._tiptapEditor.view;
+    act(() => setAtomCaret(view, posOf(editor, "t1"), "after"));
+    expect(selectedOf("t1")).not.toBeNull();
+    expect(selectedOf("k1")).toBeNull();
+    expect(document.querySelectorAll("[data-object-selected]")).toHaveLength(1);
+  });
+
+  it("a click in the gutter beside a table's caption puts the caret on the table", () => {
+    const editor = makeEditor([atomCaret, tableCaptions(createCaptionHosts())], [line, captioned]);
+    contentOf("t1").getBoundingClientRect = () => box(100, 500, 50, 150);
+    const [caption, notes] = document.querySelectorAll<HTMLElement>('.bn-block-outer[data-id="t1"] .note-table-part-host');
+    caption!.getBoundingClientRect = () => box(100, 500, 24, 50);
+    notes!.getBoundingClientRect = () => box(100, 500, 150, 170);
+    act(() => {
+      fireEvent.click(editor._tiptapEditor.view.dom, { clientX: 97, clientY: 30 });
+    });
+    expect(caretOf("t1")).toBe("before");
+    act(() => {
+      fireEvent.click(editor._tiptapEditor.view.dom, { clientX: 504, clientY: 165 });
+    });
+    expect(caretOf("t1")).toBe("after");
+  });
+
+  it("the tint and the caret are drawn on the block's .bn-block over its own row", () => {
+    const grid = cssRule(".paperhub-notes .bn-block-outer[data-object-selected] > .bn-block");
+    expect(grid).toMatch(/display:\s*grid/);
+    expect(grid).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\)/);
+    const tint = cssRule(".paperhub-notes .bn-block-outer[data-object-selected] > .bn-block::before");
+    expect(tint).toMatch(/inset:\s*0 -8px/);
+    expect(tint).toMatch(/grid-area:\s*1 \/ 1/);
+    const caret = cssRule(".paperhub-notes .bn-block-outer[data-atom-caret] > .bn-block::after");
+    expect(caret).toMatch(/grid-area:\s*1 \/ 1/);
+  });
+
+  it("on a table they span its caption, table and notes (rows 1 to 3), not what follows", () => {
+    for (const pseudo of ["::before", "::after"]) {
+      const rule = cssRule(`.paperhub-notes .bn-block-outer > .bn-block:has(> .note-table-part-host)${pseudo}`);
+      expect(rule).toMatch(/grid-row:\s*1 \/ 4/);
+    }
   });
 });
