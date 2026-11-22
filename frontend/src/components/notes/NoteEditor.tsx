@@ -13,6 +13,7 @@ import {
   SuggestionMenuController,
   useCreateBlockNote,
   type DefaultReactSuggestionItem,
+  type FloatingUIOptions,
 } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
 import { TextSelection } from "@tiptap/pm/state";
@@ -28,7 +29,6 @@ import {
   ListTree,
   MessageSquare,
   NotebookPen,
-  SearchX,
   Sigma,
   TextQuote,
 } from "lucide-react";
@@ -53,6 +53,7 @@ import { NoteEditorContext, sectionLabel } from "./blocks/markProps";
 import { citationChips } from "./citationDecorations";
 import { EditorTip } from "./EditorTip";
 import { insertMention, parseMentionHref, type MentionTarget } from "./formatActions";
+import { LinkPickerMenu } from "./LinkPickerMenu";
 import {
   completeLinkQuery,
   insertNoteLink,
@@ -652,31 +653,40 @@ function LoadedNoteEditor({
       };
       const untitled = t("notes:link.untitled", "Untitled");
       const rows = await linkItems(editor, noteId, query, untitled);
-      // BlockNote keys a menu row by its title, and a paper note shares its
-      // paper's title: an invisible zero-width space keeps the keys apart.
       if (!rows.length) {
-        // A muted row instead of an empty menu; picking it changes nothing.
+        // A muted hint instead of an empty menu; picking it changes nothing.
         return [
           {
             title: t("notes:link.picker.none", "No matching notes or papers"),
             subtext: t("notes:link.picker.noneHint", "Type part of a title; # for its headings, ## for any note's"),
             size: "small",
-            icon: <SearchX className="size-[18px]" />,
             onItemClick: () => reopenLinkPicker(editor, query),
           },
         ];
       }
-      const seen = new Map<string, number>();
+      // The muted line under a title: what the row is (a heading's or
+      // section's: the note or paper it is in).
+      const typeLine = (r: LinkItem): string | undefined => {
+        switch (r.icon) {
+          case "paperNote":
+            return t("notes:link.kind.paperNote", "Paper note");
+          case "chatNote":
+            return t("notes:link.kind.chatNote", "Chat note");
+          case "ideaNote":
+            return t("notes:link.kind.ideaNote", "Idea note");
+          case "paper":
+            return [t("notes:link.kind.paper", "Paper"), r.subtext].filter(Boolean).join(" · ");
+          default:
+            return r.subtext;
+        }
+      };
       return rows.map((r) => {
         const Icon = LINK_ICONS[r.icon];
-        const shown = r.title || untitled;
-        const n = seen.get(shown) ?? 0;
-        seen.set(shown, n + 1);
         return {
-          title: shown + "\u200b".repeat(n),
-          subtext: r.subtext,
+          title: r.title || untitled,
+          subtext: typeLine(r),
           group: groups[r.group],
-          icon: <Icon className="size-[18px]" />,
+          icon: <Icon className="size-4" />,
           onItemClick: () =>
             r.complete !== undefined ? completeLinkQuery(editor, r) : insertNoteLink(editor, r.props),
         };
@@ -684,6 +694,21 @@ function LoadedNoteEditor({
     },
     [editor, noteId, t],
   );
+
+  // The [[ menu grows out of the caret it was typed at and shrinks back
+  // into it (no motion when reduced motion is asked for).
+  const pickerMotion = useMemo<FloatingUIOptions>(() => {
+    const still = prefersReducedMotion();
+    return {
+      // Placed by top/left: the transform is the scale's.
+      useFloatingOptions: { transform: false },
+      useTransitionStylesProps: {
+        duration: still ? 0 : 130,
+        initial: { opacity: 0, transform: still ? "none" : "scale(0.95)" },
+        common: ({ side }) => ({ transformOrigin: side === "top" ? "bottom left" : "top left" }),
+      },
+    };
+  }, []);
 
   const loadColors = useNotesStore((s) => s.loadColors);
   useEffect(() => {
@@ -820,7 +845,13 @@ function LoadedNoteEditor({
           <SuggestionMenuController triggerCharacter="@" getItems={mentionItems} />
           {/* BlockNote opens a two-character trigger itself: the second [ after
               a [ opens it; a pick replaces "[[query", Esc leaves it as typed. */}
-          <SuggestionMenuController triggerCharacter="[[" getItems={pickerItems} shouldOpen={opensLinkPicker} />
+          <SuggestionMenuController
+            triggerCharacter="[["
+            getItems={pickerItems}
+            shouldOpen={opensLinkPicker}
+            suggestionMenuComponent={LinkPickerMenu}
+            floatingUIOptions={pickerMotion}
+          />
         </BlockNoteView>
         {comments.popover}
         {suggestionBars}

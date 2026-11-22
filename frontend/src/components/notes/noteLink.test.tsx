@@ -643,6 +643,27 @@ describe("the [[ picker", () => {
     expect(menuItems().map((e) => e.textContent)).not.toContainEqual(expect.stringMatching(/create|new note/i));
   });
 
+  it("[[ rows are compact: small group labels, a title line and a muted type line", async () => {
+    server.use(...searchHandlers());
+    await openAtEnd();
+    typeIn("[[");
+    await screen.findByText("Robot idea");
+    const menu = document.querySelector(".bn-suggestion-menu")!;
+    expect(menu).toHaveAttribute("data-link-picker");
+    expect([...menu.querySelectorAll("[data-link-picker-group]")].map((e) => e.textContent)).toEqual(["Notes", "Papers"]);
+    const row = (title: string) => menuItems().find((e) => e.textContent?.includes(title))!;
+    const parts = (title: string) => [
+      row(title).querySelector("[data-link-row-title]")?.textContent,
+      row(title).querySelector("[data-link-row-type]")?.textContent,
+    ];
+    expect(parts("RoboTTT")).toEqual(["RoboTTT", "Paper note"]);
+    expect(parts("Robot chat")).toEqual(["Robot chat", "Chat note"]);
+    expect(parts("Robot idea")).toEqual(["Robot idea", "Idea note"]);
+    expect(parts("Robots at scale")).toEqual(["Robots at scale", "Paper · 2025"]);
+    // One line each: a long title ends in an ellipsis instead of wrapping.
+    expect(row("RoboTTT").querySelector("[data-link-row-title]")!.className).toMatch(/truncate/);
+  });
+
   it("Enter inserts a link with a trailing space, and |text sets its label", async () => {
     server.use(...searchHandlers());
     await openAtEnd();
