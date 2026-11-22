@@ -300,3 +300,137 @@ async def test_a_chip_mark_joins_erases_and_splits(conn):
     # The split piece is a reference block after the chip's paragraph.
     assert [b.id for b in blocks] == ["p1", new["block_id"]]
     assert _cites(blocks[0]) == [m["id"]]
+
+
+# ---- a mark follows its inline citations (no mark without its anchor) ---
+
+def _chip(mark_id):
+    return {"type": "markCite", "props": {"markId": mark_id, "text": "",
+                                          "paperId": 1}}
+
+
+async def _set_runs(conn, note_id, block_id, runs):
+    cur = await get_note(conn, note_id)
+    return await apply_ops(conn, note_id, base_revision=cur.revision,
+                           actor="user", ops=[Op(
+                               op="update", block_id=block_id,
+                               block=BlockIn(type="paragraph",
+                                             content=runs))])
+
+
+async def _deleted_at(conn, mark_id):
+    async with conn.execute(
+            "SELECT deleted_at FROM note_marks WHERE id = ?", (mark_id,)) as cur:
+        return (await cur.fetchone())[0]
+
+
+async def test_taking_a_marks_last_chip_out_deletes_the_mark(conn):
+    """Backspace over the chip in the note card (run 2026-11-22, mark
+    mk_a1kgpabcjz): the mark stayed on the paper with no place in its
+    note. It now goes with its last chip, as a block's mark does."""
+    await _paper(conn)
+    note_id = await _para(conn, "p1", [_text("ab")])
+    m, _ = await create_mark(conn, _in(
+        [_piece("62%")], cite_at=CiteAt(block_id="p1", offset=2)))
+    res = await _set_runs(conn, note_id, "p1", [_text("ab")])
+    assert await list_marks(conn, 1) == []
+    assert await _deleted_at(conn, m["id"]) is not None
+    assert res.cited == [{"mark_id": m["id"], "paper_id": 1, "deleted": True}]
+
+
+async def test_deleting_the_chips_paragraph_deletes_the_mark(conn):
+    await _paper(conn)
+    note_id = await _para(conn, "p0", [_text("x")])
+    m, _ = await create_mark(conn, _in(
+        [_piece("62%")], cite_at=CiteAt(block_id=None)))
+    made = m["cite"]["block_id"]
+    cur = await get_note(conn, note_id)
+    await apply_ops(conn, note_id, base_revision=cur.revision, actor="user",
+                    ops=[Op(op="delete", block_id=made)])
+    assert await list_marks(conn, 1) == []
+
+
+async def test_the_editors_undo_of_the_chip_brings_the_mark_back(conn):
+    await _paper(conn)
+    note_id = await _para(conn, "p1", [_text("ab")])
+    m, _ = await create_mark(conn, _in(
+        [_piece("62%")], cite_at=CiteAt(block_id="p1", offset=2)))
+    await _set_runs(conn, note_id, "p1", [_text("ab")])
+    res = await _set_runs(conn, note_id, "p1", [_text("ab"), _chip(m["id"])])
+    [lm] = await list_marks(conn, 1)
+    assert lm["id"] == m["id"] and lm["cite_block_id"] == "p1"
+    assert res.cited == [{"mark_id": m["id"], "paper_id": 1, "deleted": False}]
+
+
+async def test_undoing_the_change_set_that_took_the_chip_brings_it_back(conn):
+    from paperhub.notes.ops import undo_change_set
+    await _paper(conn)
+    note_id = await _para(conn, "p1", [_text("ab")])
+    m, _ = await create_mark(conn, _in(
+        [_piece("62%")], cite_at=CiteAt(block_id="p1", offset=2)))
+    res = await _set_runs(conn, note_id, "p1", [_text("ab")])
+    assert await list_marks(conn, 1) == []
+    await undo_change_set(conn, res.change_set_id)
+    assert [x["id"] for x in await list_marks(conn, 1)] == [m["id"]]
+
+
+async def test_another_chip_of_the_mark_keeps_it(conn):
+    await _paper(conn)
+    note_id = await _para(conn, "p1", [_text("ab")])
+    m, _ = await create_mark(conn, _in(
+        [_piece("62%")], cite_at=CiteAt(block_id="p1", offset=2)))
+    await _para(conn, "p2", [_chip(m["id"])], after="p1")
+    res = await _set_runs(conn, note_id, "p1", [_text("ab")])
+    [lm] = await list_marks(conn, 1)
+    assert lm["cite_block_id"] == "p2"
+    assert res.cited == []
+
+
+async def test_a_chip_put_back_does_not_revive_a_mark_deleted_in_the_reader(conn):
+    """Delete in the reader keeps the user's dashed chip; taking that chip
+    out and putting it back is not an undo of the delete."""
+    await _paper(conn)
+    note_id = await _para(conn, "p1", [_text("ab")])
+    m, _ = await create_mark(conn, _in(
+        [_piece("62%")], cite_at=CiteAt(block_id="p1", offset=2)))
+    await delete_mark(conn, m["id"])
+    await _set_runs(conn, note_id, "p1", [_text("ab")])
+    await _set_runs(conn, note_id, "p1", [_text("ab"), _chip(m["id"])])
+    assert await list_marks(conn, 1) == []
+
+
+async def test_a_chip_taken_out_of_another_note_leaves_the_mark(conn):
+    """Only the mark's own paper note holds its place."""
+    from paperhub.notes.store import get_or_create_note
+    await _paper(conn)
+    await _para(conn, "p1", [_text("ab")])
+    m, _ = await create_mark(conn, _in(
+        [_piece("62%")], cite_at=CiteAt(block_id="p1", offset=2)))
+    other = await get_or_create_note(conn, target_kind="session",
+                                     target_id="5", title="")
+    cur = await get_note(conn, other.id)
+    await apply_ops(conn, other.id, base_revision=cur.revision, actor="user",
+                    ops=[Op(op="insert", block_id="o1", block=BlockIn(
+                        type="paragraph", content=[_chip(m["id"])]))])
+    await _set_runs(conn, other.id, "o1", [_text("gone")])
+    assert [x["id"] for x in await list_marks(conn, 1)] == [m["id"]]
+
+
+async def test_a_mark_whose_chip_cannot_be_written_is_not_saved(conn,
+                                                                monkeypatch):
+    """Creation is one transaction: no chip, no mark row."""
+    import pytest
+
+    from paperhub.notes import marks as marks_mod
+    await _paper(conn)
+    await _para(conn, "p1", [_text("ab")])
+
+    async def boom(*_a, **_k):
+        raise marks_mod.MarkConflict("block p1 was not changed")
+
+    monkeypatch.setattr(marks_mod, "_place_cite", boom)
+    with pytest.raises(marks_mod.MarkConflict):
+        await create_mark(conn, _in(
+            [_piece("62%")], cite_at=CiteAt(block_id="p1", offset=2)))
+    async with conn.execute("SELECT COUNT(*) FROM note_marks") as cur:
+        assert (await cur.fetchone())[0] == 0

@@ -142,6 +142,10 @@ class ApplyResult(BaseModel):
     # set there): {note_id, revision, change_set_id, blocks}. A client
     # reloads these notes.
     redrawn: list[dict[str, Any]] = []
+    # Marks in their paper's note only as inline citations, deleted with
+    # their last chip or brought back with it (``_follow_cites``):
+    # {mark_id, paper_id, deleted}. A client fetches those papers' marks.
+    cited: list[dict[str, Any]] = []
 
 
 def _now() -> str:
@@ -232,6 +236,7 @@ class _Ctx:
         self.inline: list[dict[str, Any]] = []
         self.marks: list[dict[str, Any]] = []
         self.redrawn: list[dict[str, Any]] = []
+        self.cited: list[dict[str, Any]] = []
         # Ids of inserts that failed: an op naming one fails with them.
         self.failed: set[str] = set()
         self.op_index: int | None = None
@@ -255,7 +260,7 @@ class _Ctx:
             suggested=self.suggested, rejected=self.rejected,
             reparented=self.reparented, withdrawn=self.withdrawn,
             renamed=self.renamed_list(), inline=self.inline,
-            marks=self.marks, redrawn=self.redrawn,
+            marks=self.marks, redrawn=self.redrawn, cited=self.cited,
         )
 
     def renamed_list(self) -> list[dict[str, str]]:
@@ -1103,10 +1108,101 @@ async def _apply_in_tx(
         res.revision = ctx.rev - 1
         res.change_set_id = None
         return res
+    await _follow_cites(ctx)
     await conn.execute("RELEASE apply_ops")
     await _record_change_set(ctx, base_revision=base_revision,
                              ops_json=json.dumps(recorded))
     return ctx.result()
+
+
+def _live_cites(state_json: str | None) -> set[str]:
+    """The marks a recorded block state cites inline (none when deleted)."""
+    state = json.loads(state_json) if state_json else None
+    if not isinstance(state, dict) or state.get("deleted_at") is not None:
+        return set()
+    return cite_ids(state.get("content"))
+
+
+async def _note_paper(ctx: _Ctx) -> int | None:
+    """The paper whose own note this is (None: not a paper's note)."""
+    async with ctx.conn.execute(
+        "SELECT target_kind, target_id FROM notes WHERE id = ?", (ctx.note_id,),
+    ) as cur:
+        r = await cur.fetchone()
+    if r is None or r[0] != "paper" or not str(r[1]).isdigit():
+        return None
+    return int(r[1])
+
+
+async def _lost_its_chips(ctx: _Ctx, mark_id: str, deleted_at: str) -> bool:
+    """Whether the mark was deleted by a change to this note that took its
+    last chip out (its deletion time is that change's)."""
+    async with ctx.conn.execute(
+        "SELECT before_json, after_json FROM note_block_history "
+        "WHERE note_id = ? AND created_at = ?", (ctx.note_id, deleted_at),
+    ) as cur:
+        rows = await cur.fetchall()
+    return any(mark_id in _live_cites(b) and mark_id not in _live_cites(a)
+               for b, a in rows)
+
+
+async def _follow_cites(ctx: _Ctx) -> None:
+    """A mark in its paper's note only as inline citations lives and dies
+    with them, as a reference block's mark does with its block: this
+    change taking its last chip out of the note deletes it (else it stays
+    on the paper with no place in the note, and nothing can delete it);
+    a chip of it coming back (the editor's undo, an Undo of the change)
+    brings back the mark losing its chips deleted. A mark deleted in the
+    reader keeps its dashed chip and stays deleted. Chips in other notes
+    are copies: they neither keep nor delete the mark."""
+    paper = await _note_paper(ctx)
+    if paper is None:
+        return
+    removed: set[str] = set()
+    added: set[str] = set()
+    async with ctx.conn.execute(
+        "SELECT before_json, after_json FROM note_block_history "
+        "WHERE note_id = ? AND revision = ?", (ctx.note_id, ctx.rev),
+    ) as cur:
+        for before, after in await cur.fetchall():
+            b, a = _live_cites(before), _live_cites(after)
+            removed |= b - a
+            added |= a - b
+    touched = sorted(removed | added)
+    if not touched:
+        return
+    marks = ",".join("?" * len(touched))
+    async with ctx.conn.execute(
+        f"SELECT id, block_id, deleted_at FROM note_marks WHERE id IN ({marks}) "  # noqa: S608
+        "AND paper_content_id = ? ORDER BY id", (*touched, paper),
+    ) as cur:
+        rows = await cur.fetchall()
+    if not rows:
+        return
+    async with ctx.conn.execute(
+        "SELECT id, payload_json FROM note_blocks "
+        "WHERE note_id = ? AND deleted_at IS NULL", (ctx.note_id,),
+    ) as cur:
+        live = {str(r[0]): json.loads(r[1]) for r in await cur.fetchall()}
+    cited: set[str] = set()
+    for payload in live.values():
+        cited |= cite_ids(payload.get("content"))
+    for mark_id, block_id, deleted_at in rows:
+        anchored = block_id in live or mark_id in cited
+        if deleted_at is None and not anchored and mark_id in removed:
+            await ctx.conn.execute(
+                "UPDATE note_marks SET deleted_at = ? WHERE id = ?",
+                (ctx.now, mark_id))
+            ctx.cited.append({"mark_id": mark_id, "paper_id": paper,
+                              "deleted": True})
+        elif (deleted_at is not None and deleted_at != ctx.now
+              and mark_id in added and mark_id in cited
+              and await _lost_its_chips(ctx, mark_id, deleted_at)):
+            await ctx.conn.execute(
+                "UPDATE note_marks SET deleted_at = NULL WHERE id = ?",
+                (mark_id,))
+            ctx.cited.append({"mark_id": mark_id, "paper_id": paper,
+                              "deleted": False})
 
 
 async def _drop_empty_scaffold(ctx: _Ctx, scaffold: frozenset[str]) -> None:
@@ -1301,6 +1397,7 @@ async def undo_change_set(conn: aiosqlite.Connection,
         ) as cur:
             withdrawn = sorted(r[0] for r in await cur.fetchall())
         ctx.withdrawn.extend(withdrawn)
+        await _follow_cites(ctx)
         outcome = {**cs["outcome"], "undo": {
             "revision": ctx.rev, "reverted": reverted, "kept": kept,
             "withdrawn": withdrawn}}
@@ -1346,6 +1443,7 @@ async def reapply_change_set(conn: aiosqlite.Connection,
             ctx.applied.append(bid)
         await _settle_parents(ctx, ctx.applied)
         await _reopen_suggestions(ctx, undo)
+        await _follow_cites(ctx)
         await _record_change_set(
             ctx, base_revision=ctx.rev - 1,
             ops_json=json.dumps([{"op": "reapply",
@@ -1402,6 +1500,7 @@ async def _restore_in_tx(conn: aiosqlite.Connection, note_id: int,
             await ctx.write(d.id, "restore", d_before, d_after)
             ctx.applied.append(d.id)
     await _settle_parents(ctx, ctx.applied)
+    await _follow_cites(ctx)
     await _record_change_set(
         ctx, base_revision=ctx.rev - 1,
         ops_json=json.dumps([{"op": "restore", "block_id": b}
