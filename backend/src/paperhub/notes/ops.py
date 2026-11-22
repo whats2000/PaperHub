@@ -411,12 +411,14 @@ class _Ctx:
                     continue
                 note = await get_note(self.conn, note_id)
                 assert note is not None
-                await _apply_in_tx(
+                res = await _apply_in_tx(
                     self.conn, note_id, base_revision=note.revision,
                     ops=[Op(op="update", block_id=bid, block=BlockIn(
                         type=other.type, props=props, content=other.content,
                         section_key=other.section_key))],
                     actor="system", run_id=self.run_id, summary="Redraw mark")
+                if bid not in res.applied:
+                    continue
             redrawn.append(bid)
         return redrawn
 
