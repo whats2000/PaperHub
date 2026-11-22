@@ -525,12 +525,16 @@ def drawn_props(props: dict[str, Any], mark: dict[str, Any]) -> dict[str, Any]:
 
 
 def _asked(ctx: _Ctx, row: _Row, blk: BlockIn) -> frozenset[str]:
-    """The drawing props an update of a mark block names (none when it
-    turns the block into another type)."""
+    """The drawing props an update of a mark block changes (none when it
+    turns the block into another type). A value equal to the stored
+    block's (the edit's base: a block changed since is refused) is no
+    change: the editor sends full props, and a colour it only carried,
+    one behind the mark row, must not recolour the mark."""
     if row.type not in MARK_BLOCK_TYPES or (
             not ctx.merge and blk.type != row.type):
         return frozenset()
-    return frozenset(k for k in MARK_EDITABLE_PROPS if k in blk.props)
+    return frozenset(k for k in MARK_EDITABLE_PROPS
+                     if k in blk.props and blk.props[k] != row.props.get(k))
 
 
 async def _redraw_asked(ctx: _Ctx, row: _Row,

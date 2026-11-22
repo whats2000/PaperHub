@@ -175,3 +175,22 @@ async def test_a_block_without_a_mark_row_keeps_the_old_merge(
     res = await _update(conn, n, "q1", {"color": "blue"})
     assert "q1" in res.applied and res.marks == []
     assert (await _props_of(conn, n, "q1"))["color"] == "blue"
+
+
+async def test_a_colour_the_editor_only_carried_does_not_recolour_the_mark(
+        conn: aiosqlite.Connection):
+    """The editor sends a block's full props on every edit. A colour it
+    carried unchanged from the stored block (one behind its mark row, e.g.
+    a copy not redrawn yet) is no change: the mark keeps its colour and
+    the block is drawn from it."""
+    await _mark(conn)
+    n = await _note(conn, blocks=[("q1", _props()), ("q2", _props())],
+                    actor="user")
+    await conn.execute("UPDATE note_marks SET color = 'blue' WHERE id = 'mk_1'")
+    await conn.commit()
+    res = await _update(conn, n, "q1", {**_props(), "quote": "q, edited"},
+                        actor="user")
+    assert res.applied == ["q1"] and res.marks == []
+    assert await _row(conn) == ("blue", "highlight")
+    props = await _props_of(conn, n, "q1")
+    assert props["color"] == "blue" and props["quote"] == "q, edited"
