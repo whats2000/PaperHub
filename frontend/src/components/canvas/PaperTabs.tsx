@@ -141,9 +141,10 @@ export function PaperTabs({
   // Reachable by Tab: the selected tab, else the first.
   const focusable = !tabStop ? null : tabs.some((x) => x.id === selected) ? selected : (tabs[0]?.id ?? null);
 
-  // The selected tab is scrolled into the strip's view (a narrow pane).
+  // The selected tab is scrolled into the strip's view (a narrow pane),
+  // again once a tab has grown in (it measured no width before).
   const root = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
+  const reveal = () => {
     const strip = root.current?.parentElement;
     const el = strip?.querySelector<HTMLElement>('[data-paper-tab][data-selected="true"], [data-paper-more][data-selected="true"]');
     if (!strip || !el) return;
@@ -151,6 +152,13 @@ export function PaperTabs({
     if (left < strip.scrollLeft) strip.scrollLeft = Math.max(0, left - 4);
     else if (left + el.offsetWidth > strip.scrollLeft + strip.clientWidth)
       strip.scrollLeft = left + el.offsetWidth - strip.clientWidth + 4;
+  };
+  const revealRef = useRef(reveal);
+  useEffect(() => {
+    revealRef.current = reveal;
+  });
+  useEffect(() => {
+    revealRef.current();
   }, [selected, papers.length, outside.length]);
 
   const titleOf = (tab: Tab) => {
@@ -218,7 +226,10 @@ export function PaperTabs({
           tab={tab}
           leaving={leaving}
           entering={entered.has(tab.id)}
-          onEntered={() => settle(tab.id)}
+          onEntered={() => {
+            settle(tab.id);
+            reveal();
+          }}
           selected={!leaving && tab.id === selected}
           focusable={!leaving && tab.id === focusable}
           title={titleOf(tab)}
