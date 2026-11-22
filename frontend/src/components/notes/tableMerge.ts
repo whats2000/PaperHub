@@ -20,6 +20,7 @@ import {
 import type { EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
+import { prefersReducedMotion } from "@/lib/motion";
 import type { TableContent } from "@/types/notes";
 
 import type { Alignment } from "./tableKeys";
@@ -122,6 +123,28 @@ function run(editor: MergeEditor, cmd: (state: EditorState, dispatch: EditorView
   return cmd(view.state, (tr) => view.dispatch(tr));
 }
 
+/** The selected cells fade in (150 ms) where a merge or split redrew
+ * them; nothing moves under reduced motion. */
+function fadeSelected(view: EditorView) {
+  if (prefersReducedMotion()) return;
+  const sel = view.state.selection;
+  const cells: HTMLElement[] = [];
+  const add = (pos: number) => {
+    const dom = view.nodeDOM(pos);
+    if (dom instanceof HTMLElement && typeof dom.animate === "function") cells.push(dom);
+  };
+  if (sel instanceof CellSelection) sel.forEachCell((_n, pos) => add(pos));
+  else {
+    const t = tableSelection(view.state);
+    if (t) {
+      const map = TableMap.get(t.table);
+      for (const rel of new Set(map.cellsInRect({ left: t.rect.c0, top: t.rect.r0, right: t.rect.c1 + 1, bottom: t.rect.r1 + 1 })))
+        add(t.tablePos + 1 + rel);
+    }
+  }
+  for (const el of cells) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: "ease-out" });
+}
+
 /** Merges the selected cells (their texts joined into the first). */
 export function mergeSelected(editor: unknown): boolean {
   const e = editor as MergeEditor;
@@ -130,6 +153,7 @@ export function mergeSelected(editor: unknown): boolean {
   if (!t || !canMerge(state)) return false;
   if (!run(e, mergeCells)) return false;
   fixHeader(e, t.blockId);
+  fadeSelected(e._tiptapEditor.view);
   return true;
 }
 
@@ -141,6 +165,7 @@ export function splitSelected(editor: unknown): boolean {
   if (!t || !canSplit(state)) return false;
   if (!run(e, splitCell)) return false;
   fixHeader(e, t.blockId);
+  fadeSelected(e._tiptapEditor.view);
   return true;
 }
 

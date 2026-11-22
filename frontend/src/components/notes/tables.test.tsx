@@ -1307,6 +1307,21 @@ describe("merging and splitting cells", () => {
     expect(spans(t)[1]![0]).toEqual([1, 1]);
   });
 
+  it("the merged cell fades in; nothing moves under reduced motion", () => {
+    reducedMotion(false);
+    const calls = recordAnimations();
+    const editor = makeEditor([tableBorderView], table(1));
+    selectCells(editor, [1, 0], [1, 1]);
+    mergeSelected(editor);
+    expect(calls.some((c) => c.el.tagName === "TD" && c.keyframes[0]?.opacity === 0)).toBe(true);
+    reducedMotion(true);
+    calls.length = 0;
+    selectCells(editor, [1, 0], [1, 0]);
+    splitSelected(editor);
+    expect(calls).toHaveLength(0);
+    delete (Element.prototype as { animate?: unknown }).animate;
+  });
+
   it("will not merge a whole row's width over several rows (a row needs a cell of its own)", () => {
     const editor = makeEditor([tableBorderView], table(0));
     selectCells(editor, [1, 0], [2, 2]);
