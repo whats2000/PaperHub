@@ -378,7 +378,7 @@ class _Ctx:
             mark = {**mark, **changed}
             entry["blocks"] = await self._redraw_copies(mark, block_id)
             self.marks.append(entry)
-        return {**state, "props": _drawn(props, mark)}
+        return {**state, "props": drawn_props(props, mark)}
 
     async def _redraw_copies(self, mark: dict[str, Any],
                              block_id: str) -> list[str]:
@@ -401,7 +401,7 @@ class _Ctx:
                     (bid,),
                 ) as cur:
                     other = _row(await cur.fetchone())
-                props = _drawn(other.props, mark)
+                props = drawn_props(other.props, mark)
                 if props != other.props:
                     others.setdefault(note_id, []).append(Op(
                         op="update", block_id=bid, block=BlockIn(
@@ -411,7 +411,7 @@ class _Ctx:
                 continue
             row = await self.get(bid)
             assert row is not None
-            props = _drawn(row.props, mark)
+            props = drawn_props(row.props, mark)
             if props == row.props:
                 continue
             before = row.state()
@@ -470,7 +470,7 @@ async def _mark_row(conn: aiosqlite.Connection,
             "block_id": r[3], "paper_id": r[4]}
 
 
-def _drawn(props: dict[str, Any], mark: dict[str, Any]) -> dict[str, Any]:
+def drawn_props(props: dict[str, Any], mark: dict[str, Any]) -> dict[str, Any]:
     """A mark block's props drawn as its mark is (as ``block_props``: no
     ``style`` key when the mark has none)."""
     out = {**props, "color": mark["color"]}

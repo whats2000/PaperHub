@@ -75,6 +75,11 @@
 #                                             showing them (no messages, papers,
 #                                             note text or links, still "New chat")
 #                                             are soft-deleted; -DryRun lists them
+# 21. paperhub-reconcile-mark-blocks        Plan H5b.1: a mark block whose colour /
+#                                             style disagree with its mark row (an
+#                                             agent recolour before Task 16) is
+#                                             redrawn from the row, a system change
+#                                             per note; nothing to redraw, no write
 # Steps 6-7 need the Marker service (`docker compose up -d marker`) for PDF
 # papers; they are sequential and skip papers that already have the output.
 #
@@ -128,29 +133,30 @@ function Invoke-Step([string]$label, [string[]]$cmd) {
     }
 }
 
-Invoke-Step "0/20 schema" (@("paperhub-apply-schema") + $dry)
-Invoke-Step "1/20 mark styles" (@("paperhub-migrate-mark-styles") + $dry)
+Invoke-Step "0/21 schema" (@("paperhub-apply-schema") + $dry)
+Invoke-Step "1/21 mark styles" (@("paperhub-migrate-mark-styles") + $dry)
 if (-not $SkipRechunk) {
-    Invoke-Step "2/20 re-chunk" (@("paperhub-reingest") + $dry)
+    Invoke-Step "2/21 re-chunk" (@("paperhub-reingest") + $dry)
 }
-Invoke-Step "3/20 figure/table index" (@("paperhub-repair-layout") + $dry)
-Invoke-Step "4/20 section names" (@("paperhub-repair-section-names") + $dry)
-Invoke-Step "5/20 PDF titles" (@("paperhub-repair-titles") + $dry)
-Invoke-Step "6/20 missing assets" (@("paperhub-backfill-assets") + $dry)
-Invoke-Step "7/20 PDF paragraph layout" (@("paperhub-backfill-assets", "--blocks-only") + $dry)
-Invoke-Step "8/20 figure locations" (@("paperhub-backfill-figure-locations") + $dry)
-Invoke-Step "9/20 page PDFs" (@("paperhub-backfill-page-pdfs", "--replace-places") + $dry)
-if (-not $DryRun) { Invoke-Step "10/20 Citation Canvas HTML" @("paperhub-rerender-html") }
-Invoke-Step "11/20 note mark anchors" (@("paperhub-reanchor-marks") + $dry)
-if (-not $DryRun) { Invoke-Step "12/20 figure citation check" @("paperhub-backfill-figure-locations", "--verify") }
-if (-not $DryRun) { Invoke-Step "13/20 page PDF check" @("paperhub-backfill-page-pdfs", "--verify") }
-Invoke-Step "14/20 ideation mechanism cards" (@("paperhub-backfill-cards") + $dry)
-Invoke-Step "15/20 ideation domain consolidation" (@("paperhub-consolidate-domains") + $dry)
-Invoke-Step "16/20 ideation citation narrowing" (@("paperhub-narrow-idea-citations") + $dry)
-Invoke-Step "17/20 translation cache repair" (@("paperhub-repair-translations") + $dry)
-Invoke-Step "18/20 idea notes into the notes store" (@("paperhub-migrate-idea-notes") + $dry)
-Invoke-Step "19/20 auto-filled note titles" (@("paperhub-clear-auto-note-titles") + $dry)
-Invoke-Step "20/20 empty chats" (@("paperhub-clean-empty-chats") + $dry)
+Invoke-Step "3/21 figure/table index" (@("paperhub-repair-layout") + $dry)
+Invoke-Step "4/21 section names" (@("paperhub-repair-section-names") + $dry)
+Invoke-Step "5/21 PDF titles" (@("paperhub-repair-titles") + $dry)
+Invoke-Step "6/21 missing assets" (@("paperhub-backfill-assets") + $dry)
+Invoke-Step "7/21 PDF paragraph layout" (@("paperhub-backfill-assets", "--blocks-only") + $dry)
+Invoke-Step "8/21 figure locations" (@("paperhub-backfill-figure-locations") + $dry)
+Invoke-Step "9/21 page PDFs" (@("paperhub-backfill-page-pdfs", "--replace-places") + $dry)
+if (-not $DryRun) { Invoke-Step "10/21 Citation Canvas HTML" @("paperhub-rerender-html") }
+Invoke-Step "11/21 note mark anchors" (@("paperhub-reanchor-marks") + $dry)
+if (-not $DryRun) { Invoke-Step "12/21 figure citation check" @("paperhub-backfill-figure-locations", "--verify") }
+if (-not $DryRun) { Invoke-Step "13/21 page PDF check" @("paperhub-backfill-page-pdfs", "--verify") }
+Invoke-Step "14/21 ideation mechanism cards" (@("paperhub-backfill-cards") + $dry)
+Invoke-Step "15/21 ideation domain consolidation" (@("paperhub-consolidate-domains") + $dry)
+Invoke-Step "16/21 ideation citation narrowing" (@("paperhub-narrow-idea-citations") + $dry)
+Invoke-Step "17/21 translation cache repair" (@("paperhub-repair-translations") + $dry)
+Invoke-Step "18/21 idea notes into the notes store" (@("paperhub-migrate-idea-notes") + $dry)
+Invoke-Step "19/21 auto-filled note titles" (@("paperhub-clear-auto-note-titles") + $dry)
+Invoke-Step "20/21 empty chats" (@("paperhub-clean-empty-chats") + $dry)
+Invoke-Step "21/21 mark blocks drawn from their marks" (@("paperhub-reconcile-mark-blocks") + $dry)
 
 if ($DryRun) { Write-Host "Done (dry run, nothing changed)." }
 else { Write-Host "Done. DB backup at $dbBak (remove it when you've verified the result)." }
