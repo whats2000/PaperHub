@@ -149,7 +149,7 @@ describe("CitationCanvas reading panel", () => {
         "Paper A body",
       ),
     );
-    await userEvent.click(screen.getByRole("button", { name: /Paper B/ }));
+    await userEvent.click(screen.getByRole("tab", { name: /Paper B/ }));
     await waitFor(() =>
       expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain(
         "Paper B body",
@@ -160,11 +160,13 @@ describe("CitationCanvas reading panel", () => {
   it("shows a cut-off paper tab title in full on hover, and none when it fits", async () => {
     render(<CitationCanvas />);
     act(() => useCanvasStore.getState().toggleCanvas());
-    const tab = await screen.findByRole("button", { name: "Paper A" });
+    const tab = await screen.findByRole("tab", { name: "Paper A" });
     await userEvent.hover(tab);
     expect(tab).not.toHaveAttribute("title");
-    Object.defineProperty(tab, "scrollWidth", { configurable: true, value: 400 });
-    Object.defineProperty(tab, "clientWidth", { configurable: true, value: 120 });
+    // The tab is an icon and a title; the title is what gets cut off.
+    const label = tab.querySelector("[data-truncate]") as HTMLElement;
+    Object.defineProperty(label, "scrollWidth", { configurable: true, value: 400 });
+    Object.defineProperty(label, "clientWidth", { configurable: true, value: 120 });
     await userEvent.unhover(tab);
     await userEvent.hover(tab);
     expect(tab).toHaveAttribute("title", "Paper A");
@@ -331,8 +333,8 @@ describe("CitationCanvas standalone reader (Ideas page)", () => {
     await waitFor(() =>
       expect(activeHtmlView(container)?.getAttribute("srcdoc")).toContain("Paper C body"),
     );
-    expect(screen.getByRole("button", { name: "Paper C" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Paper A/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Paper C" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Paper A/ })).not.toBeInTheDocument();
     expect(useCanvasStore.getState().open).toBe(false);
   });
 
@@ -397,9 +399,11 @@ describe("CitationCanvas standalone reader (Ideas page)", () => {
 
   it("marks the shown paper's tab with the soft grey, not the accent colour", () => {
     render(<CitationCanvas standalone={{ papers: [paper9, { paper_content_id: 8, title: "Paper B" }], onClose: vi.fn() }} />);
-    const active = screen.getByRole("button", { name: "Paper C" });
-    expect(active.className).toContain("bg-foreground/10");
-    expect(active.className).not.toContain("bg-primary");
-    expect(screen.getByRole("button", { name: "Paper B" }).className).not.toContain("bg-foreground/10");
+    // The fill is on the tab's shell (the tab button plus its Add and ×).
+    const shell = (name: string) => screen.getByRole("tab", { name }).closest("[data-paper-tab]") as HTMLElement;
+    expect(shell("Paper C").className).toContain("bg-foreground/10");
+    expect(shell("Paper C").className).not.toContain("bg-primary");
+    expect(screen.getByRole("tab", { name: "Paper C" })).toHaveAttribute("aria-selected", "true");
+    expect(shell("Paper B").className).not.toContain("bg-foreground/10");
   });
 });
