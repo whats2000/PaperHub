@@ -582,9 +582,15 @@ class _Writer:
         for run in _runs(content):
             kind = run.get("type", "text")
             if kind == "link":
-                href = html.escape(str(run.get("href") or ""))
-                label = self.html_inline(run.get("content")) or href
-                _append(out, f'<a href="{href}">{label}</a>')
+                # Raw HTML is not sanitised by every Markdown viewer: only a
+                # web or mail link stays a link, encoded as the pipe table's.
+                raw = str(run.get("href") or "").strip()
+                label = self.html_inline(run.get("content"))
+                if re.match(r"(?i)(https?:|mailto:)", raw):
+                    href = html.escape(quote(raw, safe=_URL_SAFE))
+                    _append(out, f'<a href="{href}">{label or href}</a>')
+                else:
+                    _append(out, label or html.escape(raw, quote=False))
             elif kind not in INLINE_NODES and isinstance(run.get("text"), str):
                 styles = run.get("styles") or {}
                 raw = run["text"]

@@ -614,3 +614,13 @@ def test_pandoc_takes_only_the_real_caption(lead: str) -> None:
     table = ast["blocks"][2]
     assert table["c"][1] == [None, []]  # no caption
     assert flags == [True]
+
+
+def test_html_table_links_are_encoded_and_only_web_or_mail() -> None:
+    link = {"type": "link", "href": "javascript:alert(1)", "content": [_txt("x")]}
+    ok = {"type": "link", "href": "https://a.org/p q\"", "content": [_txt("y")]}
+    t = {**MERGED, "rows": [*MERGED["rows"][:3], {"cells": [_c([link]), _c([ok]), _c("1")]}]}
+    md = note_to_markdown(NOTE, [_mblk(t)], {})[0]
+    assert "javascript:" not in md
+    assert "<td>x</td>" in md
+    assert '<a href="https://a.org/p%20q%22">y</a>' in md
