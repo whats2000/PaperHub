@@ -397,6 +397,8 @@
 .paperhub-notes .ph-find-current {
   background: color-mix(in oklab, var(--foreground) 30%, transparent);
   outline: 1px solid color-mix(in oklab, var(--foreground) 45%, transparent);
+  /* A match in a wide table scrolls clear of the table's 28px edge fade. */
+  scroll-margin-inline: 36px;
 }
 /* The find strip (NoteFindBar.tsx) grows down from the notes toolbar and
    shrinks back up on close: only one end is given, the other is its height. */
