@@ -242,7 +242,7 @@ def check_table(content: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("a table needs at least one row")
     for row in rows:
         cells = row.get("cells") if isinstance(row, dict) else None
-        if not isinstance(cells, list) or not cells:
+        if not isinstance(cells, list):
             raise ValueError("every table row needs cells")
         for cell in cells:
             if isinstance(cell, dict) and cell.get("type") == "tableCell":
@@ -254,6 +254,8 @@ def check_table(content: dict[str, Any]) -> dict[str, Any]:
                         raise ValueError(f"a table cell's {key} must stay {default}")
             check_inline(_cell_runs(cell))
     _, height, width = table_grid(content)
+    if not width:
+        raise ValueError("every table row needs cells")
     v = content.get("headerRows", 0)
     if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= height:
         raise ValueError(f"headerRows must be 0 to {height} (the row count)")

@@ -91,3 +91,93 @@ def test_to_gfm_folds_line_breaks() -> None:
     content = {"type": "tableContent", "rows": [
         {"cells": ["h"]}, {"cells": ["one\ntwo"]}]}
     assert table_to_gfm(content) == "| h |\n| --- |\n| one two |"
+
+
+# ------------------------------------------- merged cells as < and ^ (H5b.1)
+
+def _c(text: str, **props: object) -> dict:
+    return {"type": "tableCell", "props": props,
+            "content": [{"type": "text", "text": text, "styles": {}}] if text else []}
+
+
+MERGED = {
+    "type": "tableContent", "columnWidths": [None, None, None], "headerRows": 2,
+    "rows": [
+        {"cells": [_c("Method", rowspan=2),
+                   _c("成功恢復（每格 n = 20）", colspan=2, textAlignment="center")]},
+        {"cells": [_c("Roof 擾動", textAlignment="center"),
+                   _c("Tire 擾動", textAlignment="center")]},
+        {"cells": [_c("GDN"), _c("18", textAlignment="center"),
+                   _c("17", textAlignment="center")]},
+    ],
+}
+MERGED_GFM = ("| Method | 成功恢復（每格 n = 20） | < |\n"
+              "| --- | :-: | :-: |\n"
+              "| ^ | Roof 擾動 | Tire 擾動 |\n"
+              "| GDN | 18 | 17 |")
+
+
+def _spans(content: dict) -> list[list[tuple[int, int]]]:
+    return [[(int(c.get("props", {}).get("rowspan", 1)),
+              int(c.get("props", {}).get("colspan", 1))) for c in row["cells"]]
+            for row in content["rows"]]
+
+
+def test_a_merged_table_reads_with_markers() -> None:
+    assert table_to_gfm(MERGED) == MERGED_GFM
+
+
+def test_markers_parse_back_to_the_spans() -> None:
+    content = parse_gfm_table(MERGED_GFM)
+    check_table(content)
+    assert _spans(content) == _spans(MERGED)
+    assert _texts(content) == _texts(MERGED)
+    assert content["headerRows"] == 2
+
+
+def test_a_block_merge_writes_and_reads_like_the_demo() -> None:
+    t = {"type": "tableContent", "headerRows": 1, "rows": [
+        {"cells": [_c("h1"), _c("h2"), _c("h3")]},
+        {"cells": [_c("A", rowspan=2, colspan=2), _c("x")]},
+        {"cells": [_c("y")]},
+    ]}
+    gfm = table_to_gfm(t)
+    assert gfm.splitlines()[2:] == ["| A | < | x |", "| ^ | < | y |"]
+    back = parse_gfm_table(gfm)
+    assert back["rows"][1]["cells"][0]["props"] == {"rowspan": 2, "colspan": 2}
+    assert _texts(back) == _texts(t)
+
+
+def test_a_fully_covered_row_has_no_cells() -> None:
+    t = {"type": "tableContent", "headerRows": 1, "rows": [
+        {"cells": [_c("h1"), _c("h2")]},
+        {"cells": [_c("A", rowspan=2, colspan=2)]},
+        {"cells": []},
+    ]}
+    check_table(t)
+    gfm = table_to_gfm(t)
+    assert gfm.splitlines()[2:] == ["| A | < |", "| ^ | < |"]
+    assert parse_gfm_table(gfm)["rows"] == t["rows"]
+
+
+def test_escaped_markers_are_text() -> None:
+    content = parse_gfm_table("| a | b |\n| --- | --- |\n| \< | \^ |")
+    assert _texts(content) == [["a", "b"], ["<", "^"]]
+    assert table_to_gfm(content).splitlines()[2] == "| \< | \^ |"
+
+
+def test_inline_lt_and_caret_are_unchanged() -> None:
+    text = "| a | b |\n| --- | --- |\n| a<b | $x^2$ |"
+    content = parse_gfm_table(text)
+    assert _texts(content) == [["a", "b"], ["a<b", "$x^2$"]]
+    assert table_to_gfm(content) == text
+
+
+@pytest.mark.parametrize(("text", "where"), [
+    ("| ^ | a |\n| --- | --- |\n| 1 | 2 |", "row 1, column 1"),
+    ("| a | b |\n| --- | --- |\n| < | 2 |", "row 2, column 1"),
+    ("| a | < |\n| --- | --- |\n| ^ | x |", "row 2, column 2"),
+], ids=["caret-row0", "lt-col0", "l-shape"])
+def test_bad_markers_name_the_cell(text: str, where: str) -> None:
+    with pytest.raises(ValueError, match=where):
+        parse_gfm_table(text)

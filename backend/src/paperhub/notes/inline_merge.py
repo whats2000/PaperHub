@@ -22,7 +22,7 @@ from typing import Any
 import aiosqlite
 
 from paperhub.notes.gfm_table import fold_cell, table_to_gfm
-from paperhub.notes.models import table_rows
+from paperhub.notes.models import GridCell, header_depth, table_grid, table_rows
 from paperhub.notes.run_text import INLINE_NODES, node_text, read_runs
 
 # Blocks that own a ``note_marks`` row (the mark follows the block).
@@ -329,6 +329,17 @@ def is_plain_table(content: dict[str, Any]) -> bool:
     return not any(is_rich(c) for row in rows for c in row)
 
 
+def _start_cols(content: dict[str, Any]) -> list[list[int]]:
+    """Each real cell's grid column, row by row."""
+    grid, _, _ = table_grid(content)
+    cols: list[list[int]] = [[] for _ in grid]
+    for r, line in enumerate(grid):
+        for c, at in enumerate(line):
+            if isinstance(at, GridCell) and at.row == r and at.col == c:
+                cols[r].append(c)
+    return cols
+
+
 def _cell_node(cell: Any) -> dict[str, Any]:
     """A parsed cell as a ``tableCell`` node."""
     if isinstance(cell, dict) and cell.get("type") == "tableCell":
@@ -349,19 +360,27 @@ def merge_table(old: dict[str, Any], new: dict[str, Any],
        (``preserve_runs``) only over the old cell in its place when no
        other cell took it; otherwise it is plain text.
 
-    The header / column settings of ``old`` stay while the column count
-    does. ``(content, report)``: the inline nodes ``kept`` (in the cells
+    Cells are matched by where they start on the table's grid, so merged
+    cells (``new``'s spans are kept) line up. The header columns and the
+    column widths of ``old`` stay while the column count does; with a
+    header, ``headerRows`` covers every row a row-0 cell spans into.
+    ``(content, report)``: the inline nodes ``kept`` (in the cells
     that took old runs) and ``dropped`` (changed away, or in old cells no
     new cell took)."""
     old_rows = table_rows(old)
-    old_text = {(i, j): fold_cell(read_runs(c, quotes))
+    old_cols = _start_cols(old)
+    old_text = {(i, old_cols[i][j]): fold_cell(read_runs(c, quotes))
                 for i, row in enumerate(old_rows) for j, c in enumerate(row)}
+    old_at = {(i, old_cols[i][j]): c
+              for i, row in enumerate(old_rows) for j, c in enumerate(row)}
+    new_cols = _start_cols(new)
     nodes: list[list[dict[str, Any]]] = []
     texts: dict[tuple[int, int], str] = {}
     for r, row in enumerate(new.get("rows", [])):
         nodes.append([_cell_node(c) for c in row.get("cells", [])])
-        for c, node in enumerate(nodes[-1]):
-            texts[(r, c)] = unwrap_cite_tags(read_runs(node.get("content") or []))
+        for j, node in enumerate(nodes[-1]):
+            texts[(r, new_cols[r][j])] = unwrap_cite_tags(
+                read_runs(node.get("content") or []))
     took: dict[tuple[int, int], tuple[int, int]] = {}  # new cell -> old cell
     taken: set[tuple[int, int]] = set()
     for pos, text in texts.items():  # 1a: same place, same text
@@ -379,7 +398,7 @@ def merge_table(old: dict[str, Any], new: dict[str, Any],
     report: dict[str, list[Any]] = {"kept": [], "dropped": []}
     runs_at: dict[tuple[int, int], list[dict[str, Any]]] = {}
     for pos, src in took.items():
-        old_runs = old_rows[src[0]][src[1]]
+        old_runs = old_at[src]
         runs_at[pos] = json.loads(json.dumps(old_runs))
         report["kept"] += preserve_runs(old_runs, read_runs(old_runs, quotes),
                                         quotes)[1]["kept"]
@@ -388,7 +407,7 @@ def merge_table(old: dict[str, Any], new: dict[str, Any],
             continue
         if pos in old_text and pos not in taken:
             taken.add(pos)
-            old_runs = old_rows[pos[0]][pos[1]]
+            old_runs = old_at[pos]
             if is_rich(old_runs):
                 runs_at[pos], rep = preserve_runs(old_runs, text, quotes)
                 report["kept"] += rep["kept"]
@@ -399,16 +418,18 @@ def merge_table(old: dict[str, Any], new: dict[str, Any],
                         if text else [])
     for pos in old_text:  # old cells no new cell took
         if pos not in taken:
-            old_runs = old_rows[pos[0]][pos[1]]
+            old_runs = old_at[pos]
             report["dropped"] += preserve_runs(old_runs, "", quotes)[1]["dropped"]
-    rows = [{"cells": [{**node, "content": runs_at[(r, c)]}
-                       for c, node in enumerate(row)]}
+    rows = [{"cells": [{**node, "content": runs_at[(r, new_cols[r][j])]}
+                       for j, node in enumerate(row)]}
             for r, row in enumerate(nodes)]
     out = {**new, "rows": rows}
-    width = len(rows[0]["cells"]) if rows else 0
-    for key in ("headerRows", "headerCols"):
-        if key in old:
-            out[key] = old[key]
+    _, _, width = table_grid(out)
+    if "headerCols" in old:
+        out["headerCols"] = old["headerCols"]
+    if "headerRows" in old:
+        out["headerRows"] = (header_depth({**out, "headerRows": 1})
+                             if old["headerRows"] else 0)
     widths = old.get("columnWidths")
     if isinstance(widths, list) and len(widths) == width:
         out["columnWidths"] = list(widths)

@@ -497,3 +497,94 @@ async def test_agent_update_keeps_or_refits_the_stored_borders(
     assert not out.record.get("error"), out.content
     [block] = await list_blocks(migrated_db, nid)
     assert parse_borders(block.props["borders"]) == preset_lines(4, 2, 1, "notion")
+
+
+# ------------------------------------------------- merged cells (H5b.1)
+
+def _mc(content: Any, **props: Any) -> dict[str, Any]:
+    return {"type": "tableCell", "props": props,
+            "content": content if isinstance(content, list) else
+            ([{"type": "text", "text": content, "styles": {}}] if content else [])}
+
+
+MERGED = {"type": "tableContent", "columnWidths": [None, None, None],
+          "headerRows": 2, "rows": [
+              {"cells": [_mc("Method", rowspan=2), _mc("成功恢復", colspan=2)]},
+              {"cells": [_mc("Roof"), _mc("Tire")]},
+              {"cells": [_mc(_bold("GDN")), _mc([
+                  {"type": "text", "text": "18 ", "styles": {}},
+                  {"type": "markCite", "props": {"markId": "m1", "text": "src"}}]),
+                  _mc("17")]},
+              {"cells": [_mc("TTT"), _mc("15"), _mc("14")]}]}
+
+
+async def test_read_note_shows_merge_markers(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid = await _chat_note(migrated_db)
+    await apply_ops(migrated_db, nid, base_revision=0, actor="agent", ops=[
+        Op(op="insert", block=BlockIn(type="table", content=MERGED))])
+    out = await _call(_ctx(migrated_db, fake_tracer), "read_note", note="chat")
+    assert "| Method | 成功恢復 | < |" in out.content
+    assert "| ^ | Roof | Tire |" in out.content
+
+
+async def test_agent_update_of_one_cell_keeps_merges_runs_and_borders(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    from paperhub.notes.table_borders import Borders, dump_borders, preset_lines
+    nid = await _chat_note(migrated_db)
+    base = preset_lines(4, 3, 2, "paper")
+    custom = dump_borders(Borders("paper", base.h[:3] + ("202",) + base.h[4:], base.v))
+    res = await apply_ops(migrated_db, nid, base_revision=0, actor="agent", ops=[
+        Op(op="insert", block=BlockIn(type="table", content=MERGED,
+                                      props={"borders": custom}))])
+    bid = res.applied[0]
+    ctx = _ctx(migrated_db, fake_tracer)
+    out = await _call(ctx, "edit_note", note="chat", base_revision=res.revision, ops=[
+        {"op": "update", "block_id": bid, "block": {"type": "table", "content":
+         "| Method | 成功恢復 | < |\n| --- | --- | --- |\n| ^ | Roof | Tire |\n"
+         '| GDN | 18 <mark_cite mark="m1">src</mark_cite> | 17 |\n'
+         "| TTT (ours) | 15 | 14 |"}}])
+    assert not out.record.get("error"), out.content
+    [block] = await list_blocks(migrated_db, nid)
+    content = block.content
+    assert isinstance(content, dict)
+    assert content["rows"][0]["cells"][0]["props"]["rowspan"] == 2
+    assert content["rows"][0]["cells"][1]["props"]["colspan"] == 2
+    assert content["headerRows"] == 2
+    rows = table_rows(content)
+    assert rows[2][0] == _bold("GDN")
+    assert rows[2][1][1]["type"] == "markCite"
+    assert _cell_texts(content)[3] == ["TTT (ours)", "15", "14"]
+    assert block.props["borders"] == custom
+
+
+async def test_agent_insert_header_under_a_caret_gets_two_header_rows(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid = await _chat_note(migrated_db)
+    out = await _call(_ctx(migrated_db, fake_tracer), "edit_note", note="chat",
+                      base_revision=0, ops=[{"op": "insert", "block": {
+                          "type": "table", "content":
+                          "| M | S | < |\n| --- | --- | --- |\n| ^ | a | b |\n"
+                          "| x | 1 | 2 |"}}])
+    assert not out.record.get("error"), out.content
+    [block] = await list_blocks(migrated_db, nid)
+    assert isinstance(block.content, dict) and block.content["headerRows"] == 2
+
+
+async def test_a_caret_in_row_one_is_refused_with_a_reason(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid = await _chat_note(migrated_db)
+    res = await apply_ops(migrated_db, nid, base_revision=0, actor="agent", ops=[
+        Op(op="insert", block=BlockIn(type="table", content=RICH))])
+    out = await _call(_ctx(migrated_db, fake_tracer), "edit_note", note="chat",
+                      base_revision=res.revision, ops=[
+                          {"op": "update", "block_id": res.applied[0], "block": {
+                              "type": "table",
+                              "content": "| ^ | a |\n|---|---|\n| 1 | 2 |"}}])
+    assert "row 1, column 1" in out.content
+    [block] = await list_blocks(migrated_db, nid)
+    assert block.content == RICH
