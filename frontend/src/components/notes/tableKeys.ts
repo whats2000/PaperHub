@@ -19,7 +19,7 @@ import {
 } from "@blocknote/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
-import { CellSelection, TableMap, deleteColumn, deleteRow } from "@tiptap/pm/tables";
+import { TableMap, removeColumn, removeRow } from "@tiptap/pm/tables";
 import type { EditorView } from "@tiptap/pm/view";
 
 import { useNotesStore } from "@/store/notes";
@@ -485,12 +485,11 @@ function deleteAcrossSpans(view: EditorView, blockId: string, orientation: "row"
   const table = info?.node.firstChild;
   if (!info || !table || table.type.name !== "table") return;
   const tablePos = info.posBeforeNode + 1;
-  const map = TableMap.get(table);
-  const at = (r: number, c: number) => view.state.doc.resolve(tablePos + 1 + map.map[r * map.width + c]!);
-  const sel =
-    orientation === "row"
-      ? new CellSelection(at(index, 0), at(index, map.width - 1))
-      : new CellSelection(at(0, index), at(map.height - 1, index));
-  view.dispatch(view.state.tr.setSelection(sel));
-  (orientation === "row" ? deleteRow : deleteColumn)(view.state, (tr) => view.dispatch(tr));
+  // Exactly that grid row / column (a selection would grow to the spans
+  // crossing it and delete them all); the spans crossing it shrink.
+  const rect = { map: TableMap.get(table), table, tableStart: tablePos + 1, left: 0, top: 0, right: 0, bottom: 0 };
+  const tr = view.state.tr;
+  if (orientation === "row") removeRow(tr, rect, index);
+  else removeColumn(tr, rect, index);
+  view.dispatch(tr);
 }

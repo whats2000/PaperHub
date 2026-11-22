@@ -90,13 +90,21 @@ export function selectCells(editor: unknown, a: [number, number], b: [number, nu
 }
 
 /** Whether the selection is several cells that are not exactly one merged
- * cell and leave every row a cell of its own. */
+ * cell and leave every row a cell of its own: a row below the selection's
+ * first must keep a cell that starts in it outside the selected columns. */
 export function canMerge(state: EditorState): boolean {
   const t = tableSelection(state);
   if (!t || !(state.selection instanceof CellSelection) || t.cells < 2) return false;
   const map = TableMap.get(t.table);
-  const fullWidth = t.rect.c0 === 0 && t.rect.c1 === map.width - 1;
-  return !(fullWidth && t.rect.r1 > t.rect.r0);
+  for (let r = t.rect.r0 + 1; r <= t.rect.r1; r++) {
+    let own = false;
+    for (let c = 0; c < map.width && !own; c++) {
+      if (c >= t.rect.c0 && c <= t.rect.c1) continue;
+      own = map.findCell(map.map[r * map.width + c]!).top === r;
+    }
+    if (!own) return false;
+  }
+  return true;
 }
 
 /** Whether the selection is exactly one merged cell. */

@@ -12,7 +12,7 @@ import { API_BASE_URL } from "@/lib/api";
 import { clearPendingNoteOps, useNotesStore } from "@/store/notes";
 import type { ApplyResult, NoteBlock, NoteOpsBody, TableContent } from "@/types/notes";
 
-import { cleanPastedTable, insertNoteTable, notePasteHandler, pickAlignments, tableClean, tableKeys } from "./tableKeys";
+import { cleanPastedTable, deleteRowOrColumn, insertNoteTable, notePasteHandler, pickAlignments, tableClean, tableKeys } from "./tableKeys";
 import { createCaptionHosts, partRequests, tableCaptions } from "./tableCaptions";
 import { shrinkAway, tableMotion } from "./tableMotion";
 import { tableBorderView } from "./tableBorderView";
@@ -1321,6 +1321,42 @@ describe("merging and splitting cells", () => {
     splitSelected(editor);
     expect(calls).toHaveLength(0);
     delete (Element.prototype as { animate?: unknown }).animate;
+  });
+
+  it("a row or column handle's Delete on a merged table removes only that row / column", () => {
+    const content = (rows: unknown[][]) => [
+      {
+        id: "t",
+        type: "table",
+        content: { type: "tableContent", columnWidths: rows[0]!.map(() => null), headerRows: 1, rows: rows.map((cells) => ({ cells })) },
+      },
+    ];
+    const c = (text: string, props: Record<string, unknown> = {}) => ({ type: "tableCell", props, content: text });
+    // Row 2 (C) sits under A's rowspan.
+    const editor = makeEditor([tableBorderView], content([[c("H1"), c("H2")], [c("A", { rowspan: 2 }), c("B")], [c("C")], [c("D"), c("E")]]));
+    deleteRowOrColumn(editor, "t", "row", 2);
+    expect(texts(tableOf(editor)!)).toEqual([["H1", "H2"], ["A", "B"], ["D", "E"]]);
+    // Column 2 under a header group spanning columns 1-2.
+    const ed2 = makeEditor([tableBorderView], content([[c("M"), c("G", { colspan: 2 })], [c("x"), c("y"), c("z")]]));
+    deleteRowOrColumn(ed2, "t", "column", 2);
+    const t2 = tableOf(ed2)!;
+    expect(texts(t2)).toEqual([["M", "G"], ["x", "y"]]);
+    expect(t2.rows[0]!.cells[1]!.props.colspan ?? 1).toBe(1);
+  });
+
+  it("will not merge cells that would leave a row without a cell of its own", () => {
+    const c = (text: string, props: Record<string, unknown> = {}) => ({ type: "tableCell", props, content: text });
+    const editor = makeEditor([tableBorderView], [
+      {
+        id: "t",
+        type: "table",
+        content: { type: "tableContent", columnWidths: [null, null, null], headerRows: 0, rows: [{ cells: [c("A", { rowspan: 2 }), c("B"), c("C")] }, { cells: [c("E"), c("F")] }] },
+      },
+    ]);
+    selectCells(editor, [0, 1], [1, 2]);
+    expect(canMerge(editor._tiptapEditor.view.state)).toBe(false);
+    selectCells(editor, [0, 1], [0, 2]);
+    expect(canMerge(editor._tiptapEditor.view.state)).toBe(true);
   });
 
   it("will not merge a whole row's width over several rows (a row needs a cell of its own)", () => {
