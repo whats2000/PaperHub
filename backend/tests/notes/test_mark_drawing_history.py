@@ -1,4 +1,6 @@
 """Task 16 fix round 1 (3, 6): undo / redo / restore and the mark row."""
+import json
+
 import aiosqlite
 
 from paperhub.notes.ops import Op, apply_ops, undo_change_set
@@ -60,3 +62,41 @@ async def test_restore_draws_the_block_as_its_mark_is_now(
     await restore_blocks(conn, n, ["q2"], actor="user")
     assert await _row(conn) == ("pink", "highlight")
     assert (await _props_of(conn, n, "q2"))["color"] == "pink"
+
+
+async def _history_after(conn, block_id, revision):
+    async with conn.execute(
+        "SELECT after_json FROM note_block_history WHERE block_id = ? "
+        "AND revision = ? ORDER BY id DESC LIMIT 1", (block_id, revision),
+    ) as cur:
+        return json.loads((await cur.fetchone())[0])
+
+
+async def test_the_undo_history_records_the_colour_written(
+        conn: aiosqlite.Connection):
+    from paperhub.notes.marks import add_color, delete_color
+    custom = (await add_color(conn, hex="#2f6fd8", name="Mine"))["color"]
+    await _mark(conn)
+    n = await _note(conn, blocks=[("q1", _props())])
+    await _update(conn, n, "q1", {"color": custom})
+    res = await _update(conn, n, "q1", {"color": "pink"})
+    await delete_color(conn, custom)
+    undo = await undo_change_set(conn, res.change_set_id)
+    after = await _history_after(conn, "q1", undo.revision)
+    assert after["props"]["color"] == "pink"
+
+
+async def test_undoing_a_move_of_a_lagging_block_leaves_the_mark(
+        conn: aiosqlite.Connection):
+    await _mark(conn)
+    # q1 lags its row (pink, the row is green): an agent recolour before
+    # the fix. Moving it, then undoing the move, never recolours the mark.
+    n = await _note(conn, blocks=[("q1", _props(color="pink")),
+                                  ("q2", _props())])
+    note = await get_note(conn, n)
+    moved = await apply_ops(conn, n, base_revision=note.revision, actor="user",
+                            ops=[Op(op="move", block_id="q1", after="q2")])
+    await undo_change_set(conn, moved.change_set_id)
+    assert await _row(conn) == ("green", "highlight")
+    assert (await _props_of(conn, n, "q2"))["color"] == "green"
+    assert (await _props_of(conn, n, "q1"))["color"] == "green"

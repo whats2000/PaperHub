@@ -303,12 +303,38 @@ class _Ctx:
              self.run_id, self.now),
         )
 
+    async def write(self, block_id: str, op: str, before: dict[str, Any],
+                    after: dict[str, Any], *,
+                    asked: frozenset[str] = frozenset()) -> dict[str, Any]:
+        """Write ``after`` and its history row. A mark block's states are
+        recorded as drawn from its mark: ``before`` as the row was before
+        this write, the after-state as written (``write_state`` draws it
+        from the row). So an undo or redo never replays a block's stale
+        colour into the mark."""
+        before = await self._as_drawn(before)
+        written = await self.write_state(block_id, after, asked=asked)
+        await self.history(block_id, op, before, written)
+        return written
+
+    async def _as_drawn(self, state: dict[str, Any]) -> dict[str, Any]:
+        """A live mark block's state with the colour / style its mark row
+        has now."""
+        if state["type"] not in MARK_BLOCK_TYPES or state["deleted_at"] is not None:
+            return state
+        mark = await _mark_row(self.conn, state["props"].get("markId"))
+        if mark is None:
+            return state
+        return {**state, "props": drawn_props(state["props"], mark)}
+
     async def write_state(self, block_id: str, state: dict[str, Any], *,
-                          asked: frozenset[str] = frozenset()) -> None:
-        """Set a block's content, author, position and deletion as one.
+                          asked: frozenset[str] = frozenset()) -> dict[str, Any]:
+        """Set a block's content, author, position and deletion as one, and
+        return the state written.
 
         A live mark block's colour / style go to its mark first (``asked``:
-        the drawing props an update named; see ``_draw_mark``)."""
+        the drawing props an update named; see ``_draw_mark``), and the
+        block is drawn from the mark; a history row records the returned
+        state (``write``)."""
         if state["type"] in MARK_BLOCK_TYPES and state["deleted_at"] is None:
             state = await self._draw_mark(block_id, state, asked)
         await self.conn.execute(
@@ -333,6 +359,7 @@ class _Ctx:
                     (state["deleted_at"], block_id))
             else:
                 await self._revive_marks(block_id)
+        return state
 
     async def _draw_mark(self, block_id: str, state: dict[str, Any],
                          asked: frozenset[str]) -> dict[str, Any]:
@@ -415,9 +442,8 @@ class _Ctx:
             if props == row.props:
                 continue
             before = row.state()
-            after = {**before, "props": props}
-            await self.write_state(bid, after)
-            await self.history(bid, "update", before, after)
+            written = await self.write_state(bid, {**before, "props": props})
+            await self.history(bid, "update", before, written)
             if bid not in self.applied:
                 self.applied.append(bid)
             redrawn.append(bid)
@@ -739,8 +765,7 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
                      "deleted_at": None, "author": "user"}
             if op.block.section_key is not None:
                 after["section_key"] = op.block.section_key
-            await ctx.write_state(old.id, after)
-            await ctx.history(old.id, "restore", before, after)
+            await ctx.write(old.id, "restore", before, after)
             ctx.applied.append(old.id)
             return
         if old is not None and not revivable:
@@ -825,17 +850,12 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
             after["author"] = "user"
         asked = (_asked(ctx, row, op.block)
                  if blk.type in MARK_BLOCK_TYPES else frozenset())
-        await ctx.write_state(row.id, after, asked=asked)
-        if asked:
-            # As written: the mark block's drawing props come from its mark.
-            after = (await ctx.get(row.id) or row).state()
-        await ctx.history(row.id, "update", before, after)
+        await ctx.write(row.id, "update", before, after, asked=asked)
     elif op.op == "delete":
         for d in [row, *live_desc]:
             d_before = d.state()
             d_after = {**d_before, "deleted_at": ctx.now}
-            await ctx.write_state(d.id, d_after)
-            await ctx.history(d.id, "delete", d_before, d_after)
+            await ctx.write(d.id, "delete", d_before, d_after)
     else:  # move
         if not (op.after or op.before or op.under_heading or op.parent_id):
             ctx.reject(row.id, "invalid")
@@ -850,8 +870,7 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
             return
         key = await _place_with_divider(ctx, op, *place)
         after = {**before, "parent_id": place[0], "order_key": key}
-        await ctx.write_state(row.id, after)
-        await ctx.history(row.id, "move", before, after)
+        await ctx.write(row.id, "move", before, after)
     ctx.applied.append(row.id)
 
 
@@ -1052,8 +1071,7 @@ async def _settle_parents(ctx: _Ctx, block_ids: list[str]) -> None:
             key = key_between(keys[-1] if keys else None, None)
         before = row.state()
         after = {**before, "parent_id": new_parent, "order_key": key}
-        await ctx.write_state(bid, after)
-        await ctx.history(bid, "move", before, after)
+        await ctx.write(bid, "move", before, after)
         ctx.reparented.append({"block_id": bid, "parent_id": new_parent})
 
 
@@ -1107,8 +1125,7 @@ async def undo_change_set(conn: aiosqlite.Connection,
                 target = {**now_state, "deleted_at": ctx.now}
             else:
                 target = json.loads(before_json)
-            await ctx.write_state(block_id, target)
-            await ctx.history(block_id, _UNDO_OP[op], now_state, target)
+            await ctx.write(block_id, _UNDO_OP[op], now_state, target)
             if block_id not in reverted:
                 reverted.append(block_id)
         await _settle_parents(ctx, reverted)
@@ -1161,8 +1178,7 @@ async def reapply_change_set(conn: aiosqlite.Connection,
                 ctx.reject(bid, "changed_since_base", cur_row)
                 continue
             before = cur_row.state()
-            await ctx.write_state(bid, target)
-            await ctx.history(bid, _op_between(before, target), before, target)
+            await ctx.write(bid, _op_between(before, target), before, target)
             ctx.applied.append(bid)
         await _settle_parents(ctx, ctx.applied)
         await _reopen_suggestions(ctx, undo)
@@ -1219,8 +1235,7 @@ async def _restore_in_tx(conn: aiosqlite.Connection, note_id: int,
         for d in together:
             d_before = d.state()
             d_after = {**d_before, "deleted_at": None}
-            await ctx.write_state(d.id, d_after)
-            await ctx.history(d.id, "restore", d_before, d_after)
+            await ctx.write(d.id, "restore", d_before, d_after)
             ctx.applied.append(d.id)
     await _settle_parents(ctx, ctx.applied)
     await _record_change_set(
