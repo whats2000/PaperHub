@@ -71,6 +71,7 @@ import { codeFence, dividerRule, inlineMarks } from "./inlineMarks";
 import { isFindKey, noteFind } from "./noteFind";
 import { NoteFindBar } from "./NoteFindBar";
 import { foldKeyGuard, foldKeyOf } from "./foldKeys";
+import { tabStays } from "./tabKeys";
 import { caretFoldOwner, foldOwners } from "./folds";
 import { FoldControls } from "./FoldControls";
 import "./gutter.css";
@@ -296,6 +297,7 @@ function LoadedNoteEditor({
         mathInput,
         atomCaret,
         foldKeyGuard,
+        tabStays,
         commentKeys,
         inlineMarks,
         codeFence,
