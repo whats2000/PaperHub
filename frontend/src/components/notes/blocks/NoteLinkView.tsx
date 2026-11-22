@@ -1,8 +1,9 @@
 /** A `[[` link chip, like a Notion page mention: an icon and the target's
  * name (+ " › heading"), or the user's display text, underlined in the text
  * colour (yellow is for citations). A click follows the link; hovering it
- * previews where it goes and the first lines there, with Open and Edit
- * display text; keyboard focus opens it too (Tab moves into it, Enter
+ * shows a small card: the kind and where it lives (a paper note's paper),
+ * the target in bold (Note › Heading), its first lines as one paragraph cut
+ * at three lines, and Open / Edit display text; keyboard focus opens it too (Tab moves into it, Enter
  * follows the link). A target since deleted: grey and struck through, the
  * preview says so, a click says it was deleted; one out of reach says "Can't open this
  * right now" with Retry (plain notices, never an error toast). */
@@ -10,7 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
-import { ArrowUpRight, FileText, Lightbulb, MessageSquare, NotebookPen, Pencil } from "lucide-react";
+import { FileText, Lightbulb, MessageSquare, NotebookPen } from "lucide-react";
 
 import "katex/dist/katex.min.css";
 
@@ -76,8 +77,12 @@ function PreviewLine({ block }: { block: PreviewBlock }) {
 /** Hover: how long before the preview opens, and before it closes. */
 const OPEN_DELAY_MS = 250;
 const CLOSE_DELAY_MS = 150;
-/** Lines of the target the preview shows. */
+/** Blocks of the target the preview reads from (one paragraph, cut at
+ * three lines). */
 const PREVIEW_LINES = 3;
+/** The preview's Open / Edit display text buttons. */
+const PREVIEW_BUTTON =
+  "inline-flex h-6 items-center rounded-md border border-border bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none";
 
 export interface NoteLinkProps {
   targetKind: "note" | "paper";
@@ -195,6 +200,14 @@ export function NoteLinkView({
   // ---- hover preview ------------------------------------------------------
   const chip = useRef<HTMLSpanElement>(null);
   const [preview, setPreview] = useState(false);
+  // Where a paper note lives: its paper's title, looked up when the preview opens.
+  const paperOf = isNote && info?.noteKind === "paper" && info.targetId ? info.targetId : 0;
+  const paper = useNotesStore((s) => (paperOf ? s.linkTargets[linkTargetKey("paper", paperOf)] : undefined));
+  const resolve = useNotesStore((s) => s.resolveLinkTarget);
+  useEffect(() => {
+    if (preview && paperOf) void resolve("paper", paperOf);
+  }, [preview, paperOf, resolve]);
+  const source = paper?.status === "ok" ? paper.name : undefined;
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   const hover = (on: boolean) => {
@@ -352,7 +365,7 @@ export function NoteLinkView({
           side="top"
           initialFocus={false}
           finalFocus={false}
-          className="w-80 max-w-[90vw] p-2.5 text-xs motion-reduce:animate-none"
+          className="w-[280px] max-w-[90vw] p-2.5 text-xs motion-reduce:animate-none"
           data-testid="note-link-preview"
           ref={previewBox}
           onMouseEnter={() => hover(true)}
@@ -367,44 +380,39 @@ export function NoteLinkView({
             chip.current?.focus();
           }}
         >
-          <div className="mb-1 flex items-center gap-1 text-[10.5px] text-muted-foreground">
-            <KindIcon kind={targetKind} noteKind={info?.noteKind} className="size-3 shrink-0" />
+          <div data-preview-kind="" className="flex items-center gap-1 text-xs text-muted-foreground">
+            <KindIcon kind={targetKind} noteKind={info?.noteKind} className="size-3.5 shrink-0" />
             <span className="min-w-0 flex-1 truncate">
-              {kindLabel(t, targetKind, info?.noteKind)} · {current || name}
+              {[kindLabel(t, targetKind, info?.noteKind), source].filter(Boolean).join(" · ")}
             </span>
+          </div>
+          <div data-preview-title="" className="my-1 line-clamp-2 text-[13px] font-semibold leading-snug text-foreground">
+            {current || name}
+          </div>
+          {dead ? (
+            <p className="m-0 text-xs text-muted-foreground">{goneText}</p>
+          ) : lines.length ? (
+            <p data-preview-body="" className="m-0 line-clamp-3 text-xs leading-normal text-foreground/80">
+              {lines.map((line, i) => (
+                <span key={i}>
+                  {i > 0 && " "}
+                  <PreviewLine block={line} />
+                </span>
+              ))}
+            </p>
+          ) : isNote && info?.status === "ok" ? (
+            <p className="m-0 text-xs text-muted-foreground">{t("notes:link.empty", "Nothing written here yet")}</p>
+          ) : null}
+          <div data-preview-actions="" className="mt-2 flex flex-wrap items-center gap-1.5">
             {!dead && (
-              <button
-                type="button"
-                className="inline-flex h-5 shrink-0 items-center gap-0.5 rounded px-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                onClick={() => void open()}
-              >
-                <ArrowUpRight className="size-3" aria-hidden />
+              <button type="button" className={PREVIEW_BUTTON} onClick={() => void open()}>
                 {t("notes:link.open", "Open")}
               </button>
             )}
-            <button
-              type="button"
-              aria-label={t("notes:link.edit", "Edit display text")}
-              title={t("notes:link.edit", "Edit display text")}
-              className="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              onClick={startEdit}
-            >
-              <Pencil className="size-3" aria-hidden />
+            <button type="button" className={PREVIEW_BUTTON} onClick={startEdit}>
+              {t("notes:link.edit", "Edit display text")}
             </button>
           </div>
-          {dead ? (
-            <p className="m-0 text-muted-foreground">{goneText}</p>
-          ) : lines.length ? (
-            <div className="space-y-0.5 text-[12.5px] leading-normal text-foreground/80">
-              {lines.map((line, i) => (
-                <p key={i} className="m-0 line-clamp-2">
-                  <PreviewLine block={line} />
-                </p>
-              ))}
-            </div>
-          ) : isNote && info?.status === "ok" ? (
-            <p className="m-0 text-muted-foreground">{t("notes:link.empty", "Nothing written here yet")}</p>
-          ) : null}
         </PopoverContent>
       </Popover>
     </span>

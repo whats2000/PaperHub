@@ -87,6 +87,10 @@ function note12(status = 200) {
             ],
           }),
     ),
+    // The paper of note 12, named in the preview's kind line.
+    http.get(`${API_BASE_URL}/papers/content/47/info`, () =>
+      HttpResponse.json({ id: 47, title: "RoboTTT: Context Scaling for Robot Policies" }),
+    ),
   );
 }
 
@@ -180,6 +184,30 @@ describe("a [[ link chip", () => {
     expect(preview.textContent).toContain("Under the heading");
     expect(within(preview).getByRole("button", { name: "Open" })).toBeInTheDocument();
     expect(within(preview).getByRole("button", { name: "Edit display text" })).toBeInTheDocument();
+  });
+
+  it("previews as a card: kind and source, the target in bold, a clamped paragraph, two buttons", async () => {
+    note12();
+    seed([link({ blockId: "h1" })]);
+    mount();
+    await waitFor(() => expect(chip()?.textContent).toBe("RoboTTT › 閘控"));
+    const preview = await hoverPreview();
+    // The kind, then where it lives: a paper note names its paper.
+    const kind = preview.querySelector("[data-preview-kind]")!;
+    expect(kind.textContent).toContain("Paper note");
+    await waitFor(() => expect(kind.textContent).toContain("RoboTTT: Context Scaling for Robot Policies"));
+    expect(kind.querySelector("svg")).not.toBeNull();
+    const title = preview.querySelector("[data-preview-title]")!;
+    expect(title.textContent).toBe("RoboTTT › 閘控");
+    expect(title.className).toMatch(/font-semibold/);
+    // One wrapped paragraph cut after three lines, not a line per block.
+    const body = preview.querySelectorAll("[data-preview-body]");
+    expect(body).toHaveLength(1);
+    expect(body[0]!.className).toMatch(/line-clamp-3/);
+    expect(body[0]!.textContent).toContain("Under the heading");
+    // Two labelled buttons in a row under it.
+    const buttons = within(preview.querySelector("[data-preview-actions]") as HTMLElement).getAllByRole("button");
+    expect(buttons.map((b) => b.textContent)).toEqual(["Open", "Edit display text"]);
   });
 
   it("draws inline math in the preview's lines as the editor does, never as raw LaTeX", async () => {
