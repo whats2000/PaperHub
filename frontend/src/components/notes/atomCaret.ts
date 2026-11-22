@@ -1,12 +1,14 @@
-/** An insertion caret beside a block that takes no text (a paper reference,
- * a divider): a click on its left half puts a caret at its left edge, on its
- * right half at its right edge. Enter or a typed character then opens a new
- * line above (left) or below (right), so there is always a way to write
- * before a reference, even at the very top of the note.
+/** An insertion caret beside an object block (a paper reference, a divider,
+ * a table, a code or math block, …): a click on its left half puts a caret at
+ * its left edge, on its right half at its right edge (on a block edited in
+ * place, a click beside its content or in its gutter). Enter or a typed
+ * character then opens a new line above (left) or below (right), so there is
+ * always a way to write before a reference, even at the very top of the note.
  *
  * The block is node-selected (so the keys reach the editor and the browser
- * draws no text caret elsewhere); a node decoration draws the caret line
- * (`data-atom-caret` on the block's node view, styled in index.css). */
+ * draws no text caret elsewhere); a node decoration marks it
+ * (`data-object-selected`: a light tint, no frame) and draws the caret line
+ * (`data-atom-caret`), both styled in index.css. */
 import { createExtension } from "@blocknote/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import {
@@ -19,8 +21,9 @@ import {
 } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 
-/** The blocks that get the caret (no text of their own, no inner editor). */
-export const ATOM_CARET_TYPES: ReadonlySet<string> = new Set([
+/** The blocks that take no text of their own: Delete / Backspace from a
+ * text line never remove one in a keystroke. */
+const NO_TEXT_TYPES: ReadonlySet<string> = new Set([
   "paperQuote",
   "paperEquation",
   "paperFigure",
@@ -28,7 +31,28 @@ export const ATOM_CARET_TYPES: ReadonlySet<string> = new Set([
   "divider",
   "section",
   "toc",
+  "math",
 ]);
+
+/** Object blocks whose content is edited in place, and the element that
+ * holds it: a click there edits; beside it, the caret. */
+const EDITED_IN_PLACE: Readonly<Record<string, string>> = {
+  table: "table",
+  codeBlock: "pre",
+  math: "[data-math-render]",
+};
+
+/** Every object block (anything that is not a line of text) gets the caret:
+ * a later block type that is not a line of text is added here. */
+export const ATOM_CARET_TYPES: ReadonlySet<string> = new Set([
+  ...NO_TEXT_TYPES,
+  ...Object.keys(EDITED_IN_PLACE),
+]);
+
+/** The block's own gutter, left and right of its content: the selected
+ * block's tint spans it, the caret is drawn in it, a click in it counts as a
+ * click beside the block (index.css draws the same width). */
+export const ATOM_GUTTER_PX = 8;
 
 export type CaretSide = "before" | "after";
 
@@ -56,6 +80,25 @@ function findContainer(doc: PMNode, id: string): { node: PMNode; pos: number } |
     return true;
   });
   return found;
+}
+
+/** The table plugin turns a node selection of a table into a selection of
+ * all its cells (BlockNote gives it no option to keep the node): for a
+ * table, that is the block selected. */
+function selectsWholeTable(sel: Selection, pos: number): boolean {
+  const cells = sel as Selection & {
+    $anchorCell?: { depth: number; before: (depth: number) => number };
+    isRowSelection?: () => boolean;
+    isColSelection?: () => boolean;
+  };
+  const $cell = cells.$anchorCell;
+  if (!$cell || !cells.isRowSelection?.() || !cells.isColSelection?.()) return false;
+  return $cell.before($cell.depth - 1) === pos;
+}
+
+/** Whether the selection is the block whose content node is at `pos`. */
+function selectsBlock(sel: Selection, pos: number): boolean {
+  return (sel instanceof NodeSelection && sel.from === pos) || selectsWholeTable(sel, pos);
 }
 
 function caretAt(state: EditorState, pos: number): PMNode | null {
@@ -107,26 +150,76 @@ function leave(view: EditorView, caret: AtomCaret, dir: "up" | "down"): boolean 
   return true;
 }
 
-/** A click on a block's left / right half puts the caret on that side;
- * a click on a control inside it, or anywhere else, hides the caret. */
+/** The object block whose gutter (the strip ATOM_GUTTER_PX wide left or
+ * right of its content) holds this point, and the side. */
+function inGutter(view: EditorView, x: number, y: number): { content: HTMLElement; side: CaretSide } | null {
+  let hit: { content: HTMLElement; side: CaretSide } | null = null;
+  for (const content of view.dom.querySelectorAll<HTMLElement>(".bn-block-content[data-content-type]")) {
+    if (!ATOM_CARET_TYPES.has(content.getAttribute("data-content-type") ?? "")) continue;
+    const r = content.getBoundingClientRect();
+    if (y < r.top || y > r.bottom) continue;
+    // The innermost (a nested block comes later in the document) wins.
+    if (x < r.left && x >= r.left - ATOM_GUTTER_PX) hit = { content, side: "before" };
+    else if (x > r.right && x <= r.right + ATOM_GUTTER_PX) hit = { content, side: "after" };
+  }
+  return hit;
+}
+
+/** A click on a block's left / right half puts the caret on that side (on
+ * a block edited in place: beside its content, not on it), as does a click
+ * in its gutter; a click on a control inside it, or anywhere else, hides
+ * the caret. */
 function onBlockClick(view: EditorView, event: MouseEvent) {
   const el = event.target as HTMLElement | null;
   const clear = () => {
     if (atomCaretKey.getState(view.state)) view.dispatch(view.state.tr.setMeta(atomCaretKey, null));
   };
-  const content = el?.closest<HTMLElement>(".bn-block-content");
-  const type = content?.getAttribute("data-content-type");
-  if (!el || !content || !type || !ATOM_CARET_TYPES.has(type)) return clear();
+  if (!el) return clear();
+  let content = el.closest<HTMLElement>(".bn-block-content");
+  let side: CaretSide | null = null;
+  if (!content) {
+    // Outside every block's content: the editor's margin, maybe a gutter.
+    const hit = inGutter(view, event.clientX, event.clientY);
+    if (!hit) return clear();
+    ({ content, side } = hit);
+  }
+  const type = content.getAttribute("data-content-type");
+  if (!type || !ATOM_CARET_TYPES.has(type)) return clear();
   // (The editor itself is contenteditable: only controls inside the block count.)
   const control = el.closest(INTERACTIVE);
   if (control && content.contains(control)) return clear();
+  const inner = EDITED_IN_PLACE[type];
+  const held = inner ? content.querySelector<HTMLElement>(inner) : null;
+  if (side === null && held) {
+    // A click on the content edits it (the editor's own handling).
+    if (held.contains(el)) return clear();
+    const r = held.getBoundingClientRect();
+    side = event.clientX < r.left + r.width / 2 ? "before" : "after";
+  }
   const id = content.closest(".bn-block-outer")?.getAttribute("data-id");
   const found = id ? findContainer(view.state.doc, id) : null;
   if (!found) return clear();
-  const rect = content.getBoundingClientRect();
-  const side: CaretSide = event.clientX < rect.left + rect.width / 2 ? "before" : "after";
+  if (side === null) {
+    const rect = content.getBoundingClientRect();
+    side = event.clientX < rect.left + rect.width / 2 ? "before" : "after";
+  }
   setAtomCaret(view, found.pos + 1, side);
   view.focus();
+}
+
+/** A table's caret holds all its cells selected (the table plugin's form of
+ * a selected table), where the editor's Backspace / Delete would only empty
+ * them: the block goes, as any other selected block does. */
+function deleteTable(view: EditorView, caret: AtomCaret): boolean {
+  const { state } = view;
+  if (state.doc.nodeAt(caret.pos)?.type.name !== "table") return false;
+  const $pos = state.doc.resolve(caret.pos);
+  const from = $pos.before();
+  const tr = state.tr.delete(from, from + $pos.parent.nodeSize).setMeta(atomCaretKey, null);
+  const near = Selection.findFrom(tr.doc.resolve(Math.min(from, tr.doc.content.size)), caret.side === "after" ? -1 : 1, true);
+  if (near) tr.setSelection(near);
+  view.dispatch(tr.scrollIntoView());
+  return true;
 }
 
 function isPrintable(e: KeyboardEvent): boolean {
@@ -158,7 +251,7 @@ function guardNeighbour(view: EditorView, event: KeyboardEvent): boolean {
       ? containerPos + 1 + container.child(0).nodeSize + 1
       : $c.after(containerDepth);
     const next = state.doc.nodeAt(nextPos);
-    if (next?.type.name !== "blockContainer" || !ATOM_CARET_TYPES.has(next.child(0).type.name))
+    if (next?.type.name !== "blockContainer" || !NO_TEXT_TYPES.has(next.child(0).type.name))
       return false;
     if (empty && !hasChildren) {
       const tr = state.tr.delete(containerPos, containerPos + container.nodeSize);
@@ -187,7 +280,7 @@ function guardNeighbour(view: EditorView, event: KeyboardEvent): boolean {
     prevPos = groupPos + 1 + group.content.size - last.nodeSize;
     prev = last;
   }
-  if (prev?.type.name !== "blockContainer" || !ATOM_CARET_TYPES.has(prev.child(0).type.name))
+  if (prev?.type.name !== "blockContainer" || !NO_TEXT_TYPES.has(prev.child(0).type.name))
     return false;
   if (empty && !hasChildren) {
     const tr = state.tr.delete(containerPos, containerPos + container.nodeSize);
@@ -227,9 +320,11 @@ function onKey(view: EditorView, event: KeyboardEvent): boolean {
     case "Backspace":
       // Deletes the (selected) block as before, from its right side
       // only; from its left side there is nothing before the caret.
-      return caret.side === "before";
+      if (caret.side === "before") return true;
+      return deleteTable(view, caret);
     case "Delete":
-      return caret.side === "after";
+      if (caret.side === "after") return true;
+      return deleteTable(view, caret);
     default:
       if (isPrintable(event)) return openLine(view, caret, event.key);
       return false;
@@ -276,7 +371,7 @@ export const atomCaret = createExtension({
           // Any other move of the selection (a re-read of the same node
           // selection, e.g. on focus, keeps it), or losing the block, ends it.
           const sel = state.selection;
-          if (tr.selectionSet && !(sel instanceof NodeSelection && sel.from === pos)) return null;
+          if (tr.selectionSet && !selectsBlock(sel, pos)) return null;
           return caretAt(state, pos) ? { ...value, pos } : null;
         },
       },
@@ -301,15 +396,18 @@ export const atomCaret = createExtension({
         };
       },
       props: {
+        // A selected object block is tinted (no frame), with the caret
+        // beside it when there is one (index.css).
         decorations: (state) => {
+          const sel = state.selection;
           const caret = atomCaretKey.getState(state);
-          const node = caret ? caretAt(state, caret.pos) : null;
-          if (!caret || !node) return null;
-          return DecorationSet.create(state.doc, [
-            Decoration.node(caret.pos, caret.pos + node.nodeSize, {
-              "data-atom-caret": caret.side,
-            }),
-          ]);
+          const pos = caret?.pos ?? (sel instanceof NodeSelection ? sel.from : -1);
+          const node = pos >= 0 ? caretAt(state, pos) : null;
+          if (!node) return null;
+          const attrs: Record<string, string> = {};
+          if (selectsBlock(sel, pos)) attrs["data-object-selected"] = "";
+          if (caret) attrs["data-atom-caret"] = caret.side;
+          return DecorationSet.create(state.doc, [Decoration.node(pos, pos + node.nodeSize, attrs)]);
         },
         handleDOMEvents: {
           // Ahead of BlockNote's own keymap, whose Delete / Backspace would

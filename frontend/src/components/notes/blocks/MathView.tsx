@@ -90,7 +90,7 @@ export function MathView({
       <button
         type="button"
         data-math-render=""
-        className="block w-full overflow-x-auto rounded-md px-2 py-1 text-left transition-colors hover:bg-muted"
+        className="block w-fit max-w-full overflow-x-auto rounded-md px-2 py-1 text-left transition-colors hover:bg-muted"
         title={t("notes:math.edit", "Click to edit the LaTeX")}
         // While editing the formula is the live preview: a click on it keeps
         // the field focused instead of closing it.

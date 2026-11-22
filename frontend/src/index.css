@@ -410,32 +410,59 @@
   .note-find-in,
   .note-find-out { animation: none; }
 }
-/* The insertion caret beside a block that takes no text (atomCaret.ts):
-   a text caret's line at the block's left or right edge, blinking like one. */
-.paperhub-notes [data-atom-caret] {
+/* A selected object block (atomCaret.ts: a reference, divider, table, code
+   or math block, …) as in Notion: a light tint over the block and its
+   gutter (ATOM_GUTTER_PX = 8px each side), no frame. BlockNote's thick inset
+   ring is turned off; a table's caret holds all its cells selected, drawn
+   as the block's tint rather than as selected cells. */
+.paperhub-notes {
+  --note-select: oklch(0.55 0.12 250);
+}
+.dark .paperhub-notes {
+  --note-select: oklch(0.7 0.12 250);
+}
+.paperhub-notes [data-object-selected] {
   position: relative;
 }
-.paperhub-notes [data-atom-caret].ProseMirror-selectednode,
-.paperhub-notes [data-atom-caret] .ProseMirror-selectednode,
-.paperhub-notes [data-atom-caret] > .bn-block-content {
+.paperhub-notes [data-object-selected].ProseMirror-selectednode,
+.paperhub-notes [data-object-selected] .ProseMirror-selectednode,
+.paperhub-notes [data-object-selected] > .bn-block-content {
   outline: none;
 }
+.paperhub-notes [data-object-selected]::before {
+  content: "";
+  position: absolute;
+  inset: 0 -8px;
+  /* Over the block's own positioned parts (a code block's box, a table). */
+  z-index: 1;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--note-select) 7%, transparent);
+  pointer-events: none;
+}
+.paperhub-notes [data-object-selected].bn-block-content > *::after,
+.paperhub-notes [data-object-selected] > .bn-block-content > *::after,
+.paperhub-notes [data-object-selected] .selectedCell::after {
+  content: none;
+}
+/* The insertion caret beside it: a text caret's 2px line the block's full
+   height (6px in from its top and bottom) in its gutter, at the left or
+   right edge, blinking like one (steady under reduced motion). */
 .paperhub-notes [data-atom-caret]::after {
   content: "";
   position: absolute;
-  top: 50%;
-  width: 1.5px;
-  height: 1.4em;
-  transform: translateY(-50%);
-  background: var(--bn-colors-editor-text, currentColor);
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--foreground);
   pointer-events: none;
-  animation: paperhub-caret-blink 1.06s steps(1, end) infinite;
+  animation: paperhub-caret-blink 1.05s steps(1, end) infinite;
 }
 .paperhub-notes [data-atom-caret="before"]::after {
-  left: -3px;
+  left: -5px;
 }
 .paperhub-notes [data-atom-caret="after"]::after {
-  right: -3px;
+  right: -5px;
 }
 @keyframes paperhub-caret-blink {
   0% {
@@ -485,7 +512,11 @@
 }
 .paperhub-notes .bn-block-outer[data-part-body] > .bn-block {
     min-height: 0;
-    overflow: hidden;
+    min-width: 0;
+    /* Clipped only top and bottom (the fold): a selected object block's
+       tint and caret sit in its gutter, left and right of the block. */
+    overflow-x: visible;
+    overflow-y: clip;
 }
 .paperhub-notes .bn-block-outer[data-folded="true"] {
     grid-template-rows: 0fr;

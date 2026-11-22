@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTes
 
 import { BlockNoteEditor } from "@blocknote/core";
 
+import { setAtomCaret } from "@/components/notes/atomCaret";
 import { NoteEditor } from "@/components/notes/NoteEditor";
 import { noteSchema } from "@/components/notes/schema";
 import { diffDocuments, opBlock, toEditorBlocks, treeIds, type EditorBlock } from "@/components/notes/sync";
@@ -881,11 +882,19 @@ describe("dividers, Focus and folding", () => {
     expect(document.activeElement).not.toBe(screen.getByRole("textbox", { name: "LaTeX" }));
   });
 
-  it("shows the formatting bar for selected words, not for a selected divider or equation", async () => {
+  it("shows the formatting bar for selected words, not for a selected divider, equation or table", async () => {
     seed([
       blk("p0", { content: [{ type: "text", text: "Some words", styles: {} }], text: "Some words" }),
       blk("d0", { type: "divider" }),
       blk("m0", { type: "math", props: { latex: "x" } }),
+      blk("t0", {
+        type: "table",
+        content: {
+          type: "tableContent",
+          columnWidths: [null],
+          rows: [{ cells: [[{ type: "text", text: "a", styles: {} }]] }],
+        } as never,
+      }),
     ]);
     // jsdom has no Range geometry; the bar is placed from it.
     const range = Range.prototype as unknown as Record<"getClientRects" | "getBoundingClientRect", unknown>;
@@ -918,6 +927,11 @@ describe("dividers, Focus and folding", () => {
       act(() => view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, posOf(name)))));
       await waitFor(() => expect(document.querySelector('[data-test="bold"]')).toBeNull());
     }
+    // A table's caret holds all its cells selected: still no words to format.
+    act(() => view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 3, 7))));
+    await waitFor(() => expect(document.querySelector('[data-test="bold"]')).not.toBeNull());
+    act(() => setAtomCaret(view, posOf("table"), "after"));
+    await waitFor(() => expect(document.querySelector('[data-test="bold"]')).toBeNull());
   });
 
   const p4 = blk("p4", { content: [{ type: "text", text: "Fourth", styles: {} }], text: "Fourth" });
@@ -1601,6 +1615,21 @@ describe("the insertion caret beside a block", () => {
     clickSide("d1", "left");
     key({ key: "Escape" });
     expect(caretOf("d1")).toBeNull();
+  });
+
+  it("a click on a math block's formula edits it; beside the formula, the caret", async () => {
+    seed([mine, blk("m1", { type: "math", props: { latex: "x^2" } })]);
+    mount();
+    await waitFor(() => expect(content("m1")?.querySelector("[data-math-render]")).toBeTruthy());
+    const formula = content("m1").querySelector<HTMLElement>("[data-math-render]")!;
+    // The formula takes only its own width: the block's blank area is beside it.
+    expect(formula.className.split(" ")).not.toContain("w-full");
+    formula.getBoundingClientRect = () => ({ left: 0, width: 80, top: 0, height: 30, right: 80, bottom: 30 }) as DOMRect;
+    clickSide("m1", "right", formula.parentElement!);
+    expect(caretOf("m1")).toBe("after");
+    key({ key: "Escape" });
+    clickSide("m1", "left", formula);
+    expect(caretOf("m1")).toBeNull();
   });
 
   it("a click on a button inside the reference does not set the caret", async () => {

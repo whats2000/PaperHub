@@ -17,6 +17,7 @@ import type { ReactNode } from "react";
 import { NodeSelection } from "@tiptap/pm/state";
 import { useTranslation } from "react-i18next";
 
+import { atomCaretKey } from "./atomCaret";
 import type { noteSchema } from "./schema";
 import { selectionIsQuote, toggleQuote } from "./formatActions";
 import { FORMAT_BUTTONS, formatHint, type FormatId } from "./formatButtons";
@@ -53,6 +54,8 @@ function Bar({ onComment }: { onComment?: () => void }) {
       // A selected divider, equation or reference has no words to format
       // (BlockNote shows its bar for any selected block without text).
       if (e.prosemirrorState.selection instanceof NodeSelection) return undefined;
+      // Nor does a table with the caret beside it (its cells all selected).
+      if (atomCaretKey.getState(e.prosemirrorState)) return undefined;
       const styles = e.getActiveStyles() as Record<string, unknown>;
       return {
         bold: !!styles.bold,
