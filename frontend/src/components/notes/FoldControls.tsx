@@ -18,7 +18,8 @@ import { useTranslation } from "react-i18next";
 import { useNotesStore } from "@/store/notes";
 
 import { useNoteEditorContext } from "./blocks/markProps";
-import { foldShortcut, usePresence } from "./foldMotion";
+import { foldShortcut } from "./foldKeys";
+import { usePresence } from "./foldMotion";
 import { foldOwners, foldSummaryOf, type FoldNode } from "./folds";
 import { foldLine } from "./parts";
 import { refreshPartDecorations, type FoldHosts } from "./partsDecorations";
