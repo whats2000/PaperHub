@@ -15,6 +15,7 @@ import {
 import { AtSign, Bold, Code, EyeOff, Italic, MessageSquare, Quote, Strikethrough, Underline } from "lucide-react";
 import type { ReactNode } from "react";
 import { NodeSelection } from "@tiptap/pm/state";
+import { CellSelection } from "@tiptap/pm/tables";
 import { useTranslation } from "react-i18next";
 
 import { atomCaretKey } from "./atomCaret";
@@ -135,10 +136,17 @@ function Bar({ onComment }: { onComment?: () => void }) {
 export function NoteFormattingBar({ onComment, hidden = false }: { onComment?: () => void; hidden?: boolean }) {
   // `hidden`: find is open, its match selected in the note: the bar closes
   // (with its own fade) instead of covering the lines around the match.
+  // Selected table cells have the table's own ⌄ cell menu, not a text bar
+  // (text selected inside one cell is a text selection and keeps the bar).
+  const editor = useBlockNoteEditor();
+  const cells = useEditorState({
+    editor,
+    selector: ({ editor: e }) => e.prosemirrorState.selection instanceof CellSelection,
+  });
   return (
     <FormattingToolbarController
       formattingToolbar={() => <Bar onComment={onComment} />}
-      floatingUIOptions={hidden ? HIDDEN : undefined}
+      floatingUIOptions={hidden || cells ? HIDDEN : undefined}
     />
   );
 }

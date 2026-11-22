@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { editorHasBlockWithType } from "@blocknote/core";
+import { TextSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 
 import { NoteEditor } from "@/components/notes/NoteEditor";
@@ -100,6 +101,11 @@ function caretInCell(editor: AnyEditor, r: number, c: number) {
     return true;
   });
   editor._tiptapEditor.commands.setTextSelection(pos);
+}
+
+/** The caret into a cell's text, on a mounted editor's view. */
+function caretInCellView(view: EditorView, r: number, c: number) {
+  caretInCell({ _tiptapEditor: { view, commands: { setTextSelection: (p: number) => view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, p))) } } } as never, r, c);
 }
 
 /** Row and column of the caret's cell. */
@@ -397,6 +403,42 @@ describe("tables in the note editor", () => {
     expect(document.querySelector(".bn-extend-button-add-remove-columns")).not.toBeNull();
 
   });
+});
+
+describe("cell selection and wide tables (user report, 2026-11-22)", () => {
+  it("a cell selection shows no text formatting bar; a text selection inside one cell does", async () => {
+    // jsdom has no Range geometry; the bar is placed from it.
+    const range = Range.prototype as unknown as Record<"getClientRects" | "getBoundingClientRect", unknown>;
+    const had = { rects: range.getClientRects, box: range.getBoundingClientRect };
+    range.getClientRects = () => [];
+    range.getBoundingClientRect = () => new DOMRect();
+    onTestFinished(() => {
+      range.getClientRects = had.rects;
+      range.getBoundingClientRect = had.box;
+    });
+    seed([
+      blk("t", {
+        type: "table",
+        content: { type: "tableContent", columnWidths: [null, null], headerRows: 1, rows: [{ cells: ["alpha", "beta"] }, { cells: ["one", "two"] }] },
+      }),
+    ]);
+    const pm = mountEditor();
+    const view = pm.editor.view;
+    const { TextSelection } = await import("@tiptap/pm/state");
+    // "alpha" in the first cell: the caret's cell starts at 4 (table, row, cell, paragraph).
+    act(() => {
+      pm.focus();
+      caretInCellView(view, 0, 0);
+      const from = view.state.selection.from;
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, from + 3)));
+    });
+    await waitFor(() => expect(document.querySelector('[data-test="bold"]')).not.toBeNull());
+    act(() => {
+      selectCells({ _tiptapEditor: { view } }, [0, 0], [1, 1]);
+    });
+    await waitFor(() => expect(document.querySelector('[data-test="bold"]')).toBeNull());
+  });
+
 });
 
 // ---------------------------------------------------------------- motion
