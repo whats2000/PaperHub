@@ -27,7 +27,8 @@ function runsText(content: unknown): string {
     .join("");
 }
 
-function cellText(cell: unknown): string {
+/** A table cell's text (its runs). */
+export function cellText(cell: unknown): string {
   if (cell && typeof cell === "object" && !Array.isArray(cell)) {
     return runsText((cell as { content?: unknown }).content);
   }

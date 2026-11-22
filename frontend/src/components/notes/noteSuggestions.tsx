@@ -15,13 +15,13 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
-import { blockText } from "@/lib/notes/ops";
+import { blockText, cellText } from "@/lib/notes/ops";
 import { diffText } from "@/lib/notes/textDiff";
 import { useNotesStore } from "@/store/notes";
 import type { ApplyResult, NoteSuggestion } from "@/types/notes";
 
 import { commentAnchor, type ReanchorHint } from "./noteComments";
-import { SuggestionMark, type TablePartChange } from "./SuggestionMark";
+import { SuggestionMark, type TableCellChange, type TablePartChange } from "./SuggestionMark";
 
 // The suggestion code works on any schema; it reads block ids and text only.
 type Ed = BlockNoteEditor<any, any, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -60,6 +60,68 @@ export function tablePartChanges(s: NoteSuggestion, current: Record<string, unkn
     const from = typeof cur === "string" ? cur : "";
     if (from !== to) out.push({ part, from, to });
   }
+  return out;
+}
+
+function tableRows(content: unknown): string[][] {
+  const rows = (content as { rows?: unknown } | null)?.rows;
+  if (!Array.isArray(rows)) return [];
+  return rows.map((r: { cells?: unknown[] }) => (r.cells ?? []).map(cellText));
+}
+
+/** The cells a table suggestion changes, against the table as it is now.
+ * Rows are matched by their text (a longest common run), so an added or a
+ * removed row shows as that row, not as every row below it changing; the
+ * unmatched rows between two matches pair up as changed rows. */
+export function tableCellChanges(s: NoteSuggestion, current: unknown): TableCellChange[] {
+  const p = s.proposed;
+  if (s.kind !== "update" || !p || p.type !== "table") return [];
+  const a = tableRows(current);
+  const b = tableRows(p.content);
+  const key = (r: string[]) => r.join("\u0000");
+  // LCS over rows.
+  const lcs: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--)
+      lcs[i]![j] = key(a[i]!) === key(b[j]!) ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+  const header = a[0] ?? b[0] ?? [];
+  const out: TableCellChange[] = [];
+  const line = (r: string[]) => r.join(" | ");
+  const flush = (gone: number[], added: number[]) => {
+    const pairs = Math.min(gone.length, added.length);
+    for (let k = 0; k < pairs; k++) {
+      const ra = a[gone[k]!]!;
+      const rb = b[added[k]!]!;
+      for (let c = 0; c < Math.max(ra.length, rb.length); c++) {
+        const from = ra[c] ?? "";
+        const to = rb[c] ?? "";
+        if (from !== to)
+          out.push({ kind: "cell", row: ra[0] ?? "", rowN: gone[k]! + 1, column: header[c] ?? "", colN: c + 1, from, to });
+      }
+    }
+    for (const i of gone.slice(pairs))
+      out.push({ kind: "removeRow", row: a[i]![0] ?? "", rowN: i + 1, column: "", colN: 0, from: line(a[i]!), to: "" });
+    for (const j of added.slice(pairs))
+      out.push({ kind: "addRow", row: b[j]![0] ?? "", rowN: j + 1, column: "", colN: 0, from: "", to: line(b[j]!) });
+  };
+  let i = 0;
+  let j = 0;
+  let gone: number[] = [];
+  let added: number[] = [];
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && key(a[i]!) === key(b[j]!)) {
+      flush(gone, added);
+      gone = [];
+      added = [];
+      i++;
+      j++;
+    } else if (j < b.length && (i >= a.length || lcs[i]![j + 1]! >= lcs[i + 1]![j]!)) {
+      added.push(j++);
+    } else {
+      gone.push(i++);
+    }
+  }
+  flush(gone, added);
   return out;
 }
 
@@ -302,12 +364,15 @@ export function useNoteSuggestions(
       }
     })();
     const inText = Array.isArray(block?.content);
+    // A table's change is shown cell by cell, never as the whole table.
+    const isTable = s.proposed?.type === "table";
     return createPortal(
       <SuggestionMark
         suggestionId={s.id}
         deletes={s.kind === "delete"}
-        detached={inText || s.kind === "delete" ? null : proposedText(s)}
+        detached={inText || isTable || s.kind === "delete" ? null : proposedText(s)}
         partChanges={tablePartChanges(s, block?.props ?? {})}
+        cellChanges={tableCellChanges(s, block?.content)}
         onDecide={(accept, exit) => decide(s, accept, exit)}
       />,
       host(s.id),

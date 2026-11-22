@@ -22,6 +22,8 @@ export interface SuggestionMarkProps {
   /** A table's caption / notes the proposal changes (they are props, with
    * no text in the note to mark): shown here, old struck, new inserted. */
   partChanges?: readonly TablePartChange[];
+  /** The cells a table proposal changes (the cells are not shown whole). */
+  cellChanges?: readonly TableCellChange[];
   /** Posts the decision and shows the saved note, calling `exit` (the
    * change animating out) in between. Rejects when the decision failed;
    * resolves "kept" when the suggestion stays open (shown again). */
@@ -42,7 +44,28 @@ export interface TablePartChange {
   to: string;
 }
 
-export function SuggestionMark({ suggestionId, deletes, detached, partChanges = [], onDecide }: SuggestionMarkProps) {
+/** One change a table suggestion makes to the cells: a cell (named by its
+ * row's first cell and its column's header), or a whole row added or
+ * removed. `rowN` / `colN` are 1-based (0: not a column); a row or column
+ * without a name is shown by its number. */
+export interface TableCellChange {
+  kind: "cell" | "addRow" | "removeRow";
+  row: string;
+  rowN: number;
+  column: string;
+  colN: number;
+  from: string;
+  to: string;
+}
+
+export function SuggestionMark({
+  suggestionId,
+  deletes,
+  detached,
+  partChanges = [],
+  cellChanges = [],
+  onDecide,
+}: SuggestionMarkProps) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState<"accept" | "reject" | null>(null);
   const [leaving, setLeaving] = useState(false);
@@ -106,6 +129,36 @@ export function SuggestionMark({ suggestionId, deletes, detached, partChanges = 
           )}
         </span>
       ))}
+      {cellChanges.map((c, i) => {
+        // The first cell names its row, so a change to it names the row by number.
+        const row = c.colN !== 1 && c.row ? c.row : t("notes:suggestion.rowN", "Row {{n}}", { n: c.rowN });
+        const column = c.column || t("notes:suggestion.columnN", "Column {{n}}", { n: c.colN });
+        const label =
+          c.kind === "addRow"
+            ? t("notes:suggestion.addRow", "New row")
+            : c.kind === "removeRow"
+              ? t("notes:suggestion.removeRow", "Row removed")
+              : t("notes:suggestion.cell", "{{row}} · {{column}}", { row, column });
+        return (
+          <span key={i} data-testid="suggestion-cell" className="basis-full whitespace-pre-wrap text-foreground">
+            <span className="font-medium">
+              {label}
+              {": "}
+            </span>
+            {c.from && (
+              <del className="note-sug-del" data-suggestion-id={suggestionId}>
+                {c.from}
+              </del>
+            )}
+            {c.from && c.to && " "}
+            {c.to && (
+              <ins className="note-sug-ins" data-suggestion-id={suggestionId}>
+                {c.to}
+              </ins>
+            )}
+          </span>
+        );
+      })}
       {detached !== null && (
         <ins className="note-sug-ins basis-full" data-suggestion-id={suggestionId}>
           {detached}

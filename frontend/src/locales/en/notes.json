@@ -379,7 +379,12 @@
     "deleteLine": "Suggested removing this line",
     "failed": "Couldn't apply that. Try again.",
     "gone": "That suggestion no longer applies.",
-    "refreshed": "Your text changed since this was suggested. It now shows against the current text."
+    "refreshed": "Your text changed since this was suggested. It now shows against the current text.",
+    "rowN": "Row {{n}}",
+    "columnN": "Column {{n}}",
+    "addRow": "New row",
+    "removeRow": "Row removed",
+    "cell": "{{row}} · {{column}}"
   },
   "cite": {
     "gone": "That line is no longer in your notes.",

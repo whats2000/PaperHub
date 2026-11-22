@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -443,5 +443,12 @@ describe("the bar of a table suggestion (fix round 2)", () => {
     expect(notes.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const table = document.querySelector("[data-id='t'] table")!;
     expect(table.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // It names the cell that changes instead of repeating the whole table
+    // flattened (live gate: a one-cell change showed every row joined by |).
+    const cell = within(bar).getByTestId("suggestion-cell");
+    expect(cell).toHaveTextContent("Row 2 · k");
+    expect(cell.querySelector(".note-sug-del")).toHaveTextContent("v");
+    expect(cell.querySelector(".note-sug-ins")).toHaveTextContent("w");
+    expect(bar.textContent).not.toContain("|");
   });
 });
