@@ -197,6 +197,80 @@ def test_docx_keeps_two_columns_with_math_pipes() -> None:
     assert len(re.findall(r"<w:gridCol", xml)) == 2
 
 
+# Each table's own lines and merges (H5b.1): the .docx draws them per cell
+# (tcBorders), the Markdown writes a merged table as HTML.
+
+def _c(text: Any, **props: Any) -> dict[str, Any]:
+    content = text if isinstance(text, list) else ([_txt(text)] if text else [])
+    return {"type": "tableCell", "props": props, "content": content}
+
+
+MERGED = {
+    "type": "tableContent", "columnWidths": [None, None, None], "headerRows": 2,
+    "rows": [
+        {"cells": [_c("Method", rowspan=2),
+                   _c("成功恢復（每格 n = 20）", colspan=2, textAlignment="center")]},
+        {"cells": [_c("Roof 擾動", textAlignment="center"),
+                   _c("Tire 擾動", textAlignment="center")]},
+        {"cells": [_c([_txt("ORR", bold=True)]), _c("18"), _c("<")]},
+        {"cells": [_c("TTT"), _c("15"), _c("14")]},
+    ],
+}
+
+
+def _mblk(content: dict[str, Any], props: dict[str, Any] | None = None,
+          bid: str = "t1") -> Block:
+    return Block(id=bid, note_id=1, parent_id=None, type="table",
+                 props=props or {}, content=content, text="", author="user",
+                 section_key=None, changed_rev=1)
+
+
+def _custom_borders() -> str:
+    from paperhub.notes.table_borders import Borders, dump_borders, preset_lines
+    base = preset_lines(4, 3, 2, "notion")
+    return dump_borders(Borders("notion", base.h[:3] + ("222",) + base.h[4:], base.v))
+
+
+def test_unmerged_markdown_is_the_same_whatever_its_borders() -> None:
+    from paperhub.notes.table_borders import dump_borders, preset_lines
+    t = _table([["指標", "值"], ["ORR", "62%"]])
+    plain = note_to_markdown(NOTE, [_mblk(t)], {})[0]
+    notion = dump_borders(preset_lines(2, 2, 1, "notion"))
+    assert note_to_markdown(NOTE, [_mblk(t, {"borders": notion})], {})[0] == plain
+    assert plain.endswith("| 指標 | 值 |\n| --- | --- |\n| ORR | 62% |\n")
+
+
+def test_merged_markdown_is_an_html_table() -> None:
+    md = note_to_markdown(NOTE, [_mblk(MERGED, {"caption": "Recovery",
+                                                "notes": "n = 20"})], {})[0]
+    assert ('<tr><th rowspan="2">Method</th>'
+            '<th colspan="2" align="center">成功恢復（每格 n = 20）</th></tr>') in md
+    assert "<caption>Recovery</caption>" in md
+    thead = re.search(r"<thead>(.*?)</thead>", md, re.S)
+    assert thead and thead[1].count("<tr>") == 2
+    assert "<td><strong>ORR</strong></td>" in md
+    assert ">&lt;</td>" in md
+    assert md.endswith("</table>\n\nn = 20\n")
+    assert "Table: Recovery" not in md
+
+
+@pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not installed")
+def test_pandoc_reads_the_html_table_with_its_spans() -> None:
+    import json
+    import subprocess
+    md = note_to_markdown(NOTE, [_mblk(MERGED)], {})[0]
+    html = md[md.index("<table>"):md.index("</table>") + len("</table>")]
+    ast = json.loads(subprocess.run(
+        ["pandoc", "--from", "html", "--to", "json"], input=html,
+        capture_output=True, text=True, encoding="utf-8", check=True).stdout)
+    [table] = [b for b in ast["blocks"] if b["t"] == "Table"]
+    head_rows = table["c"][3][1]
+    first = head_rows[0][1]
+    # Cell: [attr, align, rowspan, colspan, blocks]
+    assert [(c[2], c[3]) for c in first] == [(2, 1), (1, 2)]
+    assert len(head_rows) == 2
+
+
 # Table style (three-line / grid): the .docx draws every table in the
 # viewer's style; the Markdown is the same plain pipe table either way.
 

@@ -138,17 +138,49 @@ def fit_borders(props: dict[str, Any], content: dict[str, Any]) -> dict[str, Any
 Side = Literal["top", "bottom", "left", "right"]
 
 
+def edge_at(b: Borders, row: int, col: int, rowspan: int, colspan: int,
+            side: Side) -> int:
+    """The weight of one side of the cell at ``(row, col)`` spanning
+    ``rowspan`` x ``colspan``: the heaviest segment it covers."""
+    if side == "top":
+        segs = [b.h[row][x] for x in range(col, col + colspan)]
+    elif side == "bottom":
+        segs = [b.h[row + rowspan][x] for x in range(col, col + colspan)]
+    elif side == "left":
+        segs = [b.v[y][col] for y in range(row, row + rowspan)]
+    else:
+        segs = [b.v[y][col + colspan] for y in range(row, row + rowspan)]
+    return max(int(s) for s in segs)
+
+
 def edge(b: Borders, grid: Grid, side: Side, anchor: GridCell) -> int:
     """The weight of one side of a (merged) cell: the heaviest segment it
     covers."""
-    del grid  # the anchor carries the span; kept for the callers' symmetry
-    r, c, rs, cs = anchor.row, anchor.col, anchor.rowspan, anchor.colspan
-    if side == "top":
-        segs = [b.h[r][x] for x in range(c, c + cs)]
-    elif side == "bottom":
-        segs = [b.h[r + rs][x] for x in range(c, c + cs)]
-    elif side == "left":
-        segs = [b.v[y][c] for y in range(r, r + rs)]
-    else:
-        segs = [b.v[y][c + cs] for y in range(r, r + rs)]
-    return max(int(s) for s in segs)
+    del grid  # the anchor carries its span
+    return edge_at(b, anchor.row, anchor.col, anchor.rowspan, anchor.colspan, side)
+
+
+@dataclass(frozen=True)
+class TableLayout:
+    """What Word needs to draw one table: its lines, its merged cells as
+    ``(row, col, rowspan, colspan)``, the rows its header covers, its
+    preset (Notion tints the header) and whether it has a header."""
+
+    borders: Borders
+    spans: tuple[tuple[int, int, int, int], ...]
+    header_rows: int
+    preset: Preset
+    has_header: bool
+
+
+def table_layout(props: dict[str, Any], content: dict[str, Any]) -> TableLayout:
+    """The layout of a valid table (``table_grid`` raises otherwise)."""
+    grid, _, _ = table_grid(content)
+    spans = tuple(
+        (a.row, a.col, a.rowspan, a.colspan)
+        for r, line in enumerate(grid) for c, a in enumerate(line)
+        if isinstance(a, GridCell) and (a.row, a.col) == (r, c)
+        and (a.rowspan > 1 or a.colspan > 1))
+    b = borders_of(props, content)
+    return TableLayout(borders=b, spans=spans, header_rows=header_depth(content),
+                       preset=b.preset, has_header=bool(content.get("headerRows")))

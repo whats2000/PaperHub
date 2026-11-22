@@ -22,6 +22,7 @@ are images, links and headings.
 """
 from __future__ import annotations
 
+import html
 import json
 import logging
 import re
@@ -30,15 +31,24 @@ import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 import aiosqlite
 
 from paperhub.notes.mark_pieces import live_pieces
 from paperhub.notes.marks import joined_quote
-from paperhub.notes.models import Block, Note, column_aligns, table_grid, table_rows
-from paperhub.notes.run_text import link_text, read_runs
+from paperhub.notes.models import (
+    Block,
+    Grid,
+    GridCell,
+    Note,
+    column_aligns,
+    table_grid,
+    table_rows,
+)
+from paperhub.notes.run_text import INLINE_NODES, link_text, read_runs
+from paperhub.notes.table_borders import TableLayout, table_layout
 from paperhub.pipelines.page_pdf import crop_png, page_pdf_path
 from paperhub.pipelines.paper_asset import read_paper_asset
 from paperhub.translation.language import canonical_language
@@ -499,6 +509,10 @@ class _Writer:
         self._held: dict[str, str] = {}
         # For each table written, in order: a notes paragraph follows it.
         self.table_notes: list[bool] = []
+        # For each table written, in order: what Word draws it with.
+        self.table_layouts: list[TableLayout] = []
+        # A merged table: an HTML table, or a grid of empty covered cells.
+        self.merged_as: Literal["html", "grid"] = "html"
         self._nonce = secrets.token_hex(8)
 
     def cite(self, pid: int | None, locator: str = "") -> str:
@@ -546,6 +560,44 @@ class _Writer:
             _append(out, self._citation(m))
             pos = m.end()
         _append(out, _escape(raw[pos:]))
+        return "".join(out)
+
+    def html_text(self, raw: str) -> str:
+        """``text`` for an HTML table: HTML-escaped instead of Markdown-
+        escaped, its citations as ``[@key]``."""
+        out: list[str] = []
+        pos = 0
+        for m in _CITATION.finditer(raw):
+            _append(out, html.escape(raw[pos:m.start()], quote=False))
+            _append(out, html.escape(self._citation(m), quote=False))
+            pos = m.end()
+        _append(out, html.escape(raw[pos:], quote=False))
+        return "".join(out)
+
+    def html_inline(self, content: Any) -> str:
+        """A cell's runs for an HTML table: bold, italic, underline,
+        strike, code and links as their tags; math, citation footnotes and
+        mentions as a pipe table cell writes them, HTML-escaped."""
+        out: list[str] = []
+        for run in _runs(content):
+            kind = run.get("type", "text")
+            if kind == "link":
+                href = html.escape(str(run.get("href") or ""))
+                label = self.html_inline(run.get("content")) or href
+                _append(out, f'<a href="{href}">{label}</a>')
+            elif kind not in INLINE_NODES and isinstance(run.get("text"), str):
+                styles = run.get("styles") or {}
+                raw = run["text"]
+                text = (f"<code>{html.escape(raw, quote=False)}</code>"
+                        if styles.get("code") else self.html_text(raw))
+                for key, tag in (("strike", "s"), ("underline", "u"),
+                                 ("italic", "em"), ("bold", "strong")):
+                    if styles.get(key):
+                        text = f"<{tag}>{text}</{tag}>"
+                _append(out, text)
+            else:
+                written = self.release(self.inline([run]))
+                _append(out, html.escape(written, quote=False))
         return "".join(out)
 
     def inline(self, content: Any) -> str:
@@ -796,15 +848,19 @@ def _table(w: _Writer, b: Block) -> str:
     """A pipe table: the header row (empty when the table has none), the
     alignment row, then the body. Every cell goes through ``w.inline``.
     A caption follows as pandoc's ``Table: <caption>`` line, then the notes
-    as one paragraph (a hard break per line)."""
+    as one paragraph (a hard break per line). A table with merged cells is
+    an HTML table (``_html_table``), unless the writer writes merged tables
+    as a grid (for Word, which merges them from ``table_layouts``): then
+    each covered cell is an empty one."""
     content = b.content if isinstance(b.content, dict) else {}
     rows = _written_rows(b)
     if not rows:
         return ""
-    try:
-        _, _, width = table_grid(content)
-    except ValueError:
-        width = max(len(r) for r in rows)
+    grid, _, width = table_grid(content)
+    layout = table_layout(b.props, content)
+    w.table_layouts.append(layout)
+    if layout.spans and w.merged_as == "html":
+        return _html_table(w, b, content, rows, grid, layout.header_rows)
     aligns = (column_aligns(content) + [""] * width)[:width]
 
     def cell(runs: list[dict[str, Any]]) -> str:
@@ -816,7 +872,10 @@ def _table(w: _Writer, b: Block) -> str:
         cells = cells + [""] * (width - len(cells))
         return "| " + " | ".join(cells) + " |"
 
-    body = [[cell(c) for c in r] for r in rows]
+    body = [[cell(rows[r][a.index]) if isinstance(a, GridCell)
+             and (a.row, a.col) == (r, c) else ""
+             for c, a in enumerate(grid_row)]
+            for r, grid_row in enumerate(grid)]
     header_rows = 1 if content.get("headerRows") else 0
     head = body[0] if header_rows else [""] * width
     rest = body[header_rows:]
@@ -825,10 +884,53 @@ def _table(w: _Writer, b: Block) -> str:
     caption = _table_text(w, str(b.props.get("caption") or ""))
     if caption:
         out += ["", f"Table: {caption}"]
+    out += _table_notes(w, b)
+    return "\n".join(out)
+
+
+def _table_notes(w: _Writer, b: Block) -> list[str]:
+    """The notes paragraph after a table (a hard break per line), and its
+    flag for ``markdown_to_docx``."""
     notes = [t for t in (_table_text(w, ln) for ln in _notes_lines(b)) if t]
-    if notes:
-        out += ["", "\\\n".join(notes)]
     w.table_notes.append(bool(notes))
+    return ["", "\\\n".join(notes)] if notes else []
+
+
+def _html_table(w: _Writer, b: Block, content: dict[str, Any],
+                rows: list[list[list[dict[str, Any]]]], grid: Grid,
+                header_rows: int) -> str:
+    """A merged table as HTML (a pipe table cannot span cells): its
+    caption, the header rows as ``<th>`` in ``<thead>``, the rest in
+    ``<tbody>``, ``rowspan`` / ``colspan`` where over 1 and each cell's
+    column alignment. The notes paragraph follows, as for a pipe table."""
+    aligns = column_aligns(content)
+    out = ["<table>"]
+    caption = " ".join(str(b.props.get("caption") or "").split())
+    if caption:
+        out.append(f"<caption>{w.html_text(caption)}</caption>")
+
+    def tr(r: int, tag: str) -> str:
+        cells: list[str] = []
+        for c, a in enumerate(grid[r]):
+            if not isinstance(a, GridCell) or (a.row, a.col) != (r, c):
+                continue
+            attrs = ""
+            if a.rowspan > 1:
+                attrs += f' rowspan="{a.rowspan}"'
+            if a.colspan > 1:
+                attrs += f' colspan="{a.colspan}"'
+            align = aligns[c] if c < len(aligns) else ""
+            if align in ("center", "right"):
+                attrs += f' align="{align}"'
+            text = " ".join(w.html_inline(rows[r][a.index]).split("\n")).strip()
+            cells.append(f"<{tag}{attrs}>{text}</{tag}>")
+        return "<tr>" + "".join(cells) + "</tr>"
+
+    if header_rows:
+        out += ["<thead>", *(tr(r, "th") for r in range(header_rows)), "</thead>"]
+    out += ["<tbody>", *(tr(r, "td") for r in range(header_rows, len(grid))),
+            "</tbody>", "</table>"]
+    out += _table_notes(w, b)
     return "\n".join(out)
 
 
@@ -1031,15 +1133,21 @@ def note_to_markdown(
     mark_papers: Mapping[str, int] | None = None,
     mark_cites: Mapping[str, MarkCite] | None = None,
     table_notes: list[bool] | None = None,
+    merged_as: Literal["html", "grid"] = "html",
+    table_layouts: list[TableLayout] | None = None,
 ) -> tuple[str, dict[str, bytes], str]:
     """``(markdown, image files by relative path, BibTeX)`` of a note.
     ``blocks`` in document order; ``chunk_papers`` maps a cited chunk id to
     its paper, ``mark_papers`` a reference block's mark id to its paper.
     ``table_notes``, when given, is filled with one flag per table written:
-    whether its notes paragraph follows it (for ``markdown_to_docx``)."""
+    whether its notes paragraph follows it (for ``markdown_to_docx``), and
+    ``table_layouts`` with each table's lines and merges. ``merged_as``
+    writes a merged table as HTML (Markdown viewers) or as a pipe table
+    with empty covered cells (Word, which merges them from the layouts)."""
     note, blocks, papers = _clean_inputs(note, blocks, papers)
     w = _Writer(note, papers, chunk_papers or {}, mark_papers or {},
                 mark_cites)
+    w.merged_as = merged_as
     offset = 2 if any(b.type == "section" for b in blocks) else 1
     indent: dict[str, str] = {}
     types = {b.id: b.type for b in blocks}
@@ -1069,6 +1177,8 @@ def note_to_markdown(
     bib = "\n\n".join(_bib_entry(w.keys[pid], w.papers[pid]) for pid in w.cited)
     if table_notes is not None:
         table_notes[:] = w.table_notes
+    if table_layouts is not None:
+        table_layouts[:] = w.table_layouts
     return out.rstrip() + "\n", w.images, (bib + "\n" if bib else "")
 
 
