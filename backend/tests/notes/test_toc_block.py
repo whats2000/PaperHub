@@ -61,6 +61,33 @@ def test_export_writes_a_nested_linked_list() -> None:
     assert md.count("](#") == 4
 
 
+def test_export_list_steps_back_out_to_a_sibling_heading() -> None:
+    """A note whose headings start at level 2: a level 2 after a level 3
+    is a sibling of the first, not its child (live gate: Discussion and
+    Appendix exported under Results)."""
+    doc = [
+        _blk("t", "toc"),
+        _blk("a", "heading", {"level": 2}, "Results"),
+        _blk("b", "heading", {"level": 3}, "Ablations"),
+        _blk("c", "heading", {"level": 2}, "Discussion"),
+        _blk("d", "heading", {"level": 3}, "Folded"),
+        _blk("e", "heading", {"level": 2}, "Appendix"),
+        _blk("f", "heading", {"level": 1}, "Top"),
+        _blk("g", "heading", {"level": 3}, "Deep"),
+    ]
+    md = note_to_markdown(NOTE, doc, {})[0]
+    want = [
+        "- [Results](#results)",
+        "  - [Ablations](#ablations)",
+        "- [Discussion](#discussion)",
+        "  - [Folded](#folded)",
+        "- [Appendix](#appendix)",
+        "- [Top](#top)",
+        "  - [Deep](#deep)",
+    ]
+    assert "\n".join(want) in md
+
+
 @pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not installed")
 def test_every_toc_link_matches_a_pandoc_heading_id() -> None:
     md = note_to_markdown(NOTE, _doc(), {})[0]

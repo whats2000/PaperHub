@@ -996,7 +996,9 @@ def _toc(blocks: list[Block], title: str) -> str:
 
     unique(pandoc_slug(title))
     lines: list[str] = []
-    depth = -1
+    # The levels of the entries the next one may nest under: a level 2
+    # after a level 3 steps back out to its level 2 sibling.
+    open_levels: list[int] = []
     for b in blocks:
         if b.type == "section":
             text = str(b.props.get("title") or b.section_key or "")
@@ -1011,7 +1013,10 @@ def _toc(blocks: list[Block], title: str) -> str:
         if not text or not 1 <= level <= 3:
             continue
         slug = unique(pandoc_slug(text))
-        depth = min(level - 1, depth + 1)
+        while open_levels and open_levels[-1] >= level:
+            open_levels.pop()
+        depth = len(open_levels)
+        open_levels.append(level)
         lines.append(f"{'  ' * depth}- [{_escape(text)}](#{slug})")
     return "\n".join(lines)
 
