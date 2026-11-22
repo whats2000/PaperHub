@@ -41,6 +41,10 @@ interface NotesPaneState {
   /** Opens the pane on the Notes tab at a note (and one of its blocks). */
   openAt: (target: Omit<NotesRequest, "seq">) => void;
   consumeRequest: (seq: number) => void;
+  /** A paper the notes pane switches to without coming forward (a `[[`
+   *  link to a paper: the reader opens it, the notes follow). */
+  focus: { paperId: number; seq: number } | null;
+  focusPaper: (paperId: number) => void;
   /** Per chat (its local id), the paper whose note was last on screen: the
    * pane reopens on it while the reader shows no paper. Kept for this page
    * load only. */
@@ -94,6 +98,8 @@ export const useNotesPaneStore = create<NotesPaneState>()(
         set({ open: true, activeTab: "notes", request: { ...target, seq: ++requestSeq } });
       },
       consumeRequest: (seq) => set((s) => (s.request?.seq === seq ? { request: null } : {})),
+      focus: null,
+      focusPaper: (paperId) => set((s) => ({ focus: { paperId, seq: (s.focus?.seq ?? 0) + 1 } })),
       lastPaperByChat: {},
       rememberPaper: (chatId, paperId) =>
         set((s) =>

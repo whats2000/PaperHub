@@ -74,7 +74,7 @@ beforeEach(() => {
   localStorage.clear();
   useChatStore.getState().reset();
   useNotesStore.setState({ notes: {}, byTarget: {} });
-  useNotesPaneStore.setState({ open: true, activeTab: "notes", request: null, lastPaperByChat: {} });
+  useNotesPaneStore.setState({ open: true, activeTab: "notes", request: null, focus: null, lastPaperByChat: {} });
   useCanvasStore.setState({
     open: false,
     activePaperId: null,
@@ -345,6 +345,15 @@ describe("NotesPane: paper tabs shared with the reader", () => {
     act(() => useCanvasStore.getState().showOutside(chatA, 10));
     await userEvent.dblClick(within(strip()).getByRole("tab", { name: "Paper 10" }));
     expect(useCanvasStore.getState().outsideByChat[chatA]?.every((t) => !t.preview)).toBe(true);
+  });
+
+  it("a paper link in a note switches the notes to that paper's note", async () => {
+    useChatStore.getState().setReferences(42, [ref(7), ref(8)]);
+    render(<NotesPane onClose={() => undefined} />);
+    expect(await screen.findByText("note 107")).toBeInTheDocument();
+    act(() => useNotesPaneStore.getState().focusPaper(8));
+    expect(await screen.findByText("note 108")).toBeInTheDocument();
+    expect(paperTab()).toHaveAccessibleName("Gated Adapters");
   });
 
   it("another chat draws its own papers, never this chat's dashed tabs", async () => {

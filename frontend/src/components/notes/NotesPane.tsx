@@ -85,6 +85,15 @@ export function NotesPane({ onClose }: Props) {
       ? lastViewed
       : (enabledRefs?.[0]?.paper_content_id ?? null);
   const paperId = paper.id ?? fallbackPaperId;
+  // A `[[` link to a paper: the notes switch to its note.
+  const focus = useNotesPaneStore((s) => s.focus);
+  const [seenFocus, setSeenFocus] = useState(focus?.seq ?? 0);
+  if (focus && focus.seq !== seenFocus) {
+    setSeenFocus(focus.seq);
+    setChosen("paper");
+    const id = focus.paperId;
+    setPaper((p) => ({ ...p, id }));
+  }
   // A dashed tab closed (here or in the reader) while its note is on
   // screen: the pane lands on the neighbouring paper.
   const closedTab = useCanvasStore((s) => s.closedTab);

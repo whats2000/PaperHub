@@ -8,7 +8,7 @@ import { NoteEditor } from "@/components/notes/NoteEditor";
 import { findMatches } from "@/components/notes/noteFind";
 import { cleanupEditors, makeEditor } from "@/components/notes/testEditor";
 import { API_BASE_URL } from "@/lib/api";
-import { openNoteLink } from "@/lib/notes/openNoteLink";
+import { openNoteLink, openPaperAt } from "@/lib/notes/openNoteLink";
 import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
 import { useIdeationStore } from "@/store/ideation";
@@ -452,6 +452,15 @@ describe("following a link to another place", () => {
         blocks: [blk("b9", { note_id: id, type: "heading", text: "H" })],
       }),
     );
+
+  it("a paper link opens the paper in the reader and its note in the notes pane", async () => {
+    useNotesPaneStore.setState({ open: true, activeTab: "reader", focus: null });
+    await openPaperAt(9, "");
+    expect(useCanvasStore.getState().requestedPaperId).toBe(9);
+    expect(useNotesPaneStore.getState().focus).toMatchObject({ paperId: 9 });
+    // The pane is not forced forward (the user follows a link to read).
+    expect(useNotesPaneStore.getState().activeTab).toBe("reader");
+  });
 
   it("a chat's note switches to that chat first, then opens its note", async () => {
     server.use(noteOf(20, "session", "43"));

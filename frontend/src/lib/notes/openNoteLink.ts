@@ -62,9 +62,12 @@ export async function openNoteLink(link: NoteLinkTarget): Promise<OpenOutcome> {
 }
 
 /** Opens a paper in the reader, at one of its sections (as a citation of
- * the section's chunks); the paper alone when the section is not found. */
+ * the section's chunks); the paper alone when the section is not found.
+ * The notes pane switches to the paper's note (both panes show one paper;
+ * a paper not in the chat opens as a temporary tab in both). */
 export async function openPaperAt(paperId: number, sectionKey: string): Promise<void> {
   useNavStore.getState().setPage("chat");
+  useNotesPaneStore.getState().focusPaper(paperId);
   if (sectionKey) {
     try {
       const r = await getSectionRange(paperId, sectionKey);
