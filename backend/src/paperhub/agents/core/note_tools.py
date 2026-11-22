@@ -49,7 +49,7 @@ from paperhub.notes.comments import list_comments
 from paperhub.notes.gfm_table import parse_gfm_table, table_to_gfm
 from paperhub.notes.inline_merge import cite_ids, cite_quotes, read_text
 from paperhub.notes.marks import color_labels
-from paperhub.notes.models import Block, Note, table_block_text, table_rows
+from paperhub.notes.models import Block, Note, table_block_text, table_grid
 from paperhub.notes.ops import BlockIn, Op, apply_ops
 from paperhub.notes.papers import _section_order
 from paperhub.notes.run_text import read_runs
@@ -512,11 +512,12 @@ async def _table_sizes(conn: aiosqlite.Connection,
     for bid, raw in rows:
         try:
             content = json.loads(raw or "{}").get("content")
-            cells = table_rows(content) if isinstance(content, dict) else []
+            if not isinstance(content, dict):
+                continue
+            _, n, width = table_grid(content)
         except (ValueError, AttributeError):
             continue
-        out[str(bid)] = {"rows": len(cells),
-                         "cols": max((len(r) for r in cells), default=0)}
+        out[str(bid)] = {"rows": n, "cols": width}
     return out
 
 

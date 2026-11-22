@@ -37,7 +37,7 @@ import aiosqlite
 
 from paperhub.notes.mark_pieces import live_pieces
 from paperhub.notes.marks import joined_quote
-from paperhub.notes.models import Block, Note, table_aligns, table_rows
+from paperhub.notes.models import Block, Note, column_aligns, table_grid, table_rows
 from paperhub.notes.run_text import link_text, read_runs
 from paperhub.pipelines.page_pdf import crop_png, page_pdf_path
 from paperhub.pipelines.paper_asset import read_paper_asset
@@ -776,6 +776,7 @@ def _written_rows(b: Block) -> list[list[list[dict[str, Any]]]]:
     table is not written)."""
     content = b.content if isinstance(b.content, dict) else {}
     try:
+        table_grid(content)
         return table_rows(content)
     except ValueError:
         return []
@@ -800,9 +801,11 @@ def _table(w: _Writer, b: Block) -> str:
     rows = _written_rows(b)
     if not rows:
         return ""
-    width = max(len(r) for r in rows)
-    # Alignment is read from row 0, also when headerRows is 0.
-    aligns = (table_aligns(content) + [""] * width)[:width]
+    try:
+        _, _, width = table_grid(content)
+    except ValueError:
+        width = max(len(r) for r in rows)
+    aligns = (column_aligns(content) + [""] * width)[:width]
 
     def cell(runs: list[dict[str, Any]]) -> str:
         text = " ".join(w.inline(runs).split("\n"))

@@ -10,7 +10,14 @@ from httpx import ASGITransport, AsyncClient
 
 from paperhub.app import create_app
 from paperhub.db.migrate import apply_schema
-from paperhub.notes.models import check_table, table_rows
+from paperhub.notes.models import (
+    GridCell,
+    check_table,
+    column_aligns,
+    header_depth,
+    table_grid,
+    table_rows,
+)
 from paperhub.notes.store import block_text
 
 pytestmark = pytest.mark.asyncio
@@ -87,16 +94,14 @@ CELL = {"type": "tableCell", "props": {}, "content": [{"type": "text", "text": "
 
 @pytest.mark.parametrize("table", [
     _bad(lambda t: t["rows"][1]["cells"].pop()),  # ragged
-    _bad(lambda t: t.update(headerRows=2)),
+    _bad(lambda t: t.update(headerRows=3)),
     _bad(lambda t: t["rows"][0]["cells"].__setitem__(
         0, {**CELL, "props": {"backgroundColor": "red"}})),
-    _bad(lambda t: t["rows"][0]["cells"].__setitem__(
-        0, {**CELL, "props": {"colspan": 2}})),
     _bad(lambda t: t.update(type="other")),
     _bad(lambda t: t["rows"][0]["cells"].__setitem__(
         0, [{"type": "markCite", "props": {"markId": "", "text": ""}}])),
     _bad(lambda t: t.update(columnWidths=[None])),
-], ids=["ragged", "headerRows2", "bg", "colspan", "type", "markCite", "widths"])
+], ids=["ragged", "headerRows3", "bg", "type", "markCite", "widths"])
 async def test_invalid_tables_are_rejected(client: AsyncClient, table: Any) -> None:
     nid = await _note(client)
     r = await _insert(client, nid, {"type": "table", "content": table})
@@ -294,3 +299,84 @@ async def test_the_change_card_gets_an_updated_table_before_and_after(
     after = table_rows(table["after"]["content"])
     assert after[1][1] == MATH_TABLE["rows"][1]["cells"][1]
     assert [x["text"] for x in after[2][1]] == ["無"]
+
+
+# ------------------------------------------------------ merged cells (H5b.1)
+
+def _c(text: str, **props: Any) -> dict[str, Any]:
+    return {"type": "tableCell", "props": props,
+            "content": [{"type": "text", "text": text, "styles": {}}] if text else []}
+
+
+MERGED: dict[str, Any] = {
+    "type": "tableContent",
+    "columnWidths": [None, None, None],
+    "headerRows": 2,
+    "rows": [
+        {"cells": [_c("Method", rowspan=2),
+                   _c("成功恢復（每格 n = 20）", colspan=2, textAlignment="center")]},
+        {"cells": [_c("Roof 擾動", textAlignment="center"),
+                   _c("Tire 擾動", textAlignment="center")]},
+        {"cells": [_c("GDN"), _c("18"), _c("17")]},
+        {"cells": [_c("TTT"), _c("15"), _c("14")]},
+        {"cells": [_c("LoRA"), _c("9"), _c("8")]},
+    ],
+}
+
+
+async def test_merged_table_is_accepted_and_roundtrips(client: AsyncClient) -> None:
+    nid = await _note(client)
+    r = await _insert(client, nid, {"type": "table", "content": MERGED})
+    assert r.status_code == 200, r.text
+    blk = next(b for b in (await client.get(f"/notes/{nid}")).json()["blocks"]
+               if b["id"] == TID)
+    assert blk["content"] == MERGED
+    assert blk["text"] == ("Method | 成功恢復（每格 n = 20）\nRoof 擾動 | Tire 擾動\n"
+                           "GDN | 18 | 17\nTTT | 15 | 14\nLoRA | 9 | 8")
+
+
+def test_table_grid_of_a_merged_table() -> None:
+    grid, rows, cols = table_grid(MERGED)
+    assert (rows, cols) == (5, 3)
+    assert grid[1][0] == (0, 0)
+    assert grid[0][2] == (0, 1)
+    assert grid[0][0] == GridCell(row=0, col=0, rowspan=2, colspan=1, index=0)
+    assert grid[1][1] == GridCell(row=1, col=1, rowspan=1, colspan=1, index=0)
+
+
+def test_header_depth() -> None:
+    assert header_depth({**MERGED, "headerRows": 1}) == 2
+    assert header_depth({**MERGED, "headerRows": 0}) == 0
+    assert header_depth(TABLE) == 1
+
+
+def _span(t: dict[str, Any], r: int, i: int, **props: Any) -> None:
+    t["rows"][r]["cells"][i]["props"].update(props)
+
+
+@pytest.mark.parametrize("mut", [
+    lambda t: _span(t, 2, 1, colspan=3),          # past the width
+    lambda t: _span(t, 1, 0, rowspan=2) or _span(t, 2, 0, colspan=2),  # overlap
+    lambda t: _span(t, 2, 0, rowspan=0),
+    lambda t: _span(t, 2, 0, colspan="2"),
+    lambda t: t.update(headerRows=6),
+], ids=["past-width", "overlap", "rowspan0", "colspan-str", "headerRows6"])
+async def test_bad_merges_are_rejected_with_a_reason(client: AsyncClient,
+                                                     mut: Any) -> None:
+    t = deepcopy(MERGED)
+    mut(t)
+    with pytest.raises(ValueError):
+        check_table(t)
+    nid = await _note(client)
+    r = await _insert(client, nid, {"type": "table", "content": t})
+    assert r.status_code == 422
+    assert r.text
+
+
+def test_column_aligns_reads_a_column_under_a_span_from_a_later_row() -> None:
+    t = {"type": "tableContent", "headerRows": 1, "rows": [
+        {"cells": [_c("a"), _c("b", colspan=2, textAlignment="center")]},
+        {"cells": [_c("1"), _c("2", textAlignment="right"),
+                   _c("3", textAlignment="center")]},
+    ]}
+    assert column_aligns(t) == ["", "right", "center"]

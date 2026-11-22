@@ -13,7 +13,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from paperhub.notes.models import table_aligns, table_rows
+from paperhub.notes.models import column_aligns, table_grid, table_rows
 from paperhub.notes.run_text import read_runs
 
 _DELIM = re.compile(r"^\s*(:?)-+(:?)\s*$")
@@ -113,12 +113,12 @@ def table_to_gfm(content: dict[str, Any], quotes: dict[str, str] | None = None,
     renders one cell's runs (default: as the agent reads runs)."""
     try:
         rows = table_rows(content)
+        _, _, width = table_grid(content)
     except ValueError:
         return ""
     if not rows:
         return ""
-    width = max(len(r) for r in rows)
-    aligns = (table_aligns(content) + [""] * width)[:width]
+    aligns = (column_aligns(content) + [""] * width)[:width]
     render = cell or (lambda runs: read_runs(runs, quotes))
 
     def line(cells: list[str]) -> str:

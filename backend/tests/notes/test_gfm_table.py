@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from paperhub.notes.gfm_table import parse_gfm_table, table_to_gfm
-from paperhub.notes.models import check_table, table_aligns, table_rows
+from paperhub.notes.models import check_table, column_aligns, table_rows
 
 
 def _texts(content: dict) -> list[list[str]]:
@@ -38,7 +38,7 @@ def test_round_trip(text: str) -> None:
 def test_alignment_read_from_delimiter_row() -> None:
     content = parse_gfm_table("| a | b | c | d |\n|---|:-:|--:|:--|\n|1|2|3|4|")
     # Left is the editor's default alignment, written as ---.
-    assert table_aligns(content) == ["", "center", "right", ""]
+    assert column_aligns(content) == ["", "center", "right", ""]
     assert table_to_gfm(content).splitlines()[1] == "| --- | :-: | --: | --- |"
 
 
