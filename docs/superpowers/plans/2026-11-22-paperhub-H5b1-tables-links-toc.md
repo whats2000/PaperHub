@@ -239,6 +239,19 @@ Spec: SRS "Projects, notes and the Research page" → "Two kinds of note" (H5b.1
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS + typecheck / lint.
 - [ ] **Step 5: Commit** `fix(notes): show the chat notes tab only when it has content`.
 
+### Task 16: Bugs found while mapping notes to Markdown and in review
+
+**Files:** `backend/src/paperhub/notes/inline_merge.py`, `notes/marks.py` (or the store path that applies agent ops), `notes/export.py`, `notes/gfm_table.py`, `frontend/src/components/notes/commentBadges.ts` (+ tests: `backend/tests/notes/`, `backend/tests/agents_core/`, `commentBadges.test.ts` or the editor test that owns badges)
+
+- (a) **Mark colour / style has one source.** An agent `update` of a mark block that changes `color` or `style` (`MARK_EDITABLE_PROPS`) is written to the `note_marks` row in the same transaction, so the reader, the mark list and every other block showing that mark agree. The block props stay derived from the row (`block_props`). An unknown colour key or a style not allowed for the mark's kind is rejected with the reason. The tool step's `record_result` names the mark id and the old / new values.
+- (b) **One spelling for a left-aligned column.** Export writes the default (left) column as `---`, the same as `gfm_table`; `:--` is never written. Reading `:--` stays accepted (old files).
+- (c) **The lost-comment badge on a table sits after the table**, not inside its `<tbody>` (`commentBadges.ts:67` uses the textblock position). Use the same placement as the suggestion bar after Task 13 (`pos + 1 + content.nodeSize` for a non-textblock).
+- (d) **Bar and badge order is explicit**: the suggestion bar comes before the lost-comment badge by `side`, not by the order the extensions are registered.
+
+- [ ] **Step 1: Failing tests**: (a) agent `update` of a quote mark block with `color: "blue"` → `note_marks.color` is blue and a second block showing the same mark reads blue; an unknown colour → error, nothing written. (b) exported Markdown of a table with a default column has `---` and no `:--`. (c) a lost comment in a table cell → the badge element has no `table` ancestor and follows the table. (d) a leaf block with an open suggestion and a lost comment → bar before badge, with the extension order reversed in the test.
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS + targeted ruff / mypy / typecheck / lint.
+- [ ] **Step 5: Commit** one commit per item, e.g. `fix(notes): an agent's mark colour change updates the mark`.
+
 ## Phase 4 — Verification
 
 ### Task 11: Full gates and live check on a workspace copy
