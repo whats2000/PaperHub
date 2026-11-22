@@ -336,7 +336,9 @@ class _Ctx:
         (``asked``, checked by ``_drawing_problem``) are written to the row,
         and the block takes the row's values. Any other write (an undo, a
         redo, a restore) moves the row only where it changes the block's
-        own colour / style, so a move never rewrites the mark. Every other
+        own colour / style to values the mark can still take (a colour
+        deleted since is not written back), so a move never rewrites the
+        mark; the block is drawn from the row either way. Every other
         block showing the mark is redrawn with it."""
         props = state["props"]
         mark = await _mark_row(self.conn, props.get("markId"))
@@ -352,9 +354,12 @@ class _Ctx:
             if "style" in want and (
                     (want["style"] is None) == (mark["kind"] == "text")):
                 want.pop("style")  # not a style this kind of mark can have
+            if want and await _drawing_problem(
+                    self.conn, str(mark["kind"]),
+                    want.get("color", mark["color"]),
+                    want.get("style", mark["style"])) is not None:
+                want = {}  # e.g. an undo back to a colour deleted since
         changed = {k: v for k, v in want.items() if v != mark[k]}
-        if not changed and not asked:
-            return state
         if changed:
             await self.conn.execute(
                 "UPDATE note_marks SET color = ?, style = ? WHERE id = ?",
