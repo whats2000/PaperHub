@@ -82,13 +82,15 @@ def _restyle(v: Any, threads: dict[str, str]) -> Any:
 
 
 async def _copy_session_note(
-    conn: aiosqlite.Connection, source_sid: int, new_sid: int, title: str,
+    conn: aiosqlite.Connection, source_sid: int, new_sid: int,
 ) -> None:
     """Give the fork its own copy of the source chat's live note, if any:
-    its blocks (each with an ``insert`` history row by ``system``) and the
-    comment threads on them, open and resolved, under new ids."""
+    its title as the user typed it ("" stays "": the fork's chat title is
+    only the shown default), its blocks (each with an ``insert`` history
+    row by ``system``) and the comment threads on them, open and resolved,
+    under new ids."""
     async with conn.execute(
-        "SELECT id FROM notes WHERE owner_id = 1 AND target_kind = 'session' "
+        "SELECT id, title FROM notes WHERE owner_id = 1 AND target_kind = 'session' "
         "AND target_id = ? AND deleted_at IS NULL", (str(source_sid),),
     ) as cur:
         src = await cur.fetchone()
@@ -98,7 +100,7 @@ async def _copy_session_note(
     cur = await conn.execute(
         "INSERT INTO notes (target_kind, target_id, session_id, title, "
         "revision, created_at, updated_at) VALUES ('session', ?, ?, ?, 1, ?, ?)",
-        (str(new_sid), new_sid, title, now, now),
+        (str(new_sid), new_sid, src[1], now, now),
     )
     note_id = cur.lastrowid
     assert note_id is not None
@@ -266,7 +268,7 @@ async def fork_session(
             (new_sid, source_session_id),
         )
 
-        await _copy_session_note(conn, source_session_id, new_sid, new_title)
+        await _copy_session_note(conn, source_session_id, new_sid)
 
         # slide_style_overrides (per-session deck style) — at most one row.
         await conn.execute(

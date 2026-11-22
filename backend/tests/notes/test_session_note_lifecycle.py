@@ -78,7 +78,7 @@ async def test_fork_copies_session_note(tmp_path: Path) -> None:
             "VALUES (1, 'user', 'q', ?)", (run_id,))
         await conn.commit()
         note = await get_or_create_note(
-            conn, target_kind="session", target_id="1", title="Orig", session_id=1)
+            conn, target_kind="session", target_id="1", title="My plan", session_id=1)
         res = await apply_ops(conn, note.id, base_revision=0, actor="user", ops=[
             Op(op="insert", block=BlockIn(type="heading", props={"level": 2},
                                           content=[{"type": "text", "text": "H"}]))])
@@ -109,7 +109,9 @@ async def test_fork_copies_session_note(tmp_path: Path) -> None:
             "SELECT id, revision, title FROM notes WHERE target_kind = 'session' "
             "AND target_id = ?", (str(fk.new_session_id),)) as cur:
             new = await cur.fetchone()
-        assert new is not None and new[1] == 1 and new[2] == "Fork of Orig"
+        # The copy keeps the title the user typed on the source note; the
+        # fork's chat title is only its default, never stored.
+        assert new is not None and new[1] == 1 and new[2] == "My plan"
         src = await list_blocks(conn, note.id)
         dst = await list_blocks(conn, new[0])
         assert [b.text for b in dst] == [b.text for b in src] == ["H", "child"]
@@ -158,3 +160,27 @@ async def test_restore_keeps_an_independently_deleted_note(
     async with aiosqlite.connect(db) as conn, conn.execute(
             "SELECT deleted_at FROM notes WHERE id = ?", (nid,)) as cur:
         assert (await cur.fetchone())[0] == "2020-01-01 00:00:00"
+
+
+async def test_fork_of_an_untitled_note_stays_untitled(tmp_path: Path) -> None:
+    async with aiosqlite.connect(tmp_path / "t.db") as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await apply_schema(conn)
+        await conn.execute("INSERT INTO chat_sessions (id, title) VALUES (1, 'Orig')")
+        cur = await conn.execute(
+            "INSERT INTO runs (session_id, status) VALUES (1, 'ok')")
+        run_id = int(cur.lastrowid)
+        await conn.execute(
+            "INSERT INTO messages (session_id, role, content, run_id) "
+            "VALUES (1, 'user', 'q', ?)", (run_id,))
+        await conn.commit()
+        note = await get_or_create_note(
+            conn, target_kind="session", target_id="1", title="", session_id=1)
+        await apply_ops(conn, note.id, base_revision=0, actor="user",
+                        ops=[Op(op="insert", block=_p("x"))])
+        fk = await fork_session(conn, source_session_id=1, fork_run_id=run_id,
+                                workspace_dir=tmp_path)
+        async with conn.execute(
+            "SELECT title FROM notes WHERE target_kind = 'session' "
+            "AND target_id = ?", (str(fk.new_session_id),)) as cur:
+            assert await cur.fetchone() == ("",)
