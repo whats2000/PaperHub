@@ -7,12 +7,13 @@
  * would leave a row with no cell of its own (a whole row's width over
  * several rows) is refused: the editor's table row needs one.
  */
-import type { EditorState } from "@tiptap/pm/state";
+import { TextSelection, type EditorState } from "@tiptap/pm/state";
 import {
   CellSelection,
   TableMap,
   addRowAfter,
   addRowBefore,
+  cellAround,
   deleteRow,
   mergeCells,
   splitCell,
@@ -218,4 +219,127 @@ export function alignSelectedColumns(editor: unknown, align: Alignment): void {
     }
   }
   if (tr.docChanged) view.dispatch(tr);
+}
+
+/** The selected cells (each once, a merged one at its top left) with their
+ * document position, sorted by row then column. */
+function selectedCells(state: EditorState): { row: number; col: number; pos: number; node: PMNode }[] {
+  const t = tableSelection(state);
+  if (!t) return [];
+  const map = TableMap.get(t.table);
+  const rels = new Set(map.cellsInRect({ left: t.rect.c0, top: t.rect.r0, right: t.rect.c1 + 1, bottom: t.rect.r1 + 1 }));
+  const out: { row: number; col: number; pos: number; node: PMNode }[] = [];
+  for (const rel of rels) {
+    const node = t.table.nodeAt(rel);
+    if (!node) continue;
+    const { top, left } = map.findCell(rel);
+    out.push({ row: top, col: left, pos: t.tablePos + 1 + rel, node });
+  }
+  return out.sort((a, b) => a.row - b.row || a.col - b.col);
+}
+
+function isEmptyCell(node: PMNode): boolean {
+  const empty = node.type.createAndFill(node.attrs);
+  return empty ? node.content.eq(empty.content) : node.textContent === "";
+}
+
+/** A selected cell that holds something: its grid row and column. */
+export interface FilledCell {
+  row: number;
+  col: number;
+}
+
+/** The selected cells that hold something (Clear contents is off when
+ * there are none). */
+export function filledCells(state: EditorState): FilledCell[] {
+  return selectedCells(state)
+    .filter((c) => !isEmptyCell(c.node))
+    .map(({ row, col }) => ({ row, col }));
+}
+
+/** What Clear contents took: the table and each cell's content, for Undo. */
+export interface ClearedCells {
+  blockId: string;
+  cells: (FilledCell & { content: PMNode["content"] })[];
+}
+
+/** Empties the selected cells (one undo step); what they held, for the
+ * toast's Undo. Nothing to clear: null. */
+export function clearCells(editor: unknown): ClearedCells | null {
+  const view = (editor as MergeEditor)._tiptapEditor.view;
+  const t = tableSelection(view.state);
+  const full = selectedCells(view.state).filter((c) => !isEmptyCell(c.node));
+  if (!t || !full.length) return null;
+  const tr = view.state.tr;
+  for (const c of [...full].reverse()) {
+    const empty = c.node.type.createAndFill(c.node.attrs);
+    if (empty) tr.replaceWith(c.pos + 1, c.pos + c.node.nodeSize - 1, empty.content);
+  }
+  // The selection stays on the cleared cells: a cell selection as it was,
+  // a caret at the start of its (now empty) cell, not mapped past it.
+  const sel = view.state.selection;
+  if (sel instanceof CellSelection) {
+    const anchor = tr.mapping.map(sel.$anchorCell.pos, -1);
+    const head = tr.mapping.map(sel.$headCell.pos, -1);
+    tr.setSelection(new CellSelection(tr.doc.resolve(anchor), tr.doc.resolve(head)));
+  } else {
+    const $cell = cellAround(sel.$from);
+    if ($cell) tr.setSelection(TextSelection.near(tr.doc.resolve(tr.mapping.map($cell.pos, -1) + 1)));
+  }
+  view.dispatch(tr);
+  return { blockId: t.blockId, cells: full.map(({ row, col, node }) => ({ row, col, content: node.content })) };
+}
+
+/** Puts cleared text back, into the cells still empty (one typed into since
+ * keeps what it has); a cell gone, or no longer starting there, is skipped. */
+export function restoreCells(editor: unknown, cleared: ClearedCells): void {
+  const view = (editor as MergeEditor)._tiptapEditor.view;
+  let tablePos = -1;
+  view.state.doc.descendants((node, pos) => {
+    if (tablePos >= 0) return false;
+    if (node.type.name === "blockContainer" && String(node.attrs.id) === cleared.blockId) {
+      if (node.firstChild?.type.name === "table") tablePos = pos + 1;
+      return false;
+    }
+    return true;
+  });
+  if (tablePos < 0) return;
+  const table = view.state.doc.nodeAt(tablePos)!;
+  const map = TableMap.get(table);
+  const tr = view.state.tr;
+  const back = cleared.cells
+    .map((c) => {
+      if (c.row >= map.height || c.col >= map.width) return null;
+      const rel = map.map[c.row * map.width + c.col]!;
+      const at = map.findCell(rel);
+      const node = table.nodeAt(rel);
+      if (at.top !== c.row || at.left !== c.col || !node || !isEmptyCell(node)) return null;
+      return { pos: tablePos + 1 + rel, node, content: c.content };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
+    .sort((a, b) => b.pos - a.pos);
+  for (const c of back) tr.replaceWith(c.pos + 1, c.pos + c.node.nodeSize - 1, c.content);
+  if (tr.docChanged) view.dispatch(tr);
+}
+
+/** The alignment shared by every cell starting in the selected columns;
+ * null when they differ (the menu then checks none). */
+export function selectedAlignment(state: EditorState): Alignment | null {
+  const t = tableSelection(state);
+  if (!t) return null;
+  const map = TableMap.get(t.table);
+  const seen = new Set<string>();
+  const done = new Set<number>();
+  for (let r = 0; r < map.height; r++) {
+    for (let c = t.rect.c0; c <= t.rect.c1; c++) {
+      const rel = map.map[r * map.width + c]!;
+      if (done.has(rel)) continue;
+      done.add(rel);
+      if (map.findCell(rel).left !== c) continue;
+      const attrs: Record<string, unknown> = t.table.nodeAt(rel)?.attrs ?? {};
+      const a = attrs.textAlignment;
+      seen.add(typeof a === "string" ? a : "left");
+    }
+  }
+  return seen.size === 1 ? ([...seen][0] as Alignment) : null;
 }
