@@ -30,7 +30,8 @@ MARK_BLOCK_TYPES = frozenset(
     {"paperQuote", "paperFigure", "paperEquation", "paperRegion"})
 # The props of a mark block an agent edit may change: how it is drawn.
 # Everything else (markId, quote, kind, pieces, source, anchors) is the
-# mark's identity and is kept from the stored block.
+# mark's identity and is kept from the stored block. A change to these is
+# written to the mark's ``note_marks`` row (``ops._Ctx._draw_mark``).
 MARK_EDITABLE_PROPS = frozenset({"color", "style"})
 
 _CITE_TAG = re.compile(

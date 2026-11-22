@@ -134,3 +134,64 @@ async def test_edit_records_inline_nodes_kept(
     data = json.loads(out.content)
     assert data["inline"][0]["kept"][0]["type"] == "inlineMath"
     assert out.record["inline"] == data["inline"]
+
+
+# --- Task 16a: a mark's colour / style live on the mark ---------------------------
+
+async def _quote_mark(conn: aiosqlite.Connection) -> None:
+    await _mark(conn, "the error rate rose")
+    await conn.execute("UPDATE note_marks SET color = 'green', "
+                       "style = 'highlight' WHERE id = 'mk_1'")
+    await conn.commit()
+
+
+def _quote_block() -> BlockIn:
+    return BlockIn(type="paperQuote", props={
+        "markId": "mk_1", "color": "green", "kind": "text",
+        "style": "highlight", "quote": "the error rate rose",
+        "pieces": [{"quote": "the error rate rose", "page": 0}]})
+
+
+async def test_agent_recolour_records_the_mark(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    await _quote_mark(migrated_db)
+    nid = await _note(migrated_db, [("q1", _quote_block()),
+                                    ("q2", _quote_block())], actor="agent")
+    note = await get_note(migrated_db, nid)
+    assert note is not None
+    out = await _run(_ctx(migrated_db, fake_tracer), "edit_note", note="chat",
+                     base_revision=note.revision, ops=[
+        {"op": "update", "block_id": "q1",
+         "block": {"type": "paperQuote", "props": {"color": "blue"}}}])
+    data = json.loads(out.content)
+    assert data["rejected"] == []
+    marks = [{"mark_id": "mk_1", "block_id": "q1",
+              "color": {"from": "green", "to": "blue"}, "blocks": ["q2"]}]
+    assert out.record["marks"] == marks and data["marks"] == marks
+    async with migrated_db.execute(
+            "SELECT color FROM note_marks WHERE id = 'mk_1'") as cur:
+        assert (await cur.fetchone()) == ("blue",)
+    colours = {b.id: b.props["color"] for b in await list_blocks(migrated_db, nid)}
+    assert colours == {"q1": "blue", "q2": "blue"}
+
+
+async def test_agent_unknown_colour_is_refused_with_the_reason(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    await _quote_mark(migrated_db)
+    nid = await _note(migrated_db, [("q1", _quote_block())], actor="agent")
+    note = await get_note(migrated_db, nid)
+    assert note is not None
+    out = await _run(_ctx(migrated_db, fake_tracer), "edit_note", note="chat",
+                     base_revision=note.revision, ops=[
+        {"op": "update", "block_id": "q1",
+         "block": {"type": "paperQuote", "props": {"color": "teal"}}}])
+    data = json.loads(out.content)
+    [rej] = data["rejected"]
+    assert rej["reason"] == "invalid" and rej["hint"] == "unknown colour 'teal'"
+    assert out.record["rejected"][0]["hint"] == "unknown colour 'teal'"
+    assert "marks" not in out.record
+    async with migrated_db.execute(
+            "SELECT color FROM note_marks WHERE id = 'mk_1'") as cur:
+        assert (await cur.fetchone()) == ("green",)

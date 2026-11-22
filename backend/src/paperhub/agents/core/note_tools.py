@@ -831,6 +831,10 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             withdrawn=res.withdrawn)
         if res.inline:
             record["inline"] = res.inline
+        if res.marks:
+            # The mark rows a colour / style change wrote: id, old and new
+            # values, and the other blocks redrawn with it.
+            record["marks"] = res.marks
         for r in res.rejected:
             entry = {**r, "current": _current(r.get("current"))}
             pos = entry.pop("op", None)
@@ -850,6 +854,8 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     result: dict[str, Any] = {
         "revision": revision, "applied": record["applied"],
         "suggested": record["suggested"], "rejected": rejected}
+    if record.get("marks"):
+        result["marks"] = record["marks"]
     if record.get("inline"):
         # Inline citations / formulas / mentions a plain-text update kept
         # (their text unchanged) or dropped (their text changed).

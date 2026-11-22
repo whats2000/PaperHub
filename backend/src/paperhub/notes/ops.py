@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from paperhub.db.connection import write_transaction
 from paperhub.notes.inline_merge import (
     MARK_BLOCK_TYPES,
+    MARK_EDITABLE_PROPS,
     cite_ids,
     cite_quotes,
     is_plain_table,
@@ -123,6 +124,10 @@ class ApplyResult(BaseModel):
     # Plain-string updates laid over rich runs: {block_id, kept, dropped},
     # the inline nodes (citations, formulas, mentions) kept or dropped.
     inline: list[dict[str, Any]] = []
+    # Mark colour / style changes this call wrote to ``note_marks``:
+    # {mark_id, block_id, color / style: {from, to}, blocks}, ``blocks``
+    # the other blocks showing the mark that were redrawn with it.
+    marks: list[dict[str, Any]] = []
 
 
 def _now() -> str:
@@ -206,16 +211,19 @@ class _Ctx:
         # An update merges over the stored block (agent edits, accepts).
         self.merge = merge or actor == "agent"
         self.inline: list[dict[str, Any]] = []
+        self.marks: list[dict[str, Any]] = []
         # Ids of inserts that failed: an op naming one fails with them.
         self.failed: set[str] = set()
         self.op_index: int | None = None
 
     def reject(self, block_id: str | None, reason: RejectReason,
-               current: _Row | None = None) -> None:
+               current: _Row | None = None, hint: str | None = None) -> None:
         entry: dict[str, Any] = {
             "block_id": block_id or "", "reason": reason,
             "current": current.block() if current else None,
         }
+        if hint is not None:
+            entry["hint"] = hint
         if self.op_index is not None:
             entry["op"] = self.op_index
         self.rejected.append(entry)
@@ -227,6 +235,7 @@ class _Ctx:
             suggested=self.suggested, rejected=self.rejected,
             reparented=self.reparented, withdrawn=self.withdrawn,
             renamed=self.renamed_list(), inline=self.inline,
+            marks=self.marks,
         )
 
     def renamed_list(self) -> list[dict[str, str]]:
@@ -289,8 +298,14 @@ class _Ctx:
              self.run_id, self.now),
         )
 
-    async def write_state(self, block_id: str, state: dict[str, Any]) -> None:
-        """Set a block's content, author, position and deletion as one."""
+    async def write_state(self, block_id: str, state: dict[str, Any], *,
+                          asked: frozenset[str] = frozenset()) -> None:
+        """Set a block's content, author, position and deletion as one.
+
+        A live mark block's colour / style go to its mark first (``asked``:
+        the drawing props an update named; see ``_draw_mark``)."""
+        if state["type"] in MARK_BLOCK_TYPES and state["deleted_at"] is None:
+            state = await self._draw_mark(block_id, state, asked)
         await self.conn.execute(
             "UPDATE note_blocks SET type = ?, payload_json = ?, text = ?, "
             "author = ?, parent_id = ?, order_key = ?, deleted_at = ?, "
@@ -314,6 +329,92 @@ class _Ctx:
             else:
                 await self._revive_marks(block_id)
 
+    async def _draw_mark(self, block_id: str, state: dict[str, Any],
+                         asked: frozenset[str]) -> dict[str, Any]:
+        """A mark's colour and style live on its ``note_marks`` row; its
+        blocks draw them from it. The drawing props an update named
+        (``asked``, checked by ``_drawing_problem``) are written to the row,
+        and the block takes the row's values. Any other write (an undo, a
+        redo, a restore) moves the row only where it changes the block's
+        own colour / style, so a move never rewrites the mark. Every other
+        block showing the mark is redrawn with it."""
+        props = state["props"]
+        mark = await _mark_row(self.conn, props.get("markId"))
+        if mark is None:
+            return state
+        if asked:
+            want = {k: props.get(k) for k in asked}
+        else:
+            old = await self.get(block_id)
+            was = old.props if old is not None else {}
+            want = {k: props[k] for k in MARK_EDITABLE_PROPS
+                    if k in props and props[k] != was.get(k)}
+            if "style" in want and (
+                    (want["style"] is None) == (mark["kind"] == "text")):
+                want.pop("style")  # not a style this kind of mark can have
+        changed = {k: v for k, v in want.items() if v != mark[k]}
+        if not changed and not asked:
+            return state
+        if changed:
+            await self.conn.execute(
+                "UPDATE note_marks SET color = ?, style = ? WHERE id = ?",
+                (changed.get("color", mark["color"]),
+                 changed.get("style", mark["style"]), mark["id"]))
+            entry: dict[str, Any] = {"mark_id": mark["id"],
+                                     "block_id": block_id}
+            for k in sorted(changed):
+                entry[k] = {"from": mark[k], "to": changed[k]}
+            mark = {**mark, **changed}
+            entry["blocks"] = await self._redraw_copies(mark, block_id)
+            self.marks.append(entry)
+        return {**state, "props": _drawn(props, mark)}
+
+    async def _redraw_copies(self, mark: dict[str, Any],
+                             block_id: str) -> list[str]:
+        """Redraw the other live blocks showing ``mark``: in this note as
+        part of this change, in another note as a change there."""
+        types = sorted(MARK_BLOCK_TYPES)
+        async with self.conn.execute(
+            "SELECT id, note_id FROM note_blocks WHERE deleted_at IS NULL "
+            f"AND id != ? AND type IN ({','.join('?' for _ in types)}) "  # noqa: S608
+            "AND json_extract(payload_json, '$.props.markId') = ? "
+            "ORDER BY note_id, id", (block_id, *types, mark["id"]),
+        ) as cur:
+            rows = await cur.fetchall()
+        redrawn: list[str] = []
+        for bid, note_id in rows:
+            if note_id == self.note_id:
+                row = await self.get(bid)
+                assert row is not None
+                props = _drawn(row.props, mark)
+                if props == row.props:
+                    continue
+                before = row.state()
+                after = {**before, "props": props}
+                await self.write_state(bid, after)
+                await self.history(bid, "update", before, after)
+                if bid not in self.applied:
+                    self.applied.append(bid)
+            else:
+                async with self.conn.execute(
+                    f"SELECT {_COLS} FROM note_blocks WHERE id = ?",  # noqa: S608
+                    (bid,),
+                ) as cur:
+                    other = _row(await cur.fetchone())
+                props = _drawn(other.props, mark)
+                if props == other.props:
+                    continue
+                note = await get_note(self.conn, note_id)
+                assert note is not None
+                await _apply_in_tx(
+                    self.conn, note_id, base_revision=note.revision,
+                    ops=[Op(op="update", block_id=bid, block=BlockIn(
+                        type=other.type, props=props, content=other.content,
+                        section_key=other.section_key))],
+                    actor="system", run_id=self.run_id, summary="Redraw mark")
+            redrawn.append(bid)
+        return redrawn
+
     async def _revive_marks(self, block_id: str) -> None:
         """Bring back the deleted mark of ``block_id``. One that erasing
         its last piece removed comes back with that piece, never with
@@ -330,6 +431,56 @@ class _Ctx:
                 "UPDATE note_marks SET deleted_at = NULL, pieces_json = ? "
                 "WHERE id = ?",
                 (json.dumps(revived if revived is not None else pieces), mark_id))
+
+
+async def _mark_row(conn: aiosqlite.Connection,
+                    mark_id: Any) -> dict[str, Any] | None:
+    """The kind, colour and style of a mark (None: no such mark)."""
+    if not isinstance(mark_id, str) or not mark_id:
+        return None
+    async with conn.execute(
+        "SELECT kind, color, style FROM note_marks WHERE id = ?", (mark_id,)
+    ) as cur:
+        r = await cur.fetchone()
+    if r is None:
+        return None
+    return {"id": mark_id, "kind": r[0], "color": r[1], "style": r[2]}
+
+
+def _drawn(props: dict[str, Any], mark: dict[str, Any]) -> dict[str, Any]:
+    """A mark block's props drawn as its mark is (as ``block_props``: no
+    ``style`` key when the mark has none)."""
+    out = {**props, "color": mark["color"]}
+    if mark["style"]:
+        out["style"] = mark["style"]
+    else:
+        out.pop("style", None)
+    return out
+
+
+def _asked(ctx: _Ctx, row: _Row, blk: BlockIn) -> frozenset[str]:
+    """The drawing props an update of a mark block names (none when it
+    turns the block into another type)."""
+    if row.type not in MARK_BLOCK_TYPES or (
+            not ctx.merge and blk.type != row.type):
+        return frozenset()
+    return frozenset(k for k in MARK_EDITABLE_PROPS if k in blk.props)
+
+
+async def _drawing_problem(ctx: _Ctx, row: _Row, blk: BlockIn) -> str | None:
+    """Why an update cannot draw its mark block's mark as it asks (an
+    unknown colour, a style the mark's kind does not have), else None."""
+    asked = _asked(ctx, row, blk)
+    mark = await _mark_row(ctx.conn, row.props.get("markId")) if asked else None
+    if mark is None:
+        return None
+    color = blk.props["color"] if "color" in asked else mark["color"]
+    style = blk.props["style"] if "style" in asked else mark["style"]
+    if (color, style) == (mark["color"], mark["style"]):
+        return None
+    # marks.py builds on this module: imported here, not at the top.
+    from paperhub.notes.marks import drawing_problem
+    return await drawing_problem(ctx.conn, str(mark["kind"]), color, style)
 
 
 def _section_ends(anchor: _Row, candidate: _Row) -> bool:
@@ -590,6 +741,13 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
         if changed is not None:
             ctx.reject(row.id, "changed_since_base", changed)
             return
+    if op.op == "update":
+        assert op.block is not None
+        problem = await _drawing_problem(ctx, row, op.block)
+        if problem is not None:
+            # Checked before a suggestion is made too: nothing is written.
+            ctx.reject(row.id, "invalid", row, hint=problem)
+            return
     if ctx.actor == "agent" and op.op in ("update", "delete") and (
             row.author == "user"
             or any(d.author == "user" for d in live_desc)):
@@ -608,7 +766,12 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
             after["section_key"] = blk.section_key
         if ctx.actor == "user":
             after["author"] = "user"
-        await ctx.write_state(row.id, after)
+        asked = (_asked(ctx, row, op.block)
+                 if blk.type in MARK_BLOCK_TYPES else frozenset())
+        await ctx.write_state(row.id, after, asked=asked)
+        if asked:
+            # As written: the mark block's drawing props come from its mark.
+            after = (await ctx.get(row.id) or row).state()
         await ctx.history(row.id, "update", before, after)
     elif op.op == "delete":
         for d in [row, *live_desc]:

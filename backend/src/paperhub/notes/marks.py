@@ -251,6 +251,23 @@ async def _check_color(conn: aiosqlite.Connection, style: str | None,
             raise MarkInputError(f"unknown colour {color!r}")
 
 
+async def drawing_problem(conn: aiosqlite.Connection, kind: str,
+                          color: Any, style: Any) -> str | None:
+    """Why a mark of ``kind`` cannot be drawn in ``color`` and ``style``
+    (None: it can). Only a text mark has a style; a highlight needs a
+    colour; a colour must be in the palette."""
+    if kind != "text":
+        if style is not None:
+            return f"a {kind} mark has no style"
+    elif style not in STYLES:
+        return f"unknown mark style {style!r} (one of {', '.join(STYLES)})"
+    try:
+        await _check_color(conn, style, color)
+    except MarkInputError as exc:
+        return str(exc)
+    return None
+
+
 def _validate(kind: str, view: str, pieces: list[dict[str, Any]]) -> None:
     if kind not in BLOCK_TYPE:
         raise MarkInputError(f"unknown mark kind {kind!r}")
