@@ -211,6 +211,36 @@ async def test_get_library_filters_by_q(
     assert items[0]["title"] == "Attention Is All You Need"
 
 
+async def test_get_library_q_lists_title_matches_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A paper named by the query comes before newer papers that only
+    mention it in their abstract (the notes `[[LoRA` picker showed three
+    abstract matches above "LoRA: ..." and Enter linked the wrong one)."""
+    db_path = await _get_db_path(tmp_path, monkeypatch)
+
+    async with aiosqlite.connect(db_path) as conn:
+        await apply_schema(conn)
+        session_id = await _seed_session(conn)
+        await _seed_paper_content(
+            conn, content_key="arxiv:2106.09685", title="LoRA: Low-Rank Adaptation",
+            arxiv_id="2106.09685", year=2021, abstract="adapters",
+        )
+        await _seed_paper_content(
+            conn, content_key="arxiv:2601.00001", title="Beyond Language Modeling",
+            arxiv_id="2601.00001", year=2026, abstract="we fine-tune with LoRA",
+        )
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(f"/papers/library?session_id={session_id}&q=lora")
+
+    assert r.status_code == 200
+    assert [i["title"] for i in r.json()] == [
+        "LoRA: Low-Rank Adaptation", "Beyond Language Modeling"]
+
+
 async def test_post_from_library_idempotent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

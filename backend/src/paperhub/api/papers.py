@@ -346,10 +346,14 @@ async def list_library(
     are whitespace-split and AND-joined across title+abstract. The
     LLM-driven path (``search_library_dispatch``) keeps FTS5 keyword
     semantics; this endpoint is human-facing, where forgiving substring
-    is expected.
+    is expected. Rows whose title holds every token come first, then the
+    newest.
     """
     where = ["pc.id NOT IN (SELECT paper_content_id FROM papers WHERE session_id = ?)"]
     args: list[int | str] = [session_id]
+    # Papers whose title holds every token come first: a paper named by the
+    # query must not sink below newer ones that only mention it.
+    in_title: list[str] = []
     if q:
         from paperhub.db.connection import norm_for_match
 
@@ -368,13 +372,18 @@ async def list_library(
                 "OR paperhub_norm(pc.abstract) LIKE ?)"
             )
             args.extend([pattern, pattern])
+            in_title.append(pattern)
+    title_first = (
+        "(" + " AND ".join("paperhub_norm(pc.title) LIKE ?" for _ in in_title) + ") DESC, "
+        if in_title else ""
+    )
     sql = (
         "SELECT pc.id, pc.arxiv_id, pc.title, pc.abstract, pc.year, pc.is_private "
         f"FROM paper_content pc WHERE {' AND '.join(where)} "
-        "ORDER BY pc.year DESC NULLS LAST, pc.id DESC "
+        f"ORDER BY {title_first}pc.year DESC NULLS LAST, pc.id DESC "
         "LIMIT ? OFFSET ?"
     )
-    args.extend([limit, offset])
+    args.extend([*in_title, limit, offset])
     settings = load_settings()
     async with open_db(settings.db_path) as conn, conn.execute(sql, args) as cur:
         rows = await cur.fetchall()
