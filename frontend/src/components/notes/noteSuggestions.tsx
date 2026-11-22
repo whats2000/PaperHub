@@ -106,7 +106,10 @@ export function diffTableCells(current: unknown, next: unknown): TableCellChange
   for (let i = a.length - 1; i >= 0; i--)
     for (let j = b.length - 1; j >= 0; j--)
       lcs[i]![j] = key(a[i]!) === key(b[j]!) ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
-  const header = a[0] ?? b[0] ?? [];
+  // Columns are named by the suggestion's own header row (the table may
+  // have been merged since it was made), else by the table's.
+  const header = (b[0] ?? []).map((t, c) => t || a[0]?.[c] || "");
+  if (!b.length) header.push(...(a[0] ?? []));
   const out: TableCellChange[] = [];
   const line = (r: string[]) => r.join(" | ");
   const flush = (gone: number[], added: number[]) => {
@@ -118,7 +121,7 @@ export function diffTableCells(current: unknown, next: unknown): TableCellChange
         const from = ra[c] ?? "";
         const to = rb[c] ?? "";
         if (from !== to)
-          out.push({ kind: "cell", row: ra[0] ?? "", rowN: gone[k]! + 1, column: header[c] ?? "", colN: c + 1, from, to });
+          out.push({ kind: "cell", row: ra[0] || rb[0] || "", rowN: gone[k]! + 1, column: header[c] ?? "", colN: c + 1, from, to });
       }
     }
     for (const i of gone.slice(pairs))

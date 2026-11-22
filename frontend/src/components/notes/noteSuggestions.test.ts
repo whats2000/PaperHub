@@ -100,3 +100,21 @@ describe("a suggestion on a merged table", () => {
     ]);
   });
 });
+
+describe("a suggestion made before a merge", () => {
+  const cell = (text: string, props: Record<string, unknown> = {}) => ({
+    type: "tableCell",
+    props,
+    content: text ? [{ type: "text", text, styles: {} }] : [],
+  });
+  const table = (rows: unknown[][]) => ({ type: "tableContent", columnWidths: [null, null, null], headerRows: 1, rows: rows.map((cells) => ({ cells })) });
+
+  it("names columns by the suggestion's own header row", () => {
+    // The user merged G over two columns after the agent suggested its edit.
+    const now = table([[cell("Method"), cell("G", { colspan: 2 })], [cell("a"), cell("b"), cell("c")]]);
+    const proposed = table([[cell("Method"), cell("G"), cell("H")], [cell("a"), cell("b"), cell("X")]]);
+    const out = tableCellChanges({ ...sug([]), proposed: { type: "table", content: proposed } }, now);
+    const body = out.find((c) => c.kind === "cell" && c.to === "X");
+    expect(body).toMatchObject({ row: "a", column: "H", colN: 3, from: "c" });
+  });
+});
