@@ -19,6 +19,9 @@ import {
   fetchPaperHtml,
   fetchPaperPdfData,
   toggleReference,
+  attachFromLibrary,
+  getPaperInfo,
+  listSessionReferences,
   API_BASE_URL,
 } from "@/lib/api";
 import { useSettingsStore } from "@/store/settings";
@@ -164,6 +167,18 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   const refs = allRefs.filter((r) => r.enabled);
 
   const [displayedPaperId, setDisplayedPaperId] = useState<number | null>(null);
+  // A paper asked for by a link, a citation or a note that this chat does not
+  // have (a library paper): shown view-only in this chat only, tagged with
+  // the chat it was asked for in.
+  const [outside, setOutside] = useState<{ id: number; session: number | null } | null>(null);
+  const sessionRef = useRef(backendSessionId);
+  useEffect(() => {
+    sessionRef.current = backendSessionId;
+  }, [backendSessionId]);
+  const showPaper = (pid: number) => {
+    setDisplayedPaperId(pid);
+    setOutside({ id: pid, session: sessionRef.current });
+  };
   const [activeChunk, setActiveChunk] = useState<ChunkResolution | null>(null);
   // The dom_id of the LAST chunk of a multi-chunk (section) citation, so the
   // HTML highlight spans the whole cited section, not just its first chunk.
@@ -299,10 +314,33 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   // from a previous session would otherwise show the wrong paper. We validate
   // against ALL session papers (not just enabled) so clicking a citation whose
   // source is toggled off can still display that paper (view-only).
+  const outsideShown =
+    !standalone &&
+    outside !== null &&
+    outside.id === displayedPaperId &&
+    outside.session === backendSessionId &&
+    backendSessionId !== null;
   const validDisplayedId =
-    displayedPaperId !== null && allRefIds.includes(displayedPaperId)
+    displayedPaperId !== null && (allRefIds.includes(displayedPaperId) || outsideShown)
       ? displayedPaperId
       : null;
+  const outsideId =
+    validDisplayedId !== null && !allRefIds.includes(validDisplayedId) ? validDisplayedId : null;
+  const [outsideTitles, setOutsideTitles] = useState<Record<number, string>>({});
+  useEffect(() => {
+    if (outsideId === null || outsideTitles[outsideId] !== undefined) return;
+    let cancelled = false;
+    getPaperInfo(outsideId)
+      .then((info) => {
+        if (!cancelled) setOutsideTitles((prev) => ({ ...prev, [outsideId]: info.title }));
+      })
+      .catch(() => {
+        /* the tab shows without a name */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [outsideId, outsideTitles]);
   const effectivePaperId =
     validDisplayedId ?? firstEnabledRef?.paper_content_id ?? null;
   const activeDoc =
@@ -480,9 +518,24 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   // clicking a citation whose source the user toggled off. Shown view-only via
   // a transient tab; the reference's enabled state is left untouched (the
   // citation is historical evidence, separate from future agent context).
-  const transientRef =
+  // A library paper this chat does not have takes the same tab, its
+  // papers_id 0 (no papers row yet); Add attaches it to the chat.
+  const transientRef: ReferenceItem | null =
     effectivePaperId !== null && !refIds.includes(effectivePaperId)
-      ? (allRefs.find((r) => r.paper_content_id === effectivePaperId) ?? null)
+      ? (allRefs.find((r) => r.paper_content_id === effectivePaperId) ??
+        (effectivePaperId === outsideId
+          ? {
+              papers_id: 0,
+              paper_content_id: outsideId,
+              enabled: false,
+              added_at: "",
+              arxiv_id: null,
+              title: outsideTitles[outsideId] ?? "",
+              year: null,
+              kind: "",
+              is_private: false,
+            }
+          : null))
       : null;
 
   // Resolve a clicked citation → its paper + highlight target. Keyed on
@@ -530,7 +583,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
         );
         setActiveChunk(c);
         setEndDomId(endDom);
-        setDisplayedPaperId(c.paper_content_id);
+        showPaper(c.paper_content_id);
         setScrollAnimate(requestAnimateScroll && samePaper);
         setStale(false);
         setHighlightNonce((n) => n + 1);
@@ -607,7 +660,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
         setEndDomId(null);
         setFigureTarget(anchor ? { paper: pid, anchor } : null);
         setRegionTarget(region ? { paper: pid, ...region } : null);
-        setDisplayedPaperId(pid);
+        showPaper(pid);
         setScrollAnimate(requestAnimateScroll && samePaper);
         setStale(false);
         setHighlightNonce((n) => n + 1);
@@ -648,7 +701,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
       if (pid == null) return;
       ensureDoc(pid);
       setSlideTrack(false);
-      setDisplayedPaperId(pid);
+      showPaper(pid);
       setActiveChunk(null);
       setFigureTarget(null);
       setRegionTarget(null);
@@ -720,6 +773,16 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   // cached, so it simply gains a persistent tab (transientRef → null).
   const enableReference = async (): Promise<void> => {
     if (transientRef === null || backendSessionId === null) return;
+    if (transientRef.papers_id === 0) {
+      const sid = backendSessionId;
+      try {
+        await attachFromLibrary(sid, transientRef.paper_content_id);
+        useChatStore.getState().setReferences(sid, await listSessionReferences(sid));
+      } catch {
+        toast.error(t("toast.addPaperFailed"));
+      }
+      return;
+    }
     const papersId = transientRef.papers_id;
     patchReferenceEnabled(backendSessionId, papersId, true);
     try {
@@ -860,7 +923,8 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
             </Popover>
           )}
 
-          {/* View-only tab for a citation whose source reference is toggled off.
+          {/* View-only tab for a citation whose source reference is toggled off
+              (or a library paper this chat does not have, which Add attaches).
               Distinct dashed style + an "add" affordance; viewing it does NOT
               change the reference's enabled state (agent context is untouched). */}
           {transientRef !== null && (
