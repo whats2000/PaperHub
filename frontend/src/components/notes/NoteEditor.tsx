@@ -5,7 +5,7 @@
  * of ops per pause in typing. Conflicted blocks come back through the store's
  * `reloads` and are replaced in place, so the caret elsewhere is kept.
  */
-import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from "@blocknote/core";
+import { insertOrUpdateBlockForSlashMenu } from "@blocknote/core";
 import { SuggestionMenu } from "@blocknote/core/extensions";
 import { en, ja, zh, zhTW } from "@blocknote/core/locales";
 import {
@@ -74,6 +74,7 @@ import { noteParts, refreshPartDecorations, type PartsView } from "./partsDecora
 import { NoteTitle } from "./NoteTitle";
 import { MATH_ALIASES, mathInput, slashLineText, turnIntoEquation } from "./mathInput";
 import { noteSchema, paperhubKeys } from "./schema";
+import { rankSlashItems } from "./slashRank";
 import { NoteTableHandles } from "./NoteTableHandles";
 import { TableCaptions } from "./TableCaption";
 import { createCaptionHosts, tableCaptions } from "./tableCaptions";
@@ -575,7 +576,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
           onItemClick: () => editor.getExtension(SuggestionMenu)?.openSuggestionMenu("@"),
         },
       ];
-      return Promise.resolve(filterSuggestionItems(items, query));
+      return Promise.resolve(rankSlashItems(items, query));
     },
     [editor, noteId, setQuoteTarget, t],
   );
