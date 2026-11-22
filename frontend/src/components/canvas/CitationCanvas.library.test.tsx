@@ -15,6 +15,8 @@ import type { ReferenceItem } from "@/types/domain";
 
 const IN_CHAT = 7;
 const LIBRARY = 9;
+const OTHER = 10;
+const TITLES: Record<number, string> = { [LIBRARY]: "LoRA: Low-Rank Adaptation", [OTHER]: "Attention Is All You Need" };
 
 function ref(over: Partial<ReferenceItem>): ReferenceItem {
   return {
@@ -39,8 +41,8 @@ const server = setupServer(
   http.get(`${API_BASE_URL}/papers/content/:pid/html`, () =>
     HttpResponse.text("<!DOCTYPE html><html><body></body></html>"),
   ),
-  http.get(`${API_BASE_URL}/papers/content/${LIBRARY}/info`, () =>
-    HttpResponse.json({ id: LIBRARY, title: "LoRA: Low-Rank Adaptation" }),
+  http.get(`${API_BASE_URL}/papers/content/:pid/info`, ({ params }) =>
+    HttpResponse.json({ id: Number(params.pid), title: TITLES[Number(params.pid)] ?? "Paper" }),
   ),
   http.post(`${API_BASE_URL}/papers/from-library`, async ({ request }) => {
     attached.push(await request.json());
@@ -68,6 +70,8 @@ beforeEach(() => {
     requestedPaperId: null,
     paperRequestNonce: 0,
     activePaperId: null,
+    outsideByChat: {},
+    closedTab: null,
   });
   useChatStore.getState().reset();
   chat = useChatStore.getState().newSession();
@@ -104,5 +108,95 @@ describe("CitationCanvas — a library paper the chat does not have", () => {
       useChatStore.getState().selectSession(other);
     });
     await waitFor(() => expect(useCanvasStore.getState().activePaperId).toBe(IN_CHAT));
+  });
+});
+
+describe("CitationCanvas — paper tabs shared with the notes pane", () => {
+  const dashed = () => document.querySelectorAll('[data-paper-tab][data-dashed="true"]:not([data-leaving])');
+  const shell = (name: string) => screen.getByRole("tab", { name }).closest("[data-paper-tab]") as HTMLElement;
+
+  it("draws the chat's papers as tabs of a Papers tablist", async () => {
+    useChatStore.getState().setReferences(99, [ref({}), ref({ papers_id: 2, paper_content_id: 8, title: "Mamba" })]);
+    const user = userEvent.setup();
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openPaper(IN_CHAT));
+    const list = await screen.findByRole("tablist", { name: "Papers" });
+    expect(screen.getByRole("tab", { name: "Chat paper" })).toHaveAttribute("aria-selected", "true");
+    await user.click(screen.getByRole("tab", { name: "Mamba" }));
+    await waitFor(() => expect(useCanvasStore.getState().activePaperId).toBe(8));
+    expect(list).toContainElement(screen.getByRole("tab", { name: "Mamba" }));
+  });
+
+  it("a paper opened by a link is a temporary tab; the next one replaces it", async () => {
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openPaper(LIBRARY));
+    expect(await screen.findByRole("tab", { name: TITLES[LIBRARY] })).toBeInTheDocument();
+    expect(shell(TITLES[LIBRARY]!)).toHaveAttribute("data-preview", "true");
+    act(() => useCanvasStore.getState().openPaper(OTHER));
+    expect(await screen.findByRole("tab", { name: TITLES[OTHER] })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("tab", { name: TITLES[LIBRARY] })).toBeNull());
+    expect(dashed()).toHaveLength(1);
+    expect(useCanvasStore.getState().outsideByChat[chat]).toEqual([{ paperId: OTHER, preview: true }]);
+  });
+
+  it("a double click keeps the tab: the next link opens beside it", async () => {
+    const user = userEvent.setup();
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openPaper(LIBRARY));
+    await user.dblClick(await screen.findByRole("tab", { name: TITLES[LIBRARY] }));
+    expect(shell(TITLES[LIBRARY]!)).toHaveAttribute("data-preview", "false");
+    act(() => useCanvasStore.getState().openPaper(OTHER));
+    expect(await screen.findByRole("tab", { name: TITLES[OTHER] })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: TITLES[LIBRARY] })).toBeInTheDocument();
+  });
+
+  it("× closes the temporary tab and lands on the neighbouring paper", async () => {
+    const user = userEvent.setup();
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openPaper(LIBRARY));
+    await screen.findByRole("tab", { name: TITLES[LIBRARY] });
+    await user.click(screen.getByRole("button", { name: `Close ${TITLES[LIBRARY]}` }));
+    await waitFor(() => expect(useCanvasStore.getState().activePaperId).toBe(IN_CHAT));
+    expect(useCanvasStore.getState().outsideByChat[chat]).toEqual([]);
+    expect(useCanvasStore.getState().closedTab).toMatchObject({ paperId: LIBRARY, neighbour: IN_CHAT });
+  });
+
+  it("a tab closed in the notes pane closes here too", async () => {
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openPaper(LIBRARY));
+    await waitFor(() => expect(useCanvasStore.getState().activePaperId).toBe(LIBRARY));
+    act(() => useCanvasStore.getState().closeOutside(chat, LIBRARY, IN_CHAT));
+    await waitFor(() => expect(useCanvasStore.getState().activePaperId).toBe(IN_CHAT));
+    await waitFor(() => expect(dashed()).toHaveLength(0));
+  });
+
+  it("the notes pane picking a paper moves the reader without opening it", async () => {
+    useChatStore.getState().setReferences(99, [ref({}), ref({ papers_id: 2, paper_content_id: 8, title: "Mamba" })]);
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().selectPaper(8));
+    expect(useCanvasStore.getState().open).toBe(false);
+    act(() => {
+      useCanvasStore.setState({ open: true });
+    });
+    await waitFor(() => expect(useCanvasStore.getState().activePaperId).toBe(8));
+  });
+
+  it("a temporary tab does not come back after a chat switch", async () => {
+    render(<CitationCanvas />);
+    act(() => useCanvasStore.getState().openPaper(LIBRARY));
+    await screen.findByRole("tab", { name: TITLES[LIBRARY] });
+    act(() => {
+      const other = useChatStore.getState().newSession();
+      useChatStore.getState().patchSessionBackendId(other, 98);
+      useChatStore.getState().setReferences(98, [ref({ papers_id: 3 })]);
+      useChatStore.getState().selectSession(other);
+      useCanvasStore.getState().resetForSessionChange();
+    });
+    act(() => useChatStore.getState().selectSession(chat));
+    act(() => {
+      useCanvasStore.setState({ open: true });
+    });
+    await waitFor(() => expect(useCanvasStore.getState().activePaperId).toBe(IN_CHAT));
+    expect(dashed()).toHaveLength(0);
   });
 });

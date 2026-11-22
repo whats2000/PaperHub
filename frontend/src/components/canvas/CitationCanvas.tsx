@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resetHorizontalScroll } from "@/lib/scrollWithin";
-import { Plus, X } from "lucide-react";
+import { X } from "lucide-react";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
 import { useTranslation } from "react-i18next";
@@ -18,10 +18,7 @@ import {
   getTranslateConfig,
   fetchPaperHtml,
   fetchPaperPdfData,
-  toggleReference,
-  attachFromLibrary,
   getPaperInfo,
-  listSessionReferences,
   API_BASE_URL,
 } from "@/lib/api";
 import { useSettingsStore } from "@/store/settings";
@@ -36,13 +33,10 @@ import {
 } from "@/lib/withBaseHref";
 import { resolveNeedle } from "@/lib/resolveNeedle";
 import { cn } from "@/lib/utils";
-import { truncatedTitle } from "@/lib/truncatedTitle";
 import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { addPaperToChat, neighbourOf, roveTabs } from "@/lib/paperTabs";
+import { PaperTabs } from "@/components/canvas/PaperTabs";
+import type { ClosedTab, OutsideTab } from "@/store/canvas";
 import { PaperLoading } from "@/components/canvas/PaperLoading";
 import { BoxToolButton } from "@/components/canvas/BoxTool";
 import { HighlighterControl } from "@/components/canvas/HighlighterControl";
@@ -59,7 +53,8 @@ import {
 } from "@/components/canvas/TranslatePill";
 import type { ChunkResolution, ReferenceItem } from "@/types/domain";
 
-const MAX_VISIBLE_TABS = 3;
+/** Stable "no dashed tabs" (keeps the selector's result stable). */
+const NO_OUTSIDE: OutsideTab[] = [];
 /** Stable "no paragraphs" for a PDF that isn't ready (keeps the layer's memos). */
 const NO_PARAGRAPHS: PdfParagraph[] = [];
 /** Minimum gap between re-checks of why the pill is disabled. */
@@ -133,7 +128,6 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const sessions = useChatStore((s) => s.sessions);
   const referencesBySession = useChatStore((s) => s.referencesBySession);
-  const patchReferenceEnabled = useChatStore((s) => s.patchReferenceEnabled);
 
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
@@ -167,17 +161,22 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   const refs = allRefs.filter((r) => r.enabled);
 
   const [displayedPaperId, setDisplayedPaperId] = useState<number | null>(null);
-  // A paper asked for by a link, a citation or a note that this chat does not
-  // have (a library paper): shown view-only in this chat only, tagged with
-  // the chat it was asked for in.
-  const [outside, setOutside] = useState<{ id: number; session: number | null } | null>(null);
-  const sessionRef = useRef(backendSessionId);
-  useEffect(() => {
-    sessionRef.current = backendSessionId;
-  }, [backendSessionId]);
+  // A paper asked for by a link, a citation or a note that is not one of
+  // this chat's enabled papers (a switched-off paper, a library paper): a
+  // dashed tab of this chat, shared with the notes pane (temporary until
+  // kept; the next such paper replaces it).
+  const outsideTabs = useCanvasStore((s) =>
+    standalone || activeSessionId === null ? NO_OUTSIDE : (s.outsideByChat[activeSessionId] ?? NO_OUTSIDE),
+  );
   const showPaper = (pid: number) => {
     setDisplayedPaperId(pid);
-    setOutside({ id: pid, session: sessionRef.current });
+    if (standalone) return;
+    const chat = useChatStore.getState();
+    const bsid = chat.sessions.find((x) => x.id === chat.activeSessionId)?.backend_session_id ?? null;
+    const enabled = bsid === null ? undefined : chat.referencesBySession[bsid]?.filter((r) => r.enabled);
+    if (chat.activeSessionId !== null && !enabled?.some((r) => r.paper_content_id === pid)) {
+      useCanvasStore.getState().showOutside(chat.activeSessionId, pid);
+    }
   };
   const [activeChunk, setActiveChunk] = useState<ChunkResolution | null>(null);
   // The dom_id of the LAST chunk of a multi-chunk (section) citation, so the
@@ -194,7 +193,6 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   // Per-paper fetched document content. Survives the whole session (the canvas
   // stays mounted) so re-opening / tab-switching never re-fetches.
   const [docByPaper, setDocByPaper] = useState<Record<number, DocEntry>>({});
-  const [overflowOpen, setOverflowOpen] = useState(false);
   // The figure the reader clicked to inspect full-screen (null = no lightbox).
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(
     null,
@@ -314,33 +312,32 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   // from a previous session would otherwise show the wrong paper. We validate
   // against ALL session papers (not just enabled) so clicking a citation whose
   // source is toggled off can still display that paper (view-only).
-  const outsideShown =
-    !standalone &&
-    outside !== null &&
-    outside.id === displayedPaperId &&
-    outside.session === backendSessionId &&
-    backendSessionId !== null;
+  // The dashed tabs: papers this chat shows that are not enabled in it.
+  const outsideIds = outsideTabs
+    .map((o) => o.paperId)
+    .filter((pid) => !refIds.includes(pid));
   const validDisplayedId =
-    displayedPaperId !== null && (allRefIds.includes(displayedPaperId) || outsideShown)
+    displayedPaperId !== null &&
+    (allRefIds.includes(displayedPaperId) || outsideIds.includes(displayedPaperId))
       ? displayedPaperId
       : null;
-  const outsideId =
-    validDisplayedId !== null && !allRefIds.includes(validDisplayedId) ? validDisplayedId : null;
-  const [outsideTitles, setOutsideTitles] = useState<Record<number, string>>({});
+  // A library paper's name, looked up once (the notes pane's tab reads it too).
+  const paperTitles = useCanvasStore((s) => s.paperTitles);
+  const setPaperTitle = useCanvasStore((s) => s.setPaperTitle);
+  const untitledKey = outsideIds
+    .filter((pid) => !allRefIds.includes(pid) && paperTitles[pid] === undefined)
+    .join(",");
+  const titleLookups = useRef<Set<number>>(new Set());
   useEffect(() => {
-    if (outsideId === null || outsideTitles[outsideId] !== undefined) return;
-    let cancelled = false;
-    getPaperInfo(outsideId)
-      .then((info) => {
-        if (!cancelled) setOutsideTitles((prev) => ({ ...prev, [outsideId]: info.title }));
-      })
-      .catch(() => {
-        /* the tab shows without a name */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [outsideId, outsideTitles]);
+    for (const pid of untitledKey ? untitledKey.split(",").map(Number) : []) {
+      if (titleLookups.current.has(pid)) continue;
+      titleLookups.current.add(pid);
+      getPaperInfo(pid).then(
+        (info) => setPaperTitle(pid, info.title),
+        () => titleLookups.current.delete(pid), // the tab shows without a name; retried later
+      );
+    }
+  }, [untitledKey, setPaperTitle]);
   const effectivePaperId =
     validDisplayedId ?? firstEnabledRef?.paper_content_id ?? null;
   const activeDoc =
@@ -514,29 +511,25 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
         ? paragraphsReady.paragraphs
         : NO_PARAGRAPHS; // loading, not ready, or load_failed
 
-  // The displayed paper when it is NOT an enabled reference — reached by
-  // clicking a citation whose source the user toggled off. Shown view-only via
-  // a transient tab; the reference's enabled state is left untouched (the
-  // citation is historical evidence, separate from future agent context).
-  // A library paper this chat does not have takes the same tab, its
-  // papers_id 0 (no papers row yet); Add attaches it to the chat.
-  const transientRef: ReferenceItem | null =
-    effectivePaperId !== null && !refIds.includes(effectivePaperId)
-      ? (allRefs.find((r) => r.paper_content_id === effectivePaperId) ??
-        (effectivePaperId === outsideId
-          ? {
-              papers_id: 0,
-              paper_content_id: outsideId,
-              enabled: false,
-              added_at: "",
-              arxiv_id: null,
-              title: outsideTitles[outsideId] ?? "",
-              year: null,
-              kind: "",
-              is_private: false,
-            }
-          : null))
-      : null;
+  // The dashed tabs: a citation whose source the user switched off, or a
+  // library paper this chat does not have (a link, a note). Viewing one
+  // leaves the reference's enabled state untouched (the citation is
+  // historical evidence, separate from future agent context); Add brings
+  // the paper into the chat.
+  const outsideItems = outsideTabs
+    .filter((o) => outsideIds.includes(o.paperId))
+    .map((o) => ({
+      id: o.paperId,
+      preview: o.preview,
+      title: allRefs.find((r) => r.paper_content_id === o.paperId)?.title ?? paperTitles[o.paperId] ?? "",
+    }));
+  // The shown paper switched off while on screen takes a dashed tab too.
+  useEffect(() => {
+    if (standalone || activeSessionId === null || effectivePaperId === null) return;
+    if (refIds.includes(effectivePaperId) || outsideIds.includes(effectivePaperId)) return;
+    useCanvasStore.getState().showOutside(activeSessionId, effectivePaperId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [standalone, activeSessionId, effectivePaperId, refIdsKey, outsideIds.join(",")]);
 
   // Resolve a clicked citation → its paper + highlight target. Keyed on
   // requestNonce so the same chunk re-clicked re-resolves; consumes the request
@@ -691,6 +684,36 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   // ensureDoc covers a toggled-off paper the prefetch skipped (shown view-only
   // via the transient tab); consumePaperRequest stops a later browse-mode reopen
   // from re-jumping here.
+  // A paper switch from a tab (here or in the notes pane) slides the new
+  // paper in from the side of its tab; a citation jumps (it scrolls to a
+  // passage). A tab not drawn yet (a link's new tab) is at the end.
+  const [slide, setSlide] = useState<{ pid: number; dir: 1 | -1 } | null>(null);
+  const slideTo = (pid: number) => {
+    const order = [...refIds, ...outsideIds];
+    const from = effectivePaperId === null ? -1 : order.indexOf(effectivePaperId);
+    const to = order.indexOf(pid);
+    if (from < 0 || pid === effectivePaperId) return;
+    setSlide({ pid, dir: to < 0 || to > from ? 1 : -1 });
+  };
+  const slideClass = (pid: number) =>
+    slide?.pid === pid ? (slide.dir > 0 ? "paper-slide-from-right" : "paper-slide-from-left") : undefined;
+  // The subscriptions below read the latest render's handlers (set below).
+  const latest = useRef<{ slideTo: (pid: number) => void; land: (closed: ClosedTab) => void }>({
+    slideTo: () => undefined,
+    land: () => undefined,
+  });
+  const prevClosedRef = useRef(useCanvasStore.getState().closedTab?.n ?? 0);
+  useEffect(() => {
+    if (standalone) return;
+    return useCanvasStore.subscribe((state) => {
+      const closed = state.closedTab;
+      if (!closed || closed.n === prevClosedRef.current) return;
+      prevClosedRef.current = closed.n;
+      latest.current.land(closed);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const prevPaperNonceRef = useRef(useCanvasStore.getState().paperRequestNonce);
   useEffect(() => {
     if (standalone) return;
@@ -701,6 +724,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
       if (pid == null) return;
       ensureDoc(pid);
       setSlideTrack(false);
+      latest.current.slideTo(pid);
       showPaper(pid);
       setActiveChunk(null);
       setFigureTarget(null);
@@ -750,14 +774,25 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
     // The PDF view is wrapped in <DeferredRemount> (keyed by paper), which
     // unmounts the old reader and mounts the new one across a task boundary —
     // so this swap can stay a plain synchronous state update without freezing.
+    slideTo(pid);
     setDisplayedPaperId(pid);
     setSlideTrack(pid === effectivePaperId);
     setActiveChunk(null);
     setFigureTarget(null);
     setRegionTarget(null);
     setStale(false);
-    setOverflowOpen(false);
   };
+
+  // A dashed tab closed (here or in the notes pane) while this reader shows
+  // it: land on the neighbouring paper.
+  const land = (closed: ClosedTab) => {
+    if (closed.chat !== activeSessionId || closed.paperId !== effectivePaperId) return;
+    if (closed.neighbour !== null) handleTabClick(closed.neighbour);
+    else setDisplayedPaperId(null);
+  };
+  useEffect(() => {
+    latest.current = { slideTo, land };
+  });
 
   const switchReaderTab = (tab: ReaderTab) => {
     if (effectivePaperId == null) return;
@@ -767,30 +802,22 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
     if (tab === "pdf") ensurePagePdf(pid);
   };
 
-  // Promote the view-only transient paper into an enabled reference (the user
-  // opted in via the "+ Add" affordance). Optimistic, with rollback on failure —
-  // mirrors ReferenceSourcesPanel's toggle. The paper is already displayed +
-  // cached, so it simply gains a persistent tab (transientRef → null).
-  const enableReference = async (): Promise<void> => {
-    if (transientRef === null || backendSessionId === null) return;
-    if (transientRef.papers_id === 0) {
-      const sid = backendSessionId;
-      try {
-        await attachFromLibrary(sid, transientRef.paper_content_id);
-        useChatStore.getState().setReferences(sid, await listSessionReferences(sid));
-      } catch {
-        toast.error(t("toast.addPaperFailed"));
-      }
-      return;
-    }
-    const papersId = transientRef.papers_id;
-    patchReferenceEnabled(backendSessionId, papersId, true);
-    try {
-      await toggleReference(papersId, true);
-    } catch {
-      patchReferenceEnabled(backendSessionId, papersId, false);
-      toast.error(t("toast.addPaperFailed"));
-    }
+  // Add on a dashed tab: the paper joins the chat (a switched-off paper is
+  // switched back on; a library paper is attached) and its tab turns solid.
+  const addOutside = async (pid: number): Promise<void> => {
+    const chat = activeSessionId;
+    if (backendSessionId === null || chat === null) return;
+    if (await addPaperToChat(backendSessionId, pid)) useCanvasStore.getState().forgetOutside(chat, pid);
+  };
+  // × on a dashed tab closes it here and in the notes pane; both land on
+  // the neighbouring paper (the closedTab subscription moves this reader).
+  const closeOutside = (pid: number) => {
+    if (activeSessionId === null) return;
+    const order = [...refIds, ...outsideIds];
+    useCanvasStore.getState().closeOutside(activeSessionId, pid, neighbourOf(order, pid));
+  };
+  const keepOutside = (pid: number) => {
+    if (activeSessionId !== null) useCanvasStore.getState().keepOutside(activeSessionId, pid);
   };
 
   // Stay mounted while there are references to prefetch (even when closed) so
@@ -826,15 +853,11 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
 
   if (!open && refs.length === 0) return null;
 
-  const visibleTabs = refs.slice(0, MAX_VISIBLE_TABS);
-  const overflowTabs = refs.slice(MAX_VISIBLE_TABS);
-  const hasOverflow = overflowTabs.length > 0;
 
   // HTML papers stay mounted (hidden) for instant switching; PDF papers render
   // only when active (react-pdf is heavy). Content is cached either way. Include
   // the view-only transient paper so a citation to a toggled-off source renders.
-  const renderableIds =
-    transientRef !== null ? [...refIds, transientRef.paper_content_id] : refIds;
+  const renderableIds = [...refIds, ...outsideIds];
   const htmlPapers = renderableIds.filter(
     (pid) => docByPaper[pid]?.mode === "html",
   );
@@ -870,82 +893,24 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
     >
       {/* Header: paper switcher + close */}
       <header className="flex items-center justify-between border-b border-border px-2 py-1">
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
-          {visibleTabs.map((r) => (
-            <button
-              key={r.paper_content_id}
-              type="button"
-              onClick={() => handleTabClick(r.paper_content_id)}
-              className={
-                "truncate rounded px-2 py-1 text-xs font-medium transition-colors " +
-                (effectivePaperId === r.paper_content_id
-                  ? "bg-foreground/10 text-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground")
-              }
-              {...truncatedTitle(r.title)}
-            >
-              {r.title}
-            </button>
-          ))}
-          {hasOverflow && (
-            <Popover open={overflowOpen} onOpenChange={setOverflowOpen}>
-              <PopoverTrigger
-                render={
-                  <button
-                    type="button"
-                    className="rounded px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-                    aria-label={t("panel.morePapers")}
-                  />
-                }
-              >
-                …
-              </PopoverTrigger>
-              <PopoverContent side="bottom" align="start" className="w-56 p-1">
-                <div className="flex flex-col gap-0.5">
-                  {overflowTabs.map((r) => (
-                    <button
-                      key={r.paper_content_id}
-                      type="button"
-                      onClick={() => handleTabClick(r.paper_content_id)}
-                      className={
-                        "w-full truncate rounded px-2 py-1.5 text-left text-xs font-medium transition-colors " +
-                        (effectivePaperId === r.paper_content_id
-                          ? "bg-foreground/10 text-foreground"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground")
-                      }
-                      {...truncatedTitle(r.title)}
-                    >
-                      {r.title}
-                    </button>
-                  ))}
-                </div>
-              </PopoverContent>
-            </Popover>
-          )}
-
-          {/* View-only tab for a citation whose source reference is toggled off
-              (or a library paper this chat does not have, which Add attaches).
-              Distinct dashed style + an "add" affordance; viewing it does NOT
-              change the reference's enabled state (agent context is untouched). */}
-          {transientRef !== null && (
-            <span className="flex shrink-0 items-center gap-1 rounded border border-dashed border-border bg-muted/40 pl-2 text-xs">
-              <span
-                className="max-w-[9rem] truncate italic text-muted-foreground"
-                title={t("panel.viewingTitle", { title: transientRef.title })}
-              >
-                {transientRef.title}
-              </span>
-              <button
-                type="button"
-                onClick={() => void enableReference()}
-                className="flex items-center gap-0.5 rounded px-1.5 py-1 font-medium text-primary hover:bg-primary/10"
-                title={t("panel.addToReferences")}
-              >
-                <Plus className="h-3 w-3" />
-                {t("panel.add")}
-              </button>
-            </span>
-          )}
+        {/* The paper tabs, shared with the notes pane: the chat's papers,
+            then a dashed tab for a paper shown but not in the chat. */}
+        <div
+          role="tablist"
+          aria-label={t("paperTabs:readerList", "Papers")}
+          onKeyDown={roveTabs}
+          className="paper-tabs-scroll flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden"
+        >
+          <PaperTabs
+            papers={refs.map((r) => ({ id: r.paper_content_id, title: r.title }))}
+            outside={outsideItems}
+            selected={effectivePaperId}
+            onSelect={handleTabClick}
+            onAdd={(pid) => void addOutside(pid)}
+            onClose={closeOutside}
+            onKeep={keepOutside}
+            resetKey={standalone ? "standalone" : activeSessionId}
+          />
         </div>
 
         <Button
@@ -1082,7 +1047,10 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
             <div
               key={pid}
               hidden={!isActive}
-              className="flex h-full w-full flex-1 flex-col"
+              className={cn("flex h-full w-full flex-1 flex-col", isActive && slideClass(pid))}
+              onAnimationEnd={(e) => {
+                if (e.target === e.currentTarget) setSlide(null);
+              }}
             >
               <HtmlView
                 html={doc.html}
