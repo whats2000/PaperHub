@@ -507,3 +507,28 @@ def test_docx_caption_label_is_escaped() -> None:
     with zipfile.ZipFile(io.BytesIO(out)) as z:
         xml = z.read("word/document.xml").decode("utf-8")
     assert "&lt;b&gt;&amp; " in xml and "<b>" not in xml
+
+
+@pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not installed")
+@pytest.mark.parametrize("lead", ["Table: x", "table: x", ": x", "  : x"])
+def test_pandoc_takes_only_the_real_caption(lead: str) -> None:
+    """Read by pandoc itself: a paragraph beside a table, or a table's
+    notes, that starts like pandoc's caption line stays a paragraph (every
+    ``:`` of note text is escaped): the table keeps no caption, and its
+    notes stay its notes."""
+    import json
+    import subprocess
+
+    from paperhub.notes.pandoc import _READER
+    blk = _ctbl("t1", {"notes": lead})
+    flags: list[bool] = []
+    md = note_to_markdown(NOTE, [_para("p1", lead), blk, _para("p2", lead)], {},
+                          table_notes=flags)[0]
+    ast = json.loads(subprocess.run(
+        ["pandoc", "--from", _READER, "--to", "json"], input=md,
+        capture_output=True, text=True, encoding="utf-8", check=True).stdout)
+    top = [b["t"] for b in ast["blocks"]]
+    assert top == ["Header", "Para", "Table", "Para", "Para"]
+    table = ast["blocks"][2]
+    assert table["c"][1] == [None, []]  # no caption
+    assert flags == [True]
