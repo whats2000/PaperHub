@@ -228,7 +228,10 @@ async def export_note(
         note_id: int,
         format: Literal["md", "docx"] = Query(),
         table_style: note_pandoc.TableStyle = "threeLine",
-        table_label: str = Query("Table", min_length=1, max_length=40)) -> Response:
+        # No control character XML 1.0 forbids (Word would refuse the file).
+        table_label: str = Query("Table", min_length=1, max_length=40,
+                                 pattern=r"^[^\x00-\x08\x0b\x0c\x0e-\x1f]+$"),
+) -> Response:
     """The note as a Markdown zip (``note.md``, ``images/``,
     ``references.bib``) or a ``.docx``; 409 ``pandoc_missing`` for Word
     without pandoc. ``table_style`` (the viewer's) draws the Word tables

@@ -328,3 +328,18 @@ async def test_export_passes_the_table_label_and_notes_to_word(
     r = await client.get(f"/notes/{nid}/export",
                          params={"format": "docx", "table_label": "x" * 41})
     assert r.status_code == 422
+
+
+@pytest.mark.parametrize("label", ["T\x00", "a\x08b", "\x0b", "\x0c", "x\x1f"])
+async def test_export_table_label_rejects_xml_illegal_characters(
+        client: AsyncClient, monkeypatch: pytest.MonkeyPatch, label: str) -> None:
+    monkeypatch.setattr(note_pandoc, "pandoc_status", lambda: "ok")
+    monkeypatch.setattr(note_pandoc, "markdown_to_docx", lambda *a, **k: b"docx")
+    nid = await _paper_note(client)
+    r = await client.get(f"/notes/{nid}/export",
+                         params={"format": "docx", "table_label": label})
+    assert r.status_code == 422
+    # A tab and ordinary words are fine.
+    r = await client.get(f"/notes/{nid}/export",
+                         params={"format": "docx", "table_label": "Tab\tle"})
+    assert r.status_code == 200
