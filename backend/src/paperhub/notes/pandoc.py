@@ -19,9 +19,9 @@ Note text is untrusted input to pandoc. What holds:
   saved under an index name (never a name from the note); every other
   image becomes its alt text. So the writer reads exactly the given
   resources, and no image path or URL in the note is ever read.
-- After the second run the tables are drawn in the viewer's table style
-  (``style_docx_tables``): pandoc's own ``word/document.xml`` is rewritten
-  to give each table its borders (three-line or grid). Then each table
+- After the second run each table is drawn with its own lines and merged
+  cells (``style_docx_tables``): pandoc's own ``word/document.xml`` is
+  rewritten to give each cell its borders, spans and header marks. Then each table
   caption gets its "Table N." (a Word SEQ field) and a table's notes
   paragraph (put in the Table Note style in the AST) is drawn small
   (``docx_table_captions``). No reference docx is involved, so neither run
@@ -42,6 +42,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal
 from xml.sax.saxutils import escape as xml_escape
+
+from paperhub.notes.table_borders import TableLayout, edge_at
 
 PANDOC_TIMEOUT_S = 60
 BIB_NAME = "references.bib"
@@ -65,8 +67,6 @@ _READER = (
 _NAME = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
 
 PandocStatus = Literal["ok", "pandoc_missing", "pandoc_too_old"]
-TableStyle = Literal["threeLine", "grid"]
-TABLE_STYLES: tuple[TableStyle, ...] = ("threeLine", "grid")
 # The Word paragraph style of a table's notes (styleId without the space).
 TABLE_NOTE_STYLE = "Table Note"
 
@@ -218,17 +218,16 @@ def _mark_table_notes(node: Any, flags: Sequence[bool], seen: list[int]) -> None
 
 
 def markdown_to_docx(md: str, resources: dict[str, bytes], *,
-                     table_style: TableStyle = "threeLine",
                      table_label: str = "Table",
-                     table_notes: Sequence[bool] = ()) -> bytes:
+                     table_notes: Sequence[bool] = (),
+                     table_layouts: Sequence[TableLayout] = ()) -> bytes:
     """The ``.docx`` of ``md``. ``resources`` are the files it refers to by
     relative path (images, and ``references.bib`` for its ``[@key]``
     citations, which pandoc's citeproc then renders with a reference list).
-    Its tables are drawn in ``table_style``; each caption is numbered
-    "``table_label`` N.", and the paragraph after the n-th table is its
-    notes (drawn small) when ``table_notes[n]``."""
-    if table_style not in TABLE_STYLES:
-        raise PandocError(f"unknown table style {table_style!r}")
+    The n-th table is drawn from ``table_layouts[n]`` (``md`` writes merged
+    tables as a grid); each caption is numbered "``table_label`` N.", and
+    the paragraph after the n-th table is its notes (drawn small) when
+    ``table_notes[n]``."""
     names = [_safe(n) for n in resources]
     images = [n for n in names if n != BIB_NAME]
     try:
@@ -266,18 +265,16 @@ def markdown_to_docx(md: str, resources: dict[str, bytes], *,
                 "--to", "docx", "--output", "note.docx"]
         if bib.strip():
             args += ["--citeproc", "--bibliography", BIB_NAME]
-        styled = style_docx_tables(_run(root, args, "note.docx"), table_style)
+        styled = style_docx_tables(_run(root, args, "note.docx"), table_layouts)
         return docx_table_captions(styled, table_label)
 
 
-# Table borders, in eighths of a point: booktabs' heavy top / bottom rule
-# and its lighter mid rule under the header; a thin line for the grid.
-_RULE_HEAVY = 12
-_RULE_LIGHT = 6
-_GRID = 4
+# A line's weight in eighths of a point: thin (1 px in the editor) and
+# thick (2 px), booktabs' light and heavy rules.
+_LINE_SZ = {1: 6, 2: 12}
 _HEADER_TINT = "F2F2F2"
-# Child order the schema requires (CT_TblPr / CT_TcPr): Word may refuse a
-# document whose properties are out of order.
+# Child order the schema requires (CT_TblPr / CT_TcPr / CT_TrPr): Word may
+# refuse a document whose properties are out of order.
 _TBLPR_ORDER = ("tblStyle", "tblpPr", "tblOverlap", "bidiVisual",
                 "tblStyleRowBandSize", "tblStyleColBandSize", "tblW", "jc",
                 "tblCellSpacing", "tblInd", "tblBorders", "shd", "tblLayout",
@@ -285,6 +282,9 @@ _TBLPR_ORDER = ("tblStyle", "tblpPr", "tblOverlap", "bidiVisual",
 _TCPR_ORDER = ("cnfStyle", "tcW", "gridSpan", "hMerge", "vMerge",
                "tcBorders", "shd", "noWrap", "tcMar", "textDirection",
                "tcFitText", "vAlign", "hideMark")
+_TRPR_ORDER = ("cnfStyle", "divId", "gridBefore", "gridAfter", "wBefore",
+               "wAfter", "cantSplit", "trHeight", "tblHeader",
+               "tblCellSpacing", "jc", "hidden")
 # CT_RPr: the header's bold goes after a run's style and fonts.
 _RPR_ORDER = ("rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps",
               "strike", "dstrike", "outline", "shadow", "emboss", "imprint",
@@ -293,29 +293,17 @@ _RPR_ORDER = ("rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps",
               "u", "effect", "bdr", "shd", "fitText", "vertAlign", "rtl", "cs",
               "em", "lang", "eastAsianLayout", "specVanish", "oMath")
 _CHILD = re.compile(r"<w:(\w+)\b[^>]*?/>|<w:(\w+)\b[^>]*>.*?</w:\2>", re.S)
+_NO_TABLE_BORDERS = "<w:tblBorders>" + "".join(
+    f'<w:{s} w:val="nil" />'
+    for s in ("top", "left", "bottom", "right", "insideH", "insideV")
+) + "</w:tblBorders>"
 
 
-def _line(side: str, val: str, sz: int = 0) -> str:
-    if val == "nil":
+def _line(side: str, weight: int) -> str:
+    if not weight:
         return f'<w:{side} w:val="nil" />'
-    return f'<w:{side} w:val="{val}" w:sz="{sz}" w:space="0" w:color="auto" />'
-
-
-def _table_borders(style: TableStyle) -> str:
-    if style == "grid":
-        sides = "".join(_line(s, "single", _GRID) for s in
-                        ("top", "left", "bottom", "right", "insideH", "insideV"))
-    else:
-        sides = (_line("top", "single", _RULE_HEAVY) + _line("left", "nil")
-                 + _line("bottom", "single", _RULE_HEAVY) + _line("right", "nil")
-                 + _line("insideH", "nil") + _line("insideV", "nil"))
-    return f"<w:tblBorders>{sides}</w:tblBorders>"
-
-
-def _header_cell(style: TableStyle) -> str:
-    if style == "grid":
-        return f'<w:shd w:val="clear" w:color="auto" w:fill="{_HEADER_TINT}" />'
-    return f"<w:tcBorders>{_line('bottom', 'single', _RULE_LIGHT)}</w:tcBorders>"
+    return (f'<w:{side} w:val="single" w:sz="{_LINE_SZ[weight]}" w:space="0" '
+            'w:color="auto" />')
 
 
 def _with_child(inner: str, child: str, order: tuple[str, ...]) -> str:
@@ -346,35 +334,94 @@ def _props(xml: str, tag: str, child: str, order: tuple[str, ...]) -> str:
             + xml[m.end():])
 
 
-def _style_table(tbl: str, style: TableStyle) -> str:
-    tbl = _props(tbl, "tblPr", _table_borders(style), _TBLPR_ORDER)
-    # The header: the row pandoc marks (repeated on each page), else the
-    # first row: pandoc before 2.20 may not mark it, and every exported
-    # pipe table has a header row (an empty one when the note's has none).
-    rows = list(re.finditer(r"<w:tr[ >].*?</w:tr>", tbl, re.S))
-    if not rows:
-        return tbl
-    row = next((r for r in rows if "<w:tblHeader" in r[0]), rows[0])
-    cell = _header_cell(style)
-    head = re.sub(r"<w:tc>.*?</w:tc>",
-                  lambda c: _props(c[0], "tcPr", cell, _TCPR_ORDER),
-                  row[0], flags=re.S)
-    # Its text is bold, as in the editor.
-    head = re.sub(r"<w:r>.*?</w:r>",
-                  lambda r: _props(r[0], "rPr", "<w:b />", _RPR_ORDER),
-                  head, flags=re.S)
-    return tbl[:row.start()] + head + tbl[row.end():]
+_TR = re.compile(r"<w:tr[ >].*?</w:tr>", re.S)
+_TC = re.compile(r"<w:tc>.*?</w:tc>", re.S)
 
 
-def style_docx_tables(docx: bytes, style: TableStyle) -> bytes:
-    """``docx`` (pandoc's) with every table drawn in ``style``: three-line
-    (a heavy rule above the header, a light one under it, a heavy one at
-    the end; no other lines) or grid (every border, the header tinted);
-    the header's text is bold in both.
+def _cell_xml(tc: str, children: list[str], bold: bool) -> str:
+    for child in children:
+        tc = _props(tc, "tcPr", child, _TCPR_ORDER)
+    if bold:  # the header's text is bold, as in the editor
+        tc = re.sub(r"<w:r>.*?</w:r>",
+                    lambda r: _props(r[0], "rPr", "<w:b />", _RPR_ORDER),
+                    tc, flags=re.S)
+    return tc
+
+
+def _style_row(row: str, r: int, layout: TableLayout,
+               owner: dict[tuple[int, int], tuple[int, int, int, int]]) -> str:
+    """One row: each cell's borders, its span (``gridSpan`` across,
+    ``vMerge`` down; a cell covered in its anchor's row is removed, one
+    below keeps a continuation cell only in the anchor's column) and the
+    header's marks."""
+    cells = list(_TC.finditer(row))
+    if not cells:
+        return row
+    b = layout.borders
+    header = r < layout.header_rows
+    tint = header and layout.preset == "notion"
+    out: list[str] = []
+    for c, m in enumerate(cells):
+        ar, ac, rs, cs = owner.get((r, c), (r, c, 1, 1))
+        if c != ac:
+            continue  # covered in its anchor's row, or right of a continuation
+        first, last = r == ar, r == ar + rs - 1
+        children: list[str] = []
+        if cs > 1:
+            children.append(f'<w:gridSpan w:val="{cs}" />')
+        if rs > 1:
+            children.append('<w:vMerge w:val="restart" />' if first else "<w:vMerge />")
+        top = edge_at(b, ar, ac, rs, cs, "top") if first else 0
+        bottom = edge_at(b, ar, ac, rs, cs, "bottom") if last else 0
+        children.append(
+            "<w:tcBorders>" + _line("top", top)
+            + _line("left", edge_at(b, ar, ac, rs, cs, "left"))
+            + _line("bottom", bottom)
+            + _line("right", edge_at(b, ar, ac, rs, cs, "right"))
+            + "</w:tcBorders>")
+        if tint:
+            children.append(
+                f'<w:shd w:val="clear" w:color="auto" w:fill="{_HEADER_TINT}" />')
+        out.append(_cell_xml(m[0], children, header))
+    head = row[:cells[0].start()]
+    if header and "<w:tblHeader" not in head:
+        head = _props(head + "</w:tr>", "trPr", "<w:tblHeader />",
+                      _TRPR_ORDER)[:-len("</w:tr>")]
+    return head + "".join(out) + row[cells[-1].end():]
+
+
+def _style_table(tbl: str, layout: TableLayout) -> str:
+    """One table drawn from its layout: no table-wide borders, every cell
+    its own (``tcBorders``), its merges and its header rows."""
+    tbl = _props(tbl, "tblPr", _NO_TABLE_BORDERS, _TBLPR_ORDER)
+    rows = list(_TR.finditer(tbl))
+    height = len(layout.borders.v)
+    if not layout.has_header and len(rows) == height + 1:
+        # pandoc's empty header row (a pipe table always has one) would sit
+        # outside the table's top rule.
+        tbl = tbl[:rows[0].start()] + tbl[rows[0].end():]
+        rows = list(_TR.finditer(tbl))
+    owner: dict[tuple[int, int], tuple[int, int, int, int]] = {}
+    for span in layout.spans:
+        ar, ac, rs, cs = span
+        for dr in range(rs):
+            for dc in range(cs):
+                owner[(ar + dr, ac + dc)] = span
+    out = tbl[:rows[0].start()] if rows else tbl
+    for r, m in enumerate(rows):
+        out += _style_row(m[0], r, layout, owner) if r < height else m[0]
+        nxt = rows[r + 1].start() if r + 1 < len(rows) else len(tbl)
+        out += tbl[m.end():nxt]
+    return out
+
+
+def style_docx_tables(docx: bytes, layouts: Sequence[TableLayout]) -> bytes:
+    """``docx`` (pandoc's) with the i-th table drawn from ``layouts[i]``:
+    each cell's own lines (thin / thick / none), its merges and its header
+    rows (bold, repeated on each page, tinted for Notion). A table past
+    the layouts is left as pandoc wrote it.
     pandoc writes the XML, so note text in it is always escaped: no tag
     matched here can come from the note."""
-    if style not in TABLE_STYLES:
-        raise PandocError(f"unknown table style {style!r}")
     try:
         src = zipfile.ZipFile(io.BytesIO(docx))
     except zipfile.BadZipFile as exc:
@@ -386,9 +433,15 @@ def style_docx_tables(docx: bytes, style: TableStyle) -> bytes:
             raise PandocError(f"could not read the .docx: {exc!r}") from exc
         if "<w:tbl>" not in xml:
             return docx
+        seen = [0]
+
+        def style(t: re.Match[str]) -> str:
+            i = seen[0]
+            seen[0] += 1
+            return _style_table(t[0], layouts[i]) if i < len(layouts) else t[0]
+
         # pandoc's cells hold paragraphs only, never a nested table.
-        xml = re.sub(r"<w:tbl>.*?</w:tbl>",
-                     lambda t: _style_table(t[0], style), xml, flags=re.S)
+        xml = re.sub(r"<w:tbl>.*?</w:tbl>", style, xml, flags=re.S)
         return _with_document(src, xml)
 
 

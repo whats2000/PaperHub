@@ -43,6 +43,7 @@ from paperhub.notes.store import (
     set_title,
     shared_by,
 )
+from paperhub.notes.table_borders import TableLayout
 
 logger = logging.getLogger(__name__)
 
@@ -237,15 +238,14 @@ async def _record_export(conn: aiosqlite.Connection, note_id: int, fmt: str,
 async def export_note(
         note_id: int,
         format: Literal["md", "docx"] = Query(),
-        table_style: note_pandoc.TableStyle = "threeLine",
         # No control character XML 1.0 forbids (Word would refuse the file).
         table_label: str = Query("Table", min_length=1, max_length=40,
                                  pattern=r"^[^\x00-\x08\x0b\x0c\x0e-\x1f]+$"),
 ) -> Response:
     """The note as a Markdown zip (``note.md``, ``images/``,
     ``references.bib``) or a ``.docx``; 409 ``pandoc_missing`` for Word
-    without pandoc. ``table_style`` (the viewer's) draws the Word tables
-    three-line or grid; the Markdown is a plain pipe table either way.
+    without pandoc. Each table is drawn with its own lines and merges: in
+    Word from its layout, in Markdown a merged table is an HTML table.
     ``table_label`` (the viewer's language: "Table", "表") opens each Word
     table caption, "<label> N.". Each export is recorded in
     ``note_exports``."""
@@ -264,10 +264,13 @@ async def export_note(
             papers, chunk_papers, mark_papers, mark_cites = await export_sources(
                 conn, note, blocks)
             table_notes: list[bool] = []
+            table_layouts: list[TableLayout] = []
             md, images, bib = await asyncio.to_thread(functools.partial(
                 note_to_markdown, note, blocks, papers,
                 chunk_papers=chunk_papers, mark_papers=mark_papers,
-                mark_cites=mark_cites, table_notes=table_notes))
+                mark_cites=mark_cites, table_notes=table_notes,
+                merged_as="html" if format == "md" else "grid",
+                table_layouts=table_layouts))
             name = slug(note.title) + "-notes"
             full_name = display_name(note.title) + "-notes"
             if format == "md":
@@ -277,8 +280,8 @@ async def export_note(
                 body = await asyncio.to_thread(functools.partial(
                     note_pandoc.markdown_to_docx, md,
                     {**images, note_pandoc.BIB_NAME: bib.encode("utf-8")},
-                    table_style=table_style, table_label=table_label,
-                    table_notes=table_notes))
+                    table_label=table_label, table_notes=table_notes,
+                    table_layouts=table_layouts))
                 media, ext = _DOCX_TYPE, "docx"
         except note_pandoc.PandocError as exc:
             logger.warning("note %s: Word export failed: %s", note_id, exc)

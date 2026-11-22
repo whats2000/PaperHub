@@ -272,32 +272,31 @@ async def test_export_uses_the_default_title_when_the_title_is_empty(
     assert _zip(r.content)["note.md"].decode().startswith("# Untitled")
 
 
-async def test_export_table_style_unknown_is_422(client: AsyncClient) -> None:
-    nid = await _paper_note(client)
-    r = await client.get(f"/notes/{nid}/export",
-                         params={"format": "md", "table_style": "dotted"})
-    assert r.status_code == 422
+async def test_export_ignores_an_old_table_style(
+        client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each table carries its own lines now: an old client's table_style
+    is ignored, and Word gets one layout per table."""
+    seen: list[dict[str, object]] = []
 
-
-@pytest.mark.parametrize(("given", "want"), [(None, "threeLine"),
-                                             ("threeLine", "threeLine"),
-                                             ("grid", "grid")])
-async def test_export_passes_the_table_style_to_word(
-        client: AsyncClient, monkeypatch: pytest.MonkeyPatch,
-        given: str | None, want: str) -> None:
-    seen: list[str] = []
-
-    def fake(md: str, resources: dict[str, bytes], *,
-             table_style: str = "threeLine", **_kw: object) -> bytes:
-        seen.append(table_style)
+    def fake(md: str, resources: dict[str, bytes], **kw: object) -> bytes:
+        seen.append(kw)
         return b"docx"
     monkeypatch.setattr(note_pandoc, "pandoc_status", lambda: "ok")
     monkeypatch.setattr(note_pandoc, "markdown_to_docx", fake)
     nid = await _paper_note(client)
-    params = {"format": "docx"} | ({"table_style": given} if given else {})
-    r = await client.get(f"/notes/{nid}/export", params=params)
+    table = {"type": "tableContent", "columnWidths": [None], "headerRows": 1,
+             "rows": [{"cells": ["h"]}, {"cells": ["1"]}]}
+    await _write(client, nid, [{"type": "table", "content": table}])
+    r = await client.get(f"/notes/{nid}/export",
+                         params={"format": "docx", "table_style": "grid"})
     assert r.status_code == 200 and r.content == b"docx"
-    assert seen == [want]
+    [call] = seen
+    assert "table_style" not in call
+    layouts = call["table_layouts"]
+    assert isinstance(layouts, list) and len(layouts) == 1
+    r = await client.get(f"/notes/{nid}/export",
+                         params={"format": "md", "table_style": "dotted"})
+    assert r.status_code == 200
 
 
 async def test_export_passes_the_table_label_and_notes_to_word(
