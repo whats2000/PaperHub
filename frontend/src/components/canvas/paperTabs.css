@@ -1,0 +1,65 @@
+/* The paper tabs the reader and the notes pane share: a tab that opens
+   grows in from no width; a closed or replaced one shrinks its width away
+   (its gap with it), so the tabs beside it glide instead of jumping. */
+.paper-tab-enter {
+  animation: paper-tab-enter 200ms ease-out;
+}
+@keyframes paper-tab-enter {
+  from {
+    max-width: 0;
+    min-width: 0;
+    opacity: 0;
+  }
+  to {
+    max-width: 15rem;
+    opacity: 1;
+  }
+}
+.paper-tab-leave {
+  max-width: 0 !important;
+  min-width: 0 !important;
+  margin-inline-end: -0.25rem;
+  border-width: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    max-width 180ms ease-out,
+    margin 180ms ease-out,
+    opacity 180ms ease-out;
+}
+/* The strip scrolls sideways when narrow, with no scrollbar. */
+.paper-tabs-scroll {
+  scrollbar-width: none;
+}
+.paper-tabs-scroll::-webkit-scrollbar {
+  display: none;
+}
+/* The shown paper slides in from the side of the tab picked. */
+.paper-slide-from-right {
+  animation: paper-slide-from-right 200ms ease-out;
+}
+.paper-slide-from-left {
+  animation: paper-slide-from-left 200ms ease-out;
+}
+@keyframes paper-slide-from-right {
+  from {
+    transform: translateX(0.75rem);
+    opacity: 0;
+  }
+}
+@keyframes paper-slide-from-left {
+  from {
+    transform: translateX(-0.75rem);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .paper-tab-enter,
+  .paper-slide-from-right,
+  .paper-slide-from-left {
+    animation: none;
+  }
+  .paper-tab-leave {
+    transition: none;
+  }
+}
