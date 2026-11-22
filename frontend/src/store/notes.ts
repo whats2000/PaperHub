@@ -744,7 +744,10 @@ export const useNotesStore = create<NotesStore>()(
         try {
           const d = await getNote(noteId);
           if ((sentBursts.get(noteId) ?? 0) !== sent) {
+            // Stale; that burst may already be saved (its flush found
+            // nothing due), so try again now: it waits if still in flight.
             reloadDue.add(noteId);
+            void reloadWhenSaved(noteId);
             return;
           }
           show(noteId, d);

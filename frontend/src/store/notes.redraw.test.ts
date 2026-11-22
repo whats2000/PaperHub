@@ -170,3 +170,59 @@ describe("the reload after a saved recolour (Task 16, round 2)", () => {
     await waitFor(() => expect(text()).toBe("A1 B"));
   });
 });
+
+describe("a reload a burst overtook (Task 16, round 3)", () => {
+  const para = (text: string, rev: number): NoteBlock => ({
+    id: "p1",
+    note_id: 7,
+    parent_id: null,
+    type: "paragraph",
+    props: {},
+    content: [{ type: "text", text, styles: {} }],
+    text,
+    author: "user",
+    section_key: null,
+    changed_rev: rev,
+  });
+  const upd = (text: string) => ({
+    op: "update" as const,
+    block_id: "p1",
+    block: { type: "paragraph" as const, props: {}, content: [{ type: "text", text, styles: {} }] },
+  });
+
+  it("runs again when the burst's answer came back before the reload's", async () => {
+    let serverText = "A";
+    let revision = 4;
+    let posts = 0;
+    let gets = 0;
+    let openGet!: () => void;
+    const firstGet = new Promise<void>((r) => (openGet = r));
+    useNotesStore.setState({
+      notes: { 7: { note: note(7), blocks: [para("A", 1)], suggestions: [], comments: [], revision: 4 } },
+    });
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        posts += 1;
+        const body = (await request.json()) as { ops: { block: { content: { text: string }[] } }[] };
+        serverText = body.ops.at(-1)!.block.content[0]!.text;
+        revision += 1;
+        return HttpResponse.json({ ...accepted, revision, applied: ["p1"], redrawn: [], ...(posts === 1 ? {} : { marks: [] }) });
+      }),
+      http.get(`${API_BASE_URL}/notes/7`, async () => {
+        gets += 1;
+        const snapshot = { text: serverText, revision };
+        if (gets === 1) await firstGet;
+        return HttpResponse.json({ note: { ...note(7), revision: snapshot.revision }, blocks: [para(snapshot.text, snapshot.revision)], suggestions: [], comments: [] });
+      }),
+    );
+    const store = useNotesStore.getState();
+    store.applyLocal(7, [upd("A1")]);
+    await store.flush(7); // saved; its reload is loading (held)
+    store.applyLocal(7, [upd("A1 B")]);
+    await store.flush(7); // the next burst is answered first
+    openGet(); // then the stale reload lands: dropped, and run again
+    await waitFor(() => expect(gets).toBe(2));
+    await waitFor(() => expect(useNotesStore.getState().notes[7]!.revision).toBe(revision));
+    expect(useNotesStore.getState().notes[7]!.blocks[0]!.text).toBe("A1 B");
+  });
+});
