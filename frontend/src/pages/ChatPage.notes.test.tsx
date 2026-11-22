@@ -5,6 +5,7 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { API_BASE_URL } from "@/lib/api";
+import { isRinged } from "@/lib/notes/reveal";
 import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
 import { NOTES_DEFAULT_WIDTH, useNotesPaneStore } from "@/store/notesPane";
@@ -360,7 +361,7 @@ describe("ChatPage Notes pane", () => {
       await waitFor(() => expect(useNotesPaneStore.getState().request).toBeNull());
       const block = document.querySelector('.bn-block-outer[data-id="b12"]');
       expect(scrolled).toContain(block);
-      expect(block).toHaveAttribute("data-flash");
+      expect(isRinged("b12")).toBe(true);
 
       act(() => useNotesPaneStore.getState().openAt({ kind: "paper", id: 7, noteId: 11, blockId: "b11" }));
       expect(await screen.findByText("note 11")).toBeInTheDocument();

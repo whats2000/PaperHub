@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { REVEAL_GIVE_UP_MS, revealBlock, unfoldInNote } from "@/lib/notes/reveal";
+import { isRinged, REVEAL_GIVE_UP_MS, revealBlock, unfoldInNote } from "@/lib/notes/reveal";
 import { useNotesStore } from "@/store/notes";
 import type { NoteBlock } from "@/types/notes";
 
@@ -37,24 +37,26 @@ describe("revealBlock", () => {
     root.appendChild(el);
     await expect(revealBlock(root, "b1")).resolves.toBe(true);
     expect(scrolled).toEqual([el]);
-    expect(el).toHaveAttribute("data-flash");
-    vi.advanceTimersByTime(1600);
+    expect(isRinged("b1")).toBe(true);
+    // A rule keyed by the id, not an attribute ProseMirror would redraw away.
     expect(el).not.toHaveAttribute("data-flash");
+    expect(document.getElementById("ph-note-rings")?.textContent).toContain('[data-id="b1"]');
+    vi.advanceTimersByTime(1600);
+    expect(isRinged("b1")).toBe(false);
   });
 
   it("keeps the ring when the editor redraws the block right after (a new mark's note reloading)", async () => {
-    // Live bug [2026-11-22]: the ring went on a node the editor replaced
-    // a moment later, so a new mark's block never flashed.
+    // Live bug [2026-11-22]: ProseMirror redraws a block whose attributes
+    // change, so an attribute ring vanished at once.
+    vi.useFakeTimers();
     const first = outer("b_new");
     root.appendChild(first);
     await expect(revealBlock(root, "b_new")).resolves.toBe(true);
-    const redrawn = outer("b_new");
-    first.replaceWith(redrawn);
-    await new Promise((r) => setTimeout(r, 0));
-    expect(redrawn).toHaveAttribute("data-flash");
-    expect(scrolled).toEqual([first, redrawn]);
-    await new Promise((r) => setTimeout(r, 1650));
-    expect(redrawn).not.toHaveAttribute("data-flash");
+    first.replaceWith(outer("b_new"));
+    expect(isRinged("b_new")).toBe(true);
+    expect(scrolled).toEqual([first]);
+    vi.advanceTimersByTime(1600);
+    expect(isRinged("b_new")).toBe(false);
   });
 
   it("waits for a block that is not there yet", async () => {
@@ -76,7 +78,26 @@ describe("revealBlock", () => {
     expect(unfold).toHaveBeenCalledWith("b2");
     expect(unfold).toHaveBeenCalledTimes(1);
     expect(scrolled).toEqual([el]);
-    expect(el).toHaveAttribute("data-flash");
+    expect(isRinged("b2")).toBe(true);
+  });
+
+  it("never loops with an editor that redraws a block whose attributes change", async () => {
+    // Live hang [2026-11-22]: an attribute ring made ProseMirror redraw the
+    // block, the ring followed the new node and set it again, without end.
+    root.appendChild(outer("b9"));
+    let redraws = 0;
+    const editor = new MutationObserver(() => {
+      const cur = root.querySelector('[data-id="b9"]');
+      if (cur && redraws < 200) {
+        redraws++;
+        cur.replaceWith(outer("b9"));
+      }
+    });
+    editor.observe(root, { attributes: true, subtree: true });
+    await expect(revealBlock(root, "b9")).resolves.toBe(true);
+    await new Promise((r) => setTimeout(r, 50));
+    editor.disconnect();
+    expect(redraws).toBe(0);
   });
 
   it("gives up on a block that never shows", async () => {

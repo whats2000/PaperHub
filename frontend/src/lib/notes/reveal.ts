@@ -1,5 +1,5 @@
 /** Bring a note block into view: scroll it to the middle and flash a short
- * neutral ring (`data-flash`, styled in index.css). Used by "Open in notes",
+ * neutral ring (a stylesheet rule keyed by the block id). Used by "Open in notes",
  * `[[` heading links and the table of contents. A block in a folded part is
  * unfolded first; a block not drawn yet (its note still loading) is waited
  * for, up to a limit. */
@@ -39,7 +39,7 @@ export function revealBlock(root: HTMLElement, blockId: string, opts: RevealOpti
       }
       return false;
     }
-    flash(root, blockId, el);
+    flash(blockId, el);
     return true;
   };
 
@@ -65,30 +65,47 @@ export function revealBlock(root: HTMLElement, blockId: string, opts: RevealOpti
   });
 }
 
-/** Scrolls `el` to the middle and rings it for FLASH_MS. The editor may
- * redraw the block meanwhile (a new mark's note reloading): the ring and
- * the scroll follow the redrawn node. Outlives the caller (a consumed
- * request re-renders the pane). */
-function flash(root: HTMLElement, blockId: string, el: HTMLElement): void {
-  const show = (node: HTMLElement) => {
-    node.scrollIntoView?.({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
-    node.setAttribute("data-flash", "");
-  };
-  let cur = el;
-  show(cur);
-  const follow = new MutationObserver(() => {
-    if (cur.isConnected) return;
-    const next = root.querySelector<HTMLElement>(blockSelector(blockId));
-    if (next) {
-      cur = next;
-      show(cur);
-    }
-  });
-  follow.observe(root, { childList: true, subtree: true });
+/** Scrolls `el` to the middle and rings its block for FLASH_MS. The ring
+ * is a stylesheet rule keyed by the block id, never an attribute on the
+ * editor's DOM: ProseMirror redraws a block whose attributes change, which
+ * wiped the ring at once (live bug, 2026-11-22). Outlives the caller (a
+ * consumed request re-renders the pane). */
+function flash(blockId: string, el: HTMLElement): void {
+  el.scrollIntoView?.({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+  rings.set(blockId, (rings.get(blockId) ?? 0) + 1);
+  writeRings();
   setTimeout(() => {
-    follow.disconnect();
-    cur.removeAttribute("data-flash");
+    const n = (rings.get(blockId) ?? 1) - 1;
+    if (n > 0) rings.set(blockId, n);
+    else rings.delete(blockId);
+    writeRings();
   }, FLASH_MS);
+}
+
+/** Blocks ringing now (a count: the same block revealed twice). */
+const rings = new Map<string, number>();
+
+function writeRings(): void {
+  if (typeof document === "undefined") return;
+  let el = document.getElementById("ph-note-rings");
+  if (!el) {
+    el = document.createElement("style");
+    el.id = "ph-note-rings";
+    document.head.appendChild(el);
+  }
+  // The neutral ring of index.css's `[data-flash]` (yellow is for citations).
+  el.textContent = [...rings.keys()]
+    .map(
+      (id) =>
+        `.paperhub-notes .bn-block-outer[data-id="${CSS.escape(id)}"] > .bn-block > .bn-block-content` +
+        " { border-radius: 4px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--foreground) 35%, transparent); transition: box-shadow 0s; }",
+    )
+    .join(" ");
+}
+
+/** Whether block `blockId` is ringed now (tests). */
+export function isRinged(blockId: string): boolean {
+  return rings.has(blockId);
 }
 
 /** An `unfold` for note `noteId`: opens the folded part holding a block. */
