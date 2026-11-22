@@ -89,6 +89,24 @@ async def test_read_note_shows_a_table_as_gfm(
             "| 指標 | 值 |\n| --- | --- |\n| ORR | 62% |</note_block>") in out.content
 
 
+async def test_read_note_marks_a_table_without_a_header_row(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    """GFM always draws its first row as a header: a table with none says
+    so (header_row="none"), so the agent reads that row as data."""
+    nid = await _chat_note(migrated_db)
+    res = await apply_ops(migrated_db, nid, base_revision=0, actor="user", ops=[
+        Op(op="insert", block=BlockIn(type="table", content={
+            "type": "tableContent", "columnWidths": [None, None],
+            "headerRows": 0, "rows": [{"cells": ["ORR", "62%"]},
+                                      {"cells": ["DCR", "80%"]}]}))])
+    bid = res.applied[0]
+    out = await _call(_ctx(migrated_db, fake_tracer), "read_note", note="chat")
+    assert (f'<note_block id="{bid}" type="table" header_row="none" '
+            'author="user">| ORR | 62% |\n| --- | --- |\n| DCR | 80% |'
+            "</note_block>") in out.content
+
+
 async def test_read_note_shows_cell_citations_as_tags(
     migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
 ) -> None:

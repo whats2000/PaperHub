@@ -116,6 +116,10 @@ def _block_xml(b: Block, labels: dict[str, str] | None = None,
         # The caption as an attribute; the notes after the GFM body.
         caption = str(b.props.get("caption") or "")
         attrs = f' caption="{esc(caption)}"' if caption else ""
+        # GFM draws its first row as a header: a table with no header row
+        # says so, and that row reads as data.
+        if isinstance(b.content, dict) and not b.content.get("headerRows"):
+            attrs += ' header_row="none"'
     if text is None and b.type == "table" and isinstance(b.content, dict):
         cited = _table_xml(b.content, quotes)
         notes = str(b.props.get("notes") or "")
