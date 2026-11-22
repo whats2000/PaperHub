@@ -64,7 +64,8 @@ async def test_dry_run_counts_and_changes_nothing(tmp_path: Path) -> None:
     await _seed(db)
     before = await _props_of(db)
     counts = await reconcile(db, dry_run=True)
-    assert counts == {"checked": 2, "matching": 1, "redrawn": 1, "no_mark": 1}
+    assert counts == {"checked": 2, "matching": 1, "redrawn": 1, "no_mark": 1,
+                      "rejected": []}
     assert await _props_of(db) == before
 
 
@@ -73,7 +74,8 @@ async def test_redraws_from_the_row_as_a_system_change_once(tmp_path: Path) -> N
     await _seed(db)
     sets = len(await _change_sets(db))
     counts = await reconcile(db, dry_run=False)
-    assert counts == {"checked": 2, "matching": 1, "redrawn": 1, "no_mark": 1}
+    assert counts == {"checked": 2, "matching": 1, "redrawn": 1, "no_mark": 1,
+                      "rejected": []}
     props = await _props_of(db)
     assert (props["q1"]["color"], props["q1"]["style"]) == ("blue", "wavy")
     assert props["q3"]["color"] == "pink"
@@ -85,5 +87,26 @@ async def test_redraws_from_the_row_as_a_system_change_once(tmp_path: Path) -> N
         assert await cur.fetchone() == ("blue", "wavy")
     # Idempotent: nothing left to redraw, no new change set.
     again = await reconcile(db, dry_run=False)
-    assert again == {"checked": 2, "matching": 2, "redrawn": 0, "no_mark": 1}
+    assert again == {"checked": 2, "matching": 2, "redrawn": 0, "no_mark": 1,
+                     "rejected": []}
     assert len(await _change_sets(db)) == sets + 1
+
+
+async def test_a_rejected_redraw_is_counted_and_named(tmp_path: Path,
+                                                    monkeypatch) -> None:
+    from paperhub.cli import reconcile_mark_blocks as cli
+    from paperhub.notes.ops import ApplyResult
+
+    async def refuse(conn, note_id, **kw):  # the block changed meanwhile
+        return ApplyResult(
+            note_id=note_id, revision=kw["base_revision"], change_set_id=None,
+            applied=[], suggested=[],
+            rejected=[{"block_id": "q1", "reason": "changed_since_base",
+                       "current": None}])
+    monkeypatch.setattr(cli, "apply_ops", refuse)
+    db = tmp_path / "p.db"
+    n = await _seed(db)
+    counts = await reconcile(db, dry_run=False)
+    assert counts["redrawn"] == 0
+    assert counts["rejected"] == [{"note_id": n, "block_id": "q1",
+                                   "reason": "changed_since_base"}]

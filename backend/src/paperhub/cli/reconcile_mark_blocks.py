@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
 
 from paperhub.config import load_settings
 from paperhub.db.connection import open_db
@@ -27,10 +28,13 @@ from paperhub.notes.ops import BlockIn, Op, apply_ops, drawn_props
 from paperhub.notes.store import get_note
 
 
-async def reconcile(db_path: Path, *, dry_run: bool) -> dict[str, int]:
+async def reconcile(db_path: Path, *, dry_run: bool) -> dict[str, Any]:
     """Counts: ``checked`` (live mark blocks with a mark row), ``matching``,
-    ``redrawn`` (would be, on a dry run) and ``no_mark``."""
-    counts = {"checked": 0, "matching": 0, "redrawn": 0, "no_mark": 0}
+    ``redrawn`` (would be, on a dry run; else the blocks the change
+    applied) and ``no_mark``; ``rejected`` names each redraw the op engine
+    refused ({note_id, block_id, reason})."""
+    counts: dict[str, Any] = {"checked": 0, "matching": 0, "redrawn": 0,
+                              "no_mark": 0, "rejected": []}
     async with open_db(db_path) as conn:
         if not await has_table(conn, "note_marks"):
             return counts
@@ -58,7 +62,8 @@ async def reconcile(db_path: Path, *, dry_run: bool) -> dict[str, int]:
             if want == props:
                 counts["matching"] += 1
                 continue
-            counts["redrawn"] += 1
+            if dry_run:
+                counts["redrawn"] += 1
             by_note.setdefault(note_id, []).append(Op(
                 op="update", block_id=bid, block=BlockIn(
                     type=type_, props=want, content=data.get("content"))))
@@ -68,9 +73,14 @@ async def reconcile(db_path: Path, *, dry_run: bool) -> dict[str, int]:
             note = await get_note(conn, note_id)
             if note is None:
                 continue
-            await apply_ops(conn, note_id, base_revision=note.revision,
-                            ops=ops, actor="system",
-                            summary="Redraw marks from their rows")
+            res = await apply_ops(conn, note_id, base_revision=note.revision,
+                                  ops=ops, actor="system",
+                                  summary="Redraw marks from their rows")
+            counts["redrawn"] += sum(
+                1 for o in ops if o.block_id in res.applied)
+            counts["rejected"] += [
+                {"note_id": note_id, "block_id": r["block_id"],
+                 "reason": r["reason"]} for r in res.rejected]
     return counts
 
 
@@ -79,9 +89,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
     out = asyncio.run(reconcile(load_settings().db_path, dry_run=args.dry_run))
+    for r in out["rejected"]:
+        print(f"rejected: note {r['note_id']} block {r['block_id']}: "
+              f"{r['reason']}")
     verb = "would redraw" if args.dry_run else "redrawn"
     print(f"summary: checked={out['checked']} already_matching={out['matching']} "
-          f"{verb}={out['redrawn']} no_mark_row={out['no_mark']}"
+          f"{verb}={out['redrawn']} no_mark_row={out['no_mark']} "
+          f"rejected={len(out['rejected'])}"
           + (" (dry run)" if args.dry_run else ""))
     return 0
 
