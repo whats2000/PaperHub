@@ -107,6 +107,36 @@ describe("revealBlock", () => {
     expect(isRinged("b2")).toBe(true);
   });
 
+  it("unfolds first a block nested in a folded one (a list item's child)", async () => {
+    const parent = outer("li", { "data-folded": "true" });
+    const child = outer("li1");
+    parent.appendChild(child);
+    root.appendChild(parent);
+    const unfold = vi.fn(() => queueMicrotask(() => parent.removeAttribute("data-folded")));
+    await expect(revealBlock(root, "li1", { unfold })).resolves.toBe(true);
+    expect(unfold).toHaveBeenCalledWith("li1");
+    expect(scrolled).toEqual([child]);
+  });
+
+  it("never loops with an editor that redraws a block whose attributes change", async () => {
+    // Live hang [2026-11-22]: an attribute ring made ProseMirror redraw the
+    // block, the ring followed the new node and set it again, without end.
+    root.appendChild(outer("b9"));
+    let redraws = 0;
+    const editor = new MutationObserver(() => {
+      const cur = root.querySelector('[data-id="b9"]');
+      if (cur && redraws < 200) {
+        redraws++;
+        cur.replaceWith(outer("b9"));
+      }
+    });
+    editor.observe(root, { attributes: true, subtree: true });
+    await expect(revealBlock(root, "b9")).resolves.toBe(true);
+    await new Promise((r) => setTimeout(r, 50));
+    editor.disconnect();
+    expect(redraws).toBe(0);
+  });
+
   it("gives up on a block that never shows", async () => {
     vi.useFakeTimers();
     const p = revealBlock(root, "never");
@@ -140,22 +170,23 @@ describe("unfoldInNote", () => {
     changed_rev: 1,
   });
 
-  it("unfolds the folded part holding the block, and leaves an open one alone", () => {
+  it("unfolds every fold hiding the block, and leaves the others alone", () => {
+    const heading = (id: string) => ({ ...b(id, "heading"), props: { level: 2 } });
     useNotesStore.setState({
       notes: {
         5: {
           note: { id: 5, target_kind: "paper", target_id: "3", title: "", revision: 1, updated_at: "" },
-          blocks: [b("a"), b("d1", "divider"), b("h"), b("d2", "divider"), b("z")],
+          blocks: [heading("h"), b("li", "bulletListItem"), { ...b("x", "bulletListItem"), parent_id: "li" }, heading("k"), b("z")],
           suggestions: [],
           comments: [],
           revision: 1,
         },
       },
-      folded: { 5: ["d1"] },
+      folded: { 5: ["h", "li", "k"] },
     });
+    unfoldInNote(5)("x");
+    expect(useNotesStore.getState().folded[5]).toEqual(["k"]);
     unfoldInNote(5)("h");
-    expect(useNotesStore.getState().folded[5]).toEqual([]);
-    unfoldInNote(5)("z");
-    expect(useNotesStore.getState().folded[5]).toEqual([]);
+    expect(useNotesStore.getState().folded[5]).toEqual(["k"]);
   });
 });

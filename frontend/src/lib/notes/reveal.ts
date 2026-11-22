@@ -1,9 +1,9 @@
 /** Bring a note block into view: scroll it to the middle and flash a short
  * neutral ring (a stylesheet rule keyed by the block id). Used by "Open in notes",
- * `[[` heading links and the table of contents. A block in a folded part is
- * unfolded first; a block not drawn yet (its note still loading) is waited
- * for, up to a limit. */
-import { partOf } from "@/components/notes/parts";
+ * `[[` heading links and the table of contents. A block under a fold (a
+ * folded heading, § section or list item) is unfolded first; a block not
+ * drawn yet (its note still loading) is waited for, up to a limit. */
+import { foldersHiding, treeFromRows } from "@/components/notes/folds";
 import { prefersReducedMotion } from "@/lib/motion";
 import { useNotesStore } from "@/store/notes";
 
@@ -13,7 +13,8 @@ export const REVEAL_GIVE_UP_MS = 5000;
 export const FLASH_MS = 1600;
 
 export interface RevealOptions {
-  /** Called once when the block is in a folded part (`data-folded`). */
+  /** Called once when the block is under a fold (it, or a block it is
+   * nested in, is `data-folded`). */
   unfold?: (blockId: string) => void;
   /** Stops waiting (the promise resolves false). */
   signal?: AbortSignal;
@@ -31,8 +32,8 @@ export function revealBlock(root: HTMLElement, blockId: string, opts: RevealOpti
   const tryReveal = (): boolean => {
     const el = root.querySelector<HTMLElement>(blockSelector(blockId));
     if (!el) return false;
-    if (el.getAttribute("data-folded") === "true" && unfold) {
-      // Wait for the part to open: a folded block has no place to scroll to.
+    if (el.closest('[data-folded="true"]') && unfold) {
+      // Wait for the fold to open: a folded block has no place to scroll to.
       if (!unfolded) {
         unfolded = true;
         unfold(blockId);
@@ -135,13 +136,12 @@ export function isRinged(blockId: string): boolean {
   return rings.has(blockId);
 }
 
-/** An `unfold` for note `noteId`: opens the folded part holding a block. */
+/** An `unfold` for note `noteId`: opens every fold hiding a block. */
 export function unfoldInNote(noteId: number): (blockId: string) => void {
   return (blockId) => {
     const store = useNotesStore.getState();
-    const part = partOf(store.notes[noteId]?.blocks ?? [], blockId);
-    if (part?.dividerId && (store.folded[noteId] ?? []).includes(part.dividerId)) {
-      store.toggleFold(noteId, part.dividerId);
-    }
+    const folded = store.folded[noteId] ?? [];
+    const hiding = foldersHiding(treeFromRows(store.notes[noteId]?.blocks ?? []), blockId, new Set(folded));
+    if (hiding.length) store.setFolded(noteId, folded.filter((id) => !hiding.includes(id)));
   };
 }
