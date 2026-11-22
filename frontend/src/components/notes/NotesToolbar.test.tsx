@@ -95,6 +95,26 @@ describe("NotesToolbar", () => {
     expect(slot.className).toMatch(/transition-\[grid-template-columns,opacity\]/);
   });
 
+  it("Find sits beside Focus and opens the note's find; its tooltip names Ctrl+F", () => {
+    const onFind = vi.fn();
+    render(<Toolbar onFind={onFind} />);
+    const find = screen.getByRole("button", { name: "Find" });
+    expect(find).toHaveTextContent("Find");
+    expect(find.title).toContain("Ctrl+F");
+    // Before Focus and the ⋯ menu.
+    const focus = screen.getByRole("button", { name: "Focus" });
+    expect(find.compareDocumentPosition(focus) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(find);
+    expect(onFind).toHaveBeenCalledTimes(1);
+  });
+
+  it("Find is disabled while no note shows or nothing can find", () => {
+    const { rerender } = render(<Toolbar noteId={null} onFind={() => {}} />);
+    expect(screen.getByRole("button", { name: "Find" })).toBeDisabled();
+    rerender(<Toolbar />);
+    expect(screen.getByRole("button", { name: "Find" })).toBeDisabled();
+  });
+
   it("Focus toggles, starts on the first part when none is chosen, and Esc stops it", () => {
     render(<Toolbar />);
     const focus = screen.getByRole("button", { name: "Focus" });
@@ -190,6 +210,7 @@ describe("NotesToolbar", () => {
     expect(bar.querySelectorAll("button[aria-hidden], button[tabindex='-1']")).toHaveLength(0);
     expect(within(bar).getAllByRole("button", { hidden: true }).map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual([
       "Following §2",
+      "Find",
       "Focus",
       "More",
     ]);

@@ -312,6 +312,8 @@
     "follow": "跟隨閱讀",
     "followingTitle": "筆記會捲動到你正在閱讀的章節。點一下即停止跟隨。",
     "followTitle": "點一下，讓筆記隨你正在閱讀的章節捲動。",
+    "find": "尋找",
+    "findTitle": "在筆記中尋找（{{shortcut}}）",
     "focus": "專注",
     "focusTitle": "專注：淡化筆記的其他部分，以及它們在論文上的標記（按 Esc 停止）",
     "more": "更多",

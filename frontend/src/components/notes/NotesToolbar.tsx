@@ -1,5 +1,6 @@
 /** The notes toolbar, one line under the tabs. Left: Follow ("Following §2" /
- * "Follow reading"). Right: Focus (its label hides in a narrow pane) and the
+ * "Follow reading"). Right: Find (opens the find strip under the toolbar, as
+ * Ctrl+F does), Focus (their labels hide in a narrow pane) and the
  * ⋯ menu with the rarely needed items: the note's details, Export as Markdown
  * or Word, Show table of contents, Table style (three-line or grid, for every
  * table), and Shortcuts (the guide grows from the ⋯ button). */
@@ -15,6 +16,7 @@ import {
   LocateFixed,
   Rows3,
   ScanEye,
+  Search,
   TableOfContents,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -47,6 +49,8 @@ export interface NotesToolbarProps {
   docxReason?: DocxUnavailableReason | null;
   guideOpen: boolean;
   onGuideOpenChange: (open: boolean) => void;
+  /** Opens the note's find (the strip under the toolbar). */
+  onFind?: () => void;
 }
 
 const BUTTON =
@@ -107,6 +111,7 @@ export function NotesToolbar({
   docxReason = null,
   guideOpen,
   onGuideOpenChange,
+  onFind,
 }: NotesToolbarProps) {
   const { t } = useTranslation();
   const followOn = useNotesStore((s) => s.followOn);
@@ -186,6 +191,8 @@ export function NotesToolbar({
   const soon = t("notes:toolbar.comingSoon", "Coming soon");
   const exporting = t("notes:toolbar.exporting", "Exporting…");
   const focusLabel = t("notes:toolbar.focus", "Focus");
+  const findLabel = t("notes:toolbar.find", "Find");
+  const findKey = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘F" : "Ctrl+F";
 
   return (
     <div
@@ -227,6 +234,17 @@ export function NotesToolbar({
         </div>
       </div>
       <span className="flex-1" />
+      <button
+        type="button"
+        aria-label={findLabel}
+        disabled={noteId === null || !onFind}
+        onClick={onFind}
+        title={t("notes:toolbar.findTitle", "Find in the note ({{shortcut}})", { shortcut: findKey })}
+        className={BUTTON}
+      >
+        <Search className="size-3 shrink-0" aria-hidden />
+        <span className="@max-[380px]:hidden">{findLabel}</span>
+      </button>
       <button
         type="button"
         aria-pressed={focusOn}

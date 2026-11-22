@@ -312,6 +312,8 @@
     "follow": "跟随阅读",
     "followingTitle": "笔记会滚动到你正在阅读的章节。点击即停止跟随。",
     "followTitle": "点击后，笔记会随你正在阅读的章节滚动。",
+    "find": "查找",
+    "findTitle": "在笔记中查找（{{shortcut}}）",
     "focus": "专注",
     "focusTitle": "专注：淡化笔记的其他部分，以及它们在论文上的标记（按 Esc 停止）",
     "more": "更多",
