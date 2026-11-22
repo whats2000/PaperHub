@@ -182,6 +182,39 @@ describe("a [[ link chip", () => {
     expect(within(preview).getByRole("button", { name: "Edit display text" })).toBeInTheDocument();
   });
 
+  it("draws inline math in the preview's lines as the editor does, never as raw LaTeX", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/notes/12`, () =>
+        HttpResponse.json({
+          note: { id: 12, target_kind: "paper", target_id: "47", title: "", revision: 1, updated_at: "" },
+          default_title: "LoRA",
+          shared_by: 0,
+          suggestions: [],
+          comments: [],
+          blocks: [
+            blk("m1", {
+              note_id: 12,
+              content: [
+                { type: "text", text: "The update ", styles: {} },
+                { type: "inlineMath", props: { latex: "\\Delta W = BA" } },
+                { type: "text", text: " is low rank", styles: { bold: true } },
+              ] as never,
+              text: "The update \\Delta W = BA is low rank",
+            }),
+          ],
+        }),
+      ),
+    );
+    seed([link()]);
+    mount();
+    await waitFor(() => expect(chip()?.textContent).toBe("LoRA"));
+    const preview = await hoverPreview();
+    expect(preview.querySelector(".katex")).not.toBeNull();
+    expect(preview.textContent).toContain("The update ");
+    expect(preview.textContent).toContain(" is low rank");
+    expect(preview.textContent).not.toContain("\\Delta W = BA is");
+  });
+
   it("Edit display text sets the link's label", async () => {
     note12();
     seed([link()]);

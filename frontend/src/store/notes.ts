@@ -217,8 +217,9 @@ export interface LinkTargetInfo {
   targetId?: number;
   /** A note's display title, a paper's title ("" when it has none). */
   name?: string;
-  /** A note's blocks, in document order. */
-  blocks?: { id: string; type: string; text: string }[];
+  /** A note's blocks, in document order (`content`: their inline runs,
+   * for a preview that draws inline math). */
+  blocks?: { id: string; type: string; text: string; content?: unknown }[];
 }
 
 /** A loaded note as a link target. */
@@ -366,7 +367,7 @@ async function lookUpLinkTarget(kind: "note" | "paper", id: number): Promise<Lin
       noteKind: d.note.target_kind,
       targetId: Number(d.note.target_id),
       name: d.note.title || d.default_title || "",
-      blocks: d.blocks.map((b) => ({ id: b.id, type: b.type, text: b.text })),
+      blocks: d.blocks.map((b) => ({ id: b.id, type: b.type, text: b.text, content: b.content })),
     };
   } catch (err) {
     return { status: isGone(err) ? "dead" : "failed", checkedAt: Date.now() };

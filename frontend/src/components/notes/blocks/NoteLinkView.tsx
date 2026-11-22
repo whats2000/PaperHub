@@ -12,7 +12,10 @@ import type { TFunction } from "i18next";
 import { toast } from "sonner";
 import { ArrowUpRight, FileText, Lightbulb, MessageSquare, NotebookPen, Pencil } from "lucide-react";
 
+import "katex/dist/katex.min.css";
+
 import { Popover, PopoverContent } from "@/components/ui/popover";
+import { renderInlineMath } from "@/lib/displayMath";
 import { openNoteLink } from "@/lib/notes/openNoteLink";
 import { cn } from "@/lib/utils";
 import { linkTargetKey, noteTargetInfo, useNotesStore, type LinkTargetInfo } from "@/store/notes";
@@ -25,6 +28,49 @@ function noteAlive(noteId: number): boolean {
   const st = useNotesStore.getState();
   const loaded = st.notes[noteId];
   return loaded ? !loaded.note.deleted_at : st.linkTargets[linkTargetKey("note", noteId)]?.status === "ok";
+}
+
+type PreviewBlock = { text: string; content?: unknown };
+
+/** A run's words as the preview shows them (an inline node: its label). */
+function runWords(run: Record<string, unknown>): string {
+  if (typeof run.text === "string") return run.text;
+  const p = (run.props ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  if (run.type === "noteLink") return str(p.label) || str(p.name);
+  if (run.type === "mention") return str(p.label);
+  if (run.type === "markCite") return str(p.text);
+  return "";
+}
+
+/** The inline runs of a preview line: text as text, inline math drawn by
+ * KaTeX as the editor draws it; a block without runs (a table) shows its
+ * text. */
+function PreviewRuns({ content }: { content: unknown[] }) {
+  return (
+    <>
+      {content.map((raw, i) => {
+        if (!raw || typeof raw !== "object") return null;
+        const run = raw as Record<string, unknown>;
+        if (Array.isArray(run.content)) return <PreviewRuns key={i} content={run.content} />;
+        if (run.type === "inlineMath") {
+          const latex = (run.props as { latex?: unknown } | undefined)?.latex;
+          return (
+            <span
+              key={i}
+              data-preview-math=""
+              dangerouslySetInnerHTML={{ __html: renderInlineMath(typeof latex === "string" ? latex : "") }}
+            />
+          );
+        }
+        return <span key={i}>{runWords(run)}</span>;
+      })}
+    </>
+  );
+}
+
+function PreviewLine({ block }: { block: PreviewBlock }) {
+  return Array.isArray(block.content) ? <PreviewRuns content={block.content} /> : <>{block.text.trim()}</>;
 }
 
 /** Hover: how long before the preview opens, and before it closes. */
@@ -199,14 +245,13 @@ export function NoteLinkView({
 
   // The first lines where the link lands (below the heading, for one).
   const start = heading ? blocks.indexOf(heading) + 1 : 0;
-  const lines = isNote
+  const lines: PreviewBlock[] = isNote
     ? blocks
         .slice(start)
-        .map((b) => b.text.trim())
-        .filter(Boolean)
+        .filter((b) => b.text.trim())
         .slice(0, PREVIEW_LINES)
     : sectionKey
-      ? [sectionLabel(sectionKey)]
+      ? [{ text: sectionLabel(sectionKey) }]
       : [];
   const goneText = !isNote
     ? t("notes:link.paperGone", "This paper is no longer in your library")
@@ -353,7 +398,7 @@ export function NoteLinkView({
             <div className="space-y-0.5 text-[12.5px] leading-normal text-foreground/80">
               {lines.map((line, i) => (
                 <p key={i} className="m-0 line-clamp-2">
-                  {line}
+                  <PreviewLine block={line} />
                 </p>
               ))}
             </div>
