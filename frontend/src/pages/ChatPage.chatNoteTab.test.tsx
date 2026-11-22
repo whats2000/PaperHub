@@ -257,3 +257,33 @@ describe("the pane's tab choice and loading", () => {
     expect(await screen.findByText("note 12")).toBeInTheDocument();
   });
 });
+
+describe("a failed lookup belongs to its chat", () => {
+  it("shows the empty state for the failed chat, but not the loading flash of the next one", async () => {
+    useCanvasStore.setState({ activePaperId: null });
+    server.use(http.get(`${API_BASE_URL}/notes/target`, () => new HttpResponse(null, { status: 500 })));
+    render(<ChatPage />);
+    await openNotes();
+    expect(await screen.findByText("Open a paper or start a chat to take notes.")).toBeInTheDocument();
+    // The next chat's note is slow: loading, never the old empty state.
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    server.use(
+      http.get(`${API_BASE_URL}/notes/target`, async () => {
+        await gate;
+        return HttpResponse.json({ note: null, blocks: [], shared_by: 0 });
+      }),
+    );
+    act(() => {
+      const other = useChatStore.getState().newSession();
+      useChatStore.getState().patchSessionBackendId(other, 43);
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(screen.queryByText("Open a paper or start a chat to take notes.")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading the note");
+    release();
+    expect(await screen.findByText("Open a paper or start a chat to take notes.")).toBeInTheDocument();
+  });
+});

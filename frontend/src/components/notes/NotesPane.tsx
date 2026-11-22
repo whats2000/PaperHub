@@ -133,7 +133,9 @@ export function NotesPane({ onClose }: Props) {
 
   // A chat's note started while the chat was local (only on this page)
   // keeps showing after the chat reaches the server.
-  const [probeFailed, setProbeFailed] = useState(false);
+  // The chat whose note lookup failed (a failure belongs to its chat).
+  const [probeFailedFor, setProbeFailedFor] = useState<number | null>(null);
+  const probeFailed = probeFailedFor !== null && probeFailedFor === activeSessionId;
   const hasDraft = useNotesStore((s) => draftKey !== null && s.byTarget[draftKey] !== undefined);
   const localChat = target?.kind === "chat" && backendSessionId === null;
 
@@ -146,7 +148,7 @@ export function NotesPane({ onClose }: Props) {
       return;
     }
     if (hasDraft) return;
-    loadTarget("session", backendSessionId).catch(() => setProbeFailed(true));
+    loadTarget("session", backendSessionId).catch(() => setProbeFailedFor(activeSessionId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId, backendSessionId, session === null, target?.kind, hasDraft, loadTarget, openChatDraft]);
 
