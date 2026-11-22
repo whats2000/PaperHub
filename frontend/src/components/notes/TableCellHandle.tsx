@@ -313,6 +313,7 @@ export function TableCellHandle({
         merge: canMerge(state),
         split: canSplit(state),
         filled: filledCells(state).length,
+        rows: sel ? TableMap.get(sel.table).height : 0,
         align: selectedAlignment(state),
         blockId: sel?.blockId ?? null,
         rect: sel ? `${sel.rect.r0},${sel.rect.c0},${sel.rect.r1},${sel.rect.c1}` : null,
@@ -433,6 +434,9 @@ export function TableCellHandle({
         key: "delete",
         icon: <Trash2 className={ICON} />,
         label: t("notes:table.deleteRows", "Delete rows"),
+        // As the demo: a table keeps its header row and one row of its own
+        // (the whole table goes from its block menu).
+        disabled: can.rows <= 2,
       },
     ],
   ];

@@ -277,7 +277,8 @@ describe("the cell menu, from the handle", () => {
     act(() => {
       fireEvent.keyDown(document.activeElement!, { key: "End" });
     });
-    expect(document.activeElement).toBe(item(menu, "Delete rows"));
+    // Delete rows is greyed in a 2-row table: End stops on Align right.
+    expect(document.activeElement).toBe(item(menu, "Align right"));
     act(() => {
       fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     });
@@ -381,6 +382,32 @@ describe("the cell menu, from the handle", () => {
     const menu = await screen.findByRole("menu", HIDDEN);
     expect(item(menu, "Split cell")).not.toHaveAttribute("aria-disabled");
     expect(item(menu, "Merge cells")).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("Delete rows is greyed when the table has 2 rows or fewer (the header and one row stay)", async () => {
+    const pm = mount([["a", "b"], ["1", "2"]]);
+    caretIn(pm, 1, 0);
+    await waitFor(() => expect(handle()).toHaveAttribute("data-on"));
+    act(() => {
+      fireEvent.click(handle(), { detail: 1 });
+    });
+    const menu = await screen.findByRole("menu", HIDDEN);
+    expect(item(menu, "Delete rows")).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("Delete rows is on with 3 rows", async () => {
+    const pm = mount([["a", "b"], ["1", "2"], ["x", "y"]]);
+    caretIn(pm, 1, 0);
+    await waitFor(() => expect(handle()).toHaveAttribute("data-on"));
+    act(() => {
+      fireEvent.click(handle(), { detail: 1 });
+    });
+    const menu = await screen.findByRole("menu", HIDDEN);
+    expect(item(menu, "Delete rows")).not.toHaveAttribute("aria-disabled");
+    act(() => {
+      fireEvent.click(item(menu, "Delete rows"));
+    });
+    expect(pm.querySelectorAll("tr")).toHaveLength(2);
   });
 
   it("merges a selected range from the menu", async () => {
