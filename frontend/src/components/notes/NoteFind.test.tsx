@@ -445,3 +445,56 @@ describe("closing find on a caption or notes match (fix round 1)", () => {
     expect([field.selectionStart, field.selectionEnd]).toEqual([9, 14]);
   });
 });
+
+describe("a find selection is used once (fix round 2)", () => {
+  for (const part of ["notes", "caption"] as const) {
+    it(`after closing find into the ${part} and finishing, a click edits with a plain caret`, async () => {
+      const text = "ORR, objective response";
+      seed([
+        para("p1", "intro"),
+        blk("t", {
+          type: "table",
+          props: { [part]: text },
+          content: {
+            type: "tableContent",
+            columnWidths: [null],
+            headerRows: 1,
+            rows: [{ cells: ["head"] }, { cells: ["a"] }],
+          } as never,
+          text,
+        }),
+      ]);
+      const pm = mount();
+      await screen.findByText("intro");
+      act(() => {
+        ctrlF(pm);
+      });
+      typeQuery("objective");
+      act(() => {
+        fireEvent.keyDown(findBox(), { key: "Escape" });
+      });
+      const name = part === "notes" ? "Table notes" : "Table caption";
+      const field = await waitFor(() => {
+        const el = screen.getByRole<HTMLInputElement>("textbox", { name });
+        expect(document.activeElement).toBe(el);
+        expect(el.selectionEnd! - el.selectionStart!).toBe(9);
+        return el;
+      });
+      act(() => {
+        fireEvent.keyDown(field, { key: "Escape" });
+      });
+      expect(screen.queryByRole("textbox", { name })).toBeNull();
+      const host = document.querySelector(`[data-table-caption='${part}']`)!;
+      act(() => {
+        fireEvent.click(host.querySelector("button")!);
+      });
+      const again = await waitFor(() => {
+        const el = screen.getByRole<HTMLInputElement>("textbox", { name });
+        expect(document.activeElement).toBe(el);
+        return el;
+      });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(again.selectionStart).toBe(again.selectionEnd);
+    });
+  }
+});

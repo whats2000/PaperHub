@@ -109,9 +109,12 @@ function TablePartView({ part, value, number, hits, request, select, onCommit, o
     return () => clearTimeout(timer);
   }, [ghost]);
 
+  // A click opens it with a plain caret: a find match's selection is used
+  // only by the request that carried it.
   const open = () => {
     setDraft(value);
     setEditing(true);
+    setFocusAsk((f) => ({ n: f.n + 1, select: null }));
   };
 
   // A request ("Add caption" / "Add notes", or find closing on a match
