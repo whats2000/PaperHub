@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { NodeSelection } from "@tiptap/pm/state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ATOM_CARET_TYPES, atomCaret, setAtomCaret } from "@/components/notes/atomCaret";
@@ -57,6 +58,17 @@ describe("toc block", () => {
     });
     expect(screen.getByRole("button", { name: "Set up" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Setup" })).toBeNull();
+  });
+
+  it("a note that opens on a table of contents does not open with it selected", async () => {
+    const editor = makeEditor([atomCaret], [
+      { id: "toc1", type: "toc" },
+      { id: "a", type: "paragraph", content: "one" },
+    ]);
+    await Promise.resolve();
+    const view = editor._tiptapEditor.view;
+    expect(view.state.selection instanceof NodeSelection).toBe(false);
+    expect(view.dom.querySelector(".ProseMirror-selectednode")).toBeNull();
   });
 
   it("takes no typing: a key at its caret opens a line beside it, and it can be removed", () => {

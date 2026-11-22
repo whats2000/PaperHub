@@ -13,6 +13,7 @@ import {
   NodeSelection,
   Plugin,
   PluginKey,
+  Selection,
   TextSelection,
   type EditorState,
 } from "@tiptap/pm/state";
@@ -235,6 +236,15 @@ function onKey(view: EditorView, event: KeyboardEvent): boolean {
   }
 }
 
+/** An opening node selection (the editor not focused, no caret beside the
+ * block) moved to the document's first text position. */
+function unselectOpeningAtom(view: EditorView) {
+  const { selection } = view.state;
+  if (!(selection instanceof NodeSelection) || view.hasFocus() || atomCaretKey.getState(view.state)) return;
+  const text = Selection.findFrom(view.state.doc.resolve(0), 1, true);
+  if (text) view.dispatch(view.state.tr.setSelection(text).setMeta("addToHistory", false));
+}
+
 export const atomCaret = createExtension({
   key: "paperhubAtomCaret",
   prosemirrorPlugins: [
@@ -259,7 +269,20 @@ export const atomCaret = createExtension({
       view: (view) => {
         const onClick = (event: MouseEvent) => onBlockClick(view, event);
         view.dom.addEventListener("click", onClick);
-        return { destroy: () => view.dom.removeEventListener("click", onClick) };
+        let live = true;
+        // A note whose first block takes no text (a table of contents)
+        // opens with that block node-selected (ProseMirror's start of the
+        // document) and drawn framed as if the user had picked it: opening
+        // a note selects nothing, so the selection moves to the first text.
+        queueMicrotask(() => {
+          if (live) unselectOpeningAtom(view);
+        });
+        return {
+          destroy: () => {
+            live = false;
+            view.dom.removeEventListener("click", onClick);
+          },
+        };
       },
       props: {
         decorations: (state) => {
