@@ -11,14 +11,13 @@ import { useTranslation } from "react-i18next";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { prefersReducedMotion } from "@/lib/motion";
+import { PAPER_TAB_LEAVE_MS } from "@/lib/paperTabs";
 import { cn } from "@/lib/utils";
 
 import "./paperTabs.css";
 
 /** Solid tabs shown before the rest go into the "…" menu. */
 const MAX_VISIBLE_PAPER_TABS = 3;
-/** How long a closed tab takes to shrink away. */
-const LEAVE_MS = 200;
 
 export interface PaperTabItem {
   id: number;
@@ -94,7 +93,7 @@ function usePresence(tabs: Tab[], resetKey: unknown) {
     if (!leaving) return;
     const timer = setTimeout(
       () => setState((s) => ({ ...s, shown: s.shown.filter((x) => !x.leaving) })),
-      LEAVE_MS,
+      PAPER_TAB_LEAVE_MS,
     );
     return () => clearTimeout(timer);
   }, [leaving, state.sig]);

@@ -9,6 +9,10 @@ import { attachFromLibrary, listSessionReferences, toggleReference } from "@/lib
 import { useChatStore } from "@/store/chat";
 import type { ReferenceItem } from "@/types/domain";
 
+/** How long a closed or replaced paper tab takes to shrink away; a pane
+ * shows the neighbouring paper after it. */
+export const PAPER_TAB_LEAVE_MS = 200;
+
 /** The paper a pane lands on when `id`'s tab closes: the next tab, else
  * the one before, else none. */
 export function neighbourOf(order: number[], id: number): number | null {

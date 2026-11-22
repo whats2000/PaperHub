@@ -33,8 +33,9 @@ import {
 } from "@/lib/withBaseHref";
 import { resolveNeedle } from "@/lib/resolveNeedle";
 import { cn } from "@/lib/utils";
+import { prefersReducedMotion } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
-import { addPaperToChat, neighbourOf, roveTabs } from "@/lib/paperTabs";
+import { addPaperToChat, neighbourOf, PAPER_TAB_LEAVE_MS, roveTabs } from "@/lib/paperTabs";
 import { PaperTabs } from "@/components/canvas/PaperTabs";
 import type { ClosedTab, OutsideTab } from "@/store/canvas";
 import { PaperLoading } from "@/components/canvas/PaperLoading";
@@ -316,9 +317,14 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
   const outsideIds = outsideTabs
     .map((o) => o.paperId)
     .filter((pid) => !refIds.includes(pid));
+  // A dashed tab just closed stays on screen while its tab shrinks away;
+  // the neighbouring paper shows after (see `land`).
+  const [closingId, setClosingId] = useState<number | null>(null);
   const validDisplayedId =
     displayedPaperId !== null &&
-    (allRefIds.includes(displayedPaperId) || outsideIds.includes(displayedPaperId))
+    (allRefIds.includes(displayedPaperId) ||
+      outsideIds.includes(displayedPaperId) ||
+      displayedPaperId === closingId)
       ? displayedPaperId
       : null;
   // A library paper's name, looked up once (the notes pane's tab reads it too).
@@ -525,11 +531,11 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
     }));
   // The shown paper switched off while on screen takes a dashed tab too.
   useEffect(() => {
-    if (standalone || activeSessionId === null || effectivePaperId === null) return;
+    if (standalone || activeSessionId === null || effectivePaperId === null || closingId !== null) return;
     if (refIds.includes(effectivePaperId) || outsideIds.includes(effectivePaperId)) return;
     useCanvasStore.getState().showOutside(activeSessionId, effectivePaperId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [standalone, activeSessionId, effectivePaperId, refIdsKey, outsideIds.join(",")]);
+  }, [standalone, activeSessionId, effectivePaperId, refIdsKey, outsideIds.join(","), closingId]);
 
   // Resolve a clicked citation → its paper + highlight target. Keyed on
   // requestNonce so the same chunk re-clicked re-resolves; consumes the request
@@ -785,10 +791,30 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
 
   // A dashed tab closed (here or in the notes pane) while this reader shows
   // it: land on the neighbouring paper.
+  // The neighbouring paper shows once the closed tab has shrunk away (the
+  // switch is heavy: switching during the shrink made it stall), sliding
+  // in from the side it sat on.
+  const landTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(landTimer.current), []);
   const land = (closed: ClosedTab) => {
     if (closed.chat !== activeSessionId || closed.paperId !== effectivePaperId) return;
-    if (closed.neighbour !== null) handleTabClick(closed.neighbour);
-    else setDisplayedPaperId(null);
+    const order = [...refIds, ...outsideIds];
+    const to = closed.neighbour;
+    const dir = to !== null && order.indexOf(to) < order.indexOf(closed.paperId) ? -1 : 1;
+    const go = () => {
+      setClosingId(null);
+      setDisplayedPaperId(to);
+      setSlide(to === null ? null : { pid: to, dir });
+      setSlideTrack(false);
+      setActiveChunk(null);
+      setFigureTarget(null);
+      setRegionTarget(null);
+      setStale(false);
+    };
+    clearTimeout(landTimer.current);
+    if (prefersReducedMotion()) return go();
+    setClosingId(closed.paperId);
+    landTimer.current = setTimeout(go, PAPER_TAB_LEAVE_MS);
   };
   useEffect(() => {
     latest.current = { slideTo, land };

@@ -4,7 +4,8 @@ import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { REVEAL_GIVE_UP_MS, revealBlock, unfoldInNote } from "@/lib/notes/reveal";
-import { addPaperToChat, neighbourOf } from "@/lib/paperTabs";
+import { prefersReducedMotion } from "@/lib/motion";
+import { addPaperToChat, neighbourOf, PAPER_TAB_LEAVE_MS } from "@/lib/paperTabs";
 import { cn } from "@/lib/utils";
 import { useCanvasStore, type OutsideTab } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
@@ -96,15 +97,26 @@ export function NotesPane({ onClose }: Props) {
   }
   // A dashed tab closed (here or in the reader) while its note is on
   // screen: the pane lands on the neighbouring paper.
+  // It lands once the closed tab has shrunk away (as the reader does).
   const closedTab = useCanvasStore((s) => s.closedTab);
   const [seenClosed, setSeenClosed] = useState(closedTab?.n ?? 0);
+  const [landing, setLanding] = useState<{ from: number; to: number | null } | null>(null);
   if (closedTab && closedTab.n !== seenClosed) {
     setSeenClosed(closedTab.n);
     if (closedTab.chat === activeSessionId && paperId === closedTab.paperId) {
-      const neighbour = closedTab.neighbour;
-      setPaper((p) => ({ ...p, id: neighbour }));
+      const to = closedTab.neighbour;
+      if (prefersReducedMotion()) setPaper((p) => ({ ...p, id: to }));
+      else setLanding({ from: closedTab.paperId, to });
     }
   }
+  useEffect(() => {
+    if (landing === null) return;
+    const timer = setTimeout(() => {
+      setPaper((p) => ({ ...p, id: landing.to }));
+      setLanding(null);
+    }, PAPER_TAB_LEAVE_MS);
+    return () => clearTimeout(timer);
+  }, [landing]);
   // "Open in notes" (the agent's change card): the note's tab comes forward.
   const request = useNotesPaneStore((s) => s.request);
   const consumeRequest = useNotesPaneStore((s) => s.consumeRequest);
@@ -207,9 +219,10 @@ export function NotesPane({ onClose }: Props) {
   // paper, a note opened from elsewhere) takes a dashed tab, as in the reader.
   useEffect(() => {
     if (activeSessionId === null || tab !== "paper" || paperId === null || enabledKey === null) return;
+    if (landing !== null) return; // its tab just closed
     if (enabledKey.split(",").includes(String(paperId)) || outsideTabs.some((o) => o.paperId === paperId)) return;
     useCanvasStore.getState().showOutside(activeSessionId, paperId);
-  }, [activeSessionId, tab, paperId, enabledKey, outsideTabs]);
+  }, [activeSessionId, tab, paperId, enabledKey, outsideTabs, landing]);
   const selectPaperTab = (id: number) => {
     setChosen("paper");
     setPaper((p) => ({ ...p, id }));
@@ -290,11 +303,17 @@ export function NotesPane({ onClose }: Props) {
   }, [targetKey, hasDraft, localChat, loadTarget, openChatDraft]);
 
   // The note slides in from the side of the tab picked (This chat is last).
-  const tabPos = tab === "chat" ? tabOrder.length : paperId === null ? -1 : tabOrder.indexOf(paperId);
-  const [slideFrom, setSlideFrom] = useState({ key: targetKey, session: activeSessionId, pos: tabPos, dir: 0 });
+  // Positions are taken in the tabs as they were (a closed tab's
+  // neighbour, a new tab at the end).
+  const order = [...tabOrder.map(String), "chat"];
+  const targetName = tab === "chat" ? "chat" : String(paperId);
+  const [slideFrom, setSlideFrom] = useState({ key: targetKey, session: activeSessionId, name: targetName, order, dir: 0 });
   if (slideFrom.key !== targetKey) {
-    const same = slideFrom.session === activeSessionId && tabPos >= 0 && slideFrom.pos >= 0;
-    setSlideFrom({ key: targetKey, session: activeSessionId, pos: tabPos, dir: same ? Math.sign(tabPos - slideFrom.pos) : 0 });
+    const from = slideFrom.order.indexOf(slideFrom.name);
+    const at = slideFrom.order.indexOf(targetName);
+    const to = at >= 0 ? at : slideFrom.order.length - 1;
+    const dir = slideFrom.session === activeSessionId && from >= 0 ? Math.sign(to - from) : 0;
+    setSlideFrom({ key: targetKey, session: activeSessionId, name: targetName, order, dir });
   }
 
   const current = loaded.key === targetKey ? loaded : null;
