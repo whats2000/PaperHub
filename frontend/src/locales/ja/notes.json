@@ -516,6 +516,7 @@
     "es": "スペイン語"
   },
   "noteCard": {
+    "missing": "このマークはもうノートにありません。不要ならここで削除できます。",
     "label": "この箇所のノート",
     "where": "› {{section}} · ノート {{index}}/{{count}}",
     "whereOne": "› {{section}}",

@@ -24,3 +24,10 @@ export function noteBlockOfMark(blocks: readonly NoteBlock[] | undefined, mark: 
   if (!blocks || blocks.some((b) => b.id === mark.block_id)) return mark.block_id;
   return citeBlockOf(blocks, mark.id) ?? mark.block_id;
 }
+
+/** Whether a mark has a place in its note: its reference block, or an
+ * inline citation of it. A mark with neither cannot be shown there (its
+ * card can still delete it). */
+export function markInNote(blocks: readonly NoteBlock[], mark: Pick<Mark, "id" | "block_id">): boolean {
+  return blocks.some((b) => b.id === mark.block_id) || citeBlockOf(blocks, mark.id) !== null;
+}

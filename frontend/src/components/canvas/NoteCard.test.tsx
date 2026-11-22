@@ -593,6 +593,18 @@ describe("the note card, fix round 1", () => {
   });
 });
 
+describe("a mark with no place in its note", () => {
+  it("its card says so instead of loading forever, and Delete removes the mark", async () => {
+    seed([mark("mk_9", "b_gone")]);
+    anchorTop = { mk_9: 200 };
+    const card = await openCard("mk_9");
+    expect(within(card).getByTestId("note-card-missing")).toHaveTextContent("This mark isn't in your note any more");
+    expect(within(card).queryByText("Loading the note…")).toBeNull();
+    fireEvent.click(within(card).getByRole("button", { name: "Delete this mark" }));
+    await waitFor(() => expect(deleteMark).toHaveBeenCalledWith("mk_9", expect.anything()));
+  });
+});
+
 describe("a click on the paper", () => {
   it("with the pane visible, waits for the paper's marks to load, then opens the block", async () => {
     seed([]);
@@ -607,6 +619,18 @@ describe("a click on the paper", () => {
     activateMark(3, "mk_1");
     await waitFor(() => expect(openAt).toHaveBeenCalledWith({ kind: "paper", id: 3, noteId: 7, blockId: "q1" }));
     expect(loadPaper).toHaveBeenCalledWith(3);
+  });
+
+  it("with the pane visible, a mark with no place in its note opens its card (it can be deleted there)", () => {
+    // mk_9's block is not in the note and no inline citation names it
+    // (2026-11-22: a chip taken out left such a mark on the paper).
+    seed([mark("mk_9", "b_gone")]);
+    const openAt = vi.fn();
+    useNotesPaneStore.setState({ open: true, openAt });
+    useCanvasStore.setState({ width: 900 });
+    activateMark(3, "mk_9");
+    expect(openAt).not.toHaveBeenCalled();
+    expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mk_9" });
   });
 
   it("on a 文 marker with the pane hidden, shows the mark in the translation first, then opens its card", () => {

@@ -20,7 +20,7 @@ import { partsOfNote, type Part } from "@/components/notes/parts";
 import { usePresence } from "@/hooks/usePresence";
 import { CARD_EDGE, NOTE_MIN_SIDE_PX, placeCard, type CardPlacement } from "@/lib/cardPlacement";
 import { sameLanguage } from "@/lib/language";
-import { noteBlockOfMark } from "@/lib/marks/cites";
+import { markInNote, noteBlockOfMark } from "@/lib/marks/cites";
 import { prefersReducedMotion } from "@/lib/motion";
 import { readerTrackSliding } from "@/lib/readerTrack";
 import { truncatedTitle } from "@/lib/truncatedTitle";
@@ -562,7 +562,13 @@ function NoteCardBody({ target, open, state }: { target: NoteCardTarget; open: b
             </div>
           </div>
         )}
-        {!note || !section || !current || noteId === undefined ? (
+        {note && mark && !markInNote(note.blocks, mark) ? (
+          // No place in its note (its block and every citation of it gone):
+          // nothing to edit here; the header's Delete still removes it.
+          <p data-testid="note-card-missing" role="status" className="px-3 py-1.5 text-xs text-muted-foreground">
+            {t("noteCard.missing", "This mark isn't in your note any more. Delete it here if you no longer need it.")}
+          </p>
+        ) : !note || !section || !current || noteId === undefined ? (
           <p role="status" className="px-3 py-1.5 text-xs text-muted-foreground">
             {t("loading", "Loading the note…")}
           </p>

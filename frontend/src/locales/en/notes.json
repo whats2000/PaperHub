@@ -516,6 +516,7 @@
     "es": "Español"
   },
   "noteCard": {
+    "missing": "This mark isn't in your note any more. Delete it here if you no longer need it.",
     "label": "Note for this passage",
     "where": "› {{section}} · note {{index}} of {{count}}",
     "whereOne": "› {{section}}",

@@ -516,6 +516,7 @@
     "es": "西班牙文"
   },
   "noteCard": {
+    "missing": "這個標記已不在你的筆記裡。若不再需要，可在這裡刪除。",
     "label": "這段文字的筆記",
     "where": "› {{section}} · 第 {{index}} 則，共 {{count}} 則",
     "whereOne": "› {{section}}",

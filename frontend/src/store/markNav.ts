@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { create } from "zustand";
 
 import i18n from "@/lib/i18n";
-import { noteBlockOfMark } from "@/lib/marks/cites";
+import { markInNote, noteBlockOfMark } from "@/lib/marks/cites";
 
 import { useCanvasStore } from "@/store/canvas";
 import { useMarksStore } from "@/store/marks";
@@ -186,6 +186,12 @@ export function activateMark(paperId: number, markId: string): void {
   const open = (mark: Mark | null) => {
     if (mark?.note_id === undefined) return false;
     const blocks = useNotesStore.getState().notes[mark.note_id]?.blocks;
+    // No place in its note (neither its block nor a citation of it): the
+    // pane has nothing to show; its card can still delete it.
+    if (blocks && !markInNote(blocks, mark)) {
+      useMarkNavStore.getState().openCard(paperId, markId);
+      return true;
+    }
     useNotesPaneStore
       .getState()
       .openAt({ kind: "paper", id: paperId, noteId: mark.note_id, blockId: noteBlockOfMark(blocks, mark) });
