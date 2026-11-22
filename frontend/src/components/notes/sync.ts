@@ -53,8 +53,8 @@ function decodeProps(type: string, props: Record<string, unknown>): Record<strin
   for (const [k, v] of Object.entries(props)) {
     if (type === "section" && k === "sectionKey") continue;
     if (MARK_TYPES.has(type) && k in MARK_OPTIONAL_DEFAULTS && MARK_OPTIONAL_DEFAULTS[k] === v) continue;
-    // A table with no caption (or no notes) stores none.
-    if (type === "table" && (k === "caption" || k === "notes") && v === "") continue;
+    // A table with no caption (or no notes, or no lines of its own) stores none.
+    if (type === "table" && (k === "caption" || k === "notes" || k === "borders") && v === "") continue;
     if (JSON_PROPS.has(k) && typeof v === "string") {
       try {
         out[k] = JSON.parse(v) as unknown;

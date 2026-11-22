@@ -15,6 +15,9 @@ import type { ApplyResult, NoteBlock, NoteOpsBody, TableContent } from "@/types/
 import { cleanPastedTable, notePasteHandler, pickAlignments, tableClean, tableKeys } from "./tableKeys";
 import { createCaptionHosts, partRequests, tableCaptions } from "./tableCaptions";
 import { shrinkAway, tableMotion } from "./tableMotion";
+import { tableBorderView } from "./tableBorderView";
+import { dumpBorders, parseBorders, presetLines } from "./tableBorders";
+import { opBlock, toEditorBlocks } from "./sync";
 import { cleanupEditors, makeEditor, press, type AnyEditor } from "./testEditor";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }) }));
@@ -292,27 +295,12 @@ describe("tables in the note editor", () => {
     expect(rows[1]!.querySelectorAll("th")).toHaveLength(0);
   });
 
-  it("the editor root carries the table style, and follows a switch", () => {
-    seed([seededTable]);
-    useNotesStore.setState({ tableStyle: "threeLine" });
-    mountEditor();
-    const root = screen.getByTestId("note-editor");
-    expect(root).toHaveAttribute("data-table-style", "threeLine");
-    act(() => {
-      useNotesStore.setState({ tableStyle: "grid" });
-    });
-    expect(root).toHaveAttribute("data-table-style", "grid");
-    act(() => {
-      useNotesStore.setState({ tableStyle: "threeLine" });
-    });
-  });
-
-  it("three-line rules are mixed against the surface the table sits on", () => {
+  it("table rules and guides are mixed against the surface the table sits on", () => {
     // Opaque rules (a translucent one darkens the joints), mixed with the
     // surface each editor sits on: the pane (card), the sticky note card,
     // else the page background.
     const decl = (name: string) => new RegExp(`${name}:\\s*color-mix\\(([^;]*)\\);`).exec(indexCss)?.[1] ?? "";
-    for (const v of ["--note-table-rule", "--note-table-faint"]) {
+    for (const v of ["--note-table-rule", "--note-table-guide"]) {
       expect(decl(v)).toContain("var(--note-table-surface, var(--background))");
       expect(decl(v)).not.toContain("transparent");
     }
@@ -1011,5 +999,178 @@ describe("caption hosts and part requests (fix round 1)", () => {
     expect(document.activeElement).toBe(fields[0]);
     // The other editor never opened its caption (no empty caption written).
     expect(useNotesStore.getState().notes[7]!.blocks.find((x) => x.id === "t")!.props).toEqual({});
+  });
+});
+
+// ------------------------------------------------- each table's own lines (H5b.1)
+
+const cellOf = (text: string) => ({ type: "tableCell" as const, props: {}, content: text ? [{ type: "text", text, styles: {} }] : [] });
+
+describe("table borders drawn from the table's lines", () => {
+  const plainTable = (rows: number, cols: number, borders = "", id = "t"): unknown[] => [
+    {
+      id,
+      type: "table",
+      props: borders ? { borders } : {},
+      content: {
+        type: "tableContent",
+        columnWidths: Array.from({ length: cols }, () => null),
+        headerRows: 1,
+        rows: Array.from({ length: rows }, (_, r) => ({ cells: Array.from({ length: cols }, (_, c) => `r${r}c${c}`) })),
+      },
+    },
+    { id: `${id}-after`, type: "paragraph", content: "after" },
+  ];
+  const cells = (editor: AnyEditor) =>
+    [...editor._tiptapEditor.view.dom.querySelectorAll("tr")].map((tr) => [...tr.querySelectorAll<HTMLElement>("th, td")]);
+  const bordersProp = (editor: AnyEditor) =>
+    parseBorders((editor.document.find((b) => b.type === "table")?.props as Record<string, unknown>).borders);
+
+  it("draws a table without lines as Paper, and loading it sends nothing", () => {
+    const stored = blk("t", {
+      type: "table",
+      content: {
+        type: "tableContent",
+        columnWidths: [null, null],
+        headerRows: 1,
+        rows: [{ cells: ["a", "b"] }, { cells: ["1", "2"] }, { cells: ["3", "4"] }],
+      },
+    });
+    const editor = makeEditor([tableBorderView], toEditorBlocks([stored]));
+    const grid = cells(editor);
+    expect(grid[0]![0]!.dataset.bt).toBe("2");
+    expect(grid[0]![0]!.dataset.bb).toBe("1");
+    expect(grid[2]![1]!.dataset.bb).toBe("2");
+    expect(grid[1]![0]!.dataset.bl).toBe("0");
+    expect(grid[1]![0]!.dataset.bb).toBe("0");
+    // A 0 edge is a dashed guide while editing.
+    expect(indexCss).toMatch(/\[data-bt="0"\][^{]*\{[^}]*dashed var\(--note-table-guide\)/);
+    // Its lines stay unset: nothing is sent for them (the "no op churn" test
+    // below mounts the whole editor).
+    expect(opBlock(editor.document[0] as never).props).toEqual({});
+  });
+
+  it("Tab in the last cell keeps the end rule under the new row", () => {
+    const custom = dumpBorders({ preset: "paper", h: ["22", "11", "22"], v: ["202", "202"] });
+    const editor = makeEditor([tableBorderView, tableKeys], plainTable(2, 2, custom));
+    caretInCell(editor, 1, 1);
+    press(editor, { key: "Tab" });
+    const grid = cells(editor);
+    expect(grid).toHaveLength(3);
+    expect(grid[2]![0]!.dataset.bb).toBe("2");
+    expect(grid[1]![0]!.dataset.bb).not.toBe("2");
+    expect(bordersProp(editor)?.v).toEqual(["202", "202", "202"]);
+  });
+
+  it("Tab past a last row holding a merged cell keeps the end rule at the bottom", () => {
+    const content = {
+      type: "tableContent",
+      columnWidths: [null, null],
+      headerRows: 1,
+      rows: [
+        { cells: ["h1", "h2"] },
+        { cells: [{ type: "tableCell", props: { rowspan: 2 }, content: "m" }, "x"] },
+        { cells: ["y"] },
+      ],
+    };
+    const lines = { preset: "paper" as const, h: ["22", "11", "00", "22"], v: ["020", "020", "020"] };
+    const editor = makeEditor([tableBorderView, tableKeys], [
+      { id: "t", type: "table", props: { borders: dumpBorders(lines) }, content },
+      { id: "after", type: "paragraph", content: "after" },
+    ]);
+    caretInCell(editor, 2, 0);
+    press(editor, { key: "Tab" });
+    const b = bordersProp(editor)!;
+    expect(b.v).toHaveLength(4);
+    expect(b.h[4]).toBe("22");
+    expect(b.h[3]).not.toBe("22");
+  });
+
+  it("inserting rows and columns keeps the lines' shape and follows the rules", () => {
+    const custom = dumpBorders({ preset: "paper", h: ["22", "11", "02", "22"], v: ["000", "010", "010"] });
+    const editor = makeEditor([tableBorderView], plainTable(3, 2, custom));
+    const t = () => tableOf(editor)!;
+    // Insert above row 1 (as the row menu does: a new row in the content).
+    editor.updateBlock("t", {
+      type: "table",
+      content: { ...t(), rows: [t().rows[0]!, { cells: [cellOf(""), cellOf("")] }, ...t().rows.slice(1)] },
+    } as never);
+    let b = bordersProp(editor)!;
+    expect(b.h).toHaveLength(5);
+    expect(b.v[1]).toBe("000");
+    // A column at the right edge.
+    editor.updateBlock("t", {
+      type: "table",
+      content: { ...t(), columnWidths: [null, null, null], rows: t().rows.map((r) => ({ cells: [...r.cells, cellOf("")] })) },
+    } as never);
+    b = bordersProp(editor)!;
+    expect(b.h.every((l) => l.length === 3)).toBe(true);
+    expect(b.v.every((l) => l.length === 4)).toBe(true);
+    expect(b.h[0]).toBe("222");
+  });
+
+  it("dragging a row moves its vertical lines with it", () => {
+    const custom = dumpBorders({ preset: "paper", h: ["22", "11", "00", "22"], v: ["000", "010", "202"] });
+    const editor = makeEditor([tableBorderView], plainTable(3, 2, custom));
+    const t = tableOf(editor)!;
+    editor.updateBlock("t", { type: "table", content: { ...t, rows: [t.rows[0]!, t.rows[2]!, t.rows[1]!] } } as never);
+    const b = bordersProp(editor)!;
+    expect(b.v).toEqual(["000", "202", "010"]);
+    expect(b.h).toEqual(["22", "11", "00", "22"]);
+  });
+
+  it("deleting a row that crosses a merged cell keeps the shape and the end rule", () => {
+    const content = {
+      type: "tableContent",
+      columnWidths: [null, null],
+      headerRows: 1,
+      rows: [
+        { cells: ["h1", "h2"] },
+        { cells: [{ type: "tableCell", props: { rowspan: 2 }, content: "m" }, "x"] },
+        { cells: ["y"] },
+        { cells: ["z1", "z2"] },
+      ],
+    };
+    const lines = { preset: "paper" as const, h: ["22", "11", "00", "01", "22"], v: ["000", "020", "020", "000"] };
+    const editor = makeEditor([tableBorderView], [{ id: "t", type: "table", props: { borders: dumpBorders(lines) }, content }]);
+    const t = tableOf(editor)!;
+    const anchor = t.rows[1]!.cells[0]!;
+    const shrunk = {
+      ...t,
+      rows: [t.rows[0]!, { cells: [{ ...anchor, props: { ...anchor.props, rowspan: 1 } }, t.rows[1]!.cells[1]!] }, t.rows[3]!],
+    };
+    expect(() => editor.updateBlock("t", { type: "table", content: shrunk } as never)).not.toThrow();
+    const b = bordersProp(editor)!;
+    expect(b.v).toHaveLength(3);
+    expect(b.h[3]).toBe("22");
+  });
+
+  it("one undo takes back both the row and its lines", () => {
+    const custom = dumpBorders({ preset: "paper", h: ["22", "11", "22"], v: ["202", "202"] });
+    const editor = makeEditor([tableBorderView, tableKeys], plainTable(2, 2, custom));
+    caretInCell(editor, 1, 1);
+    press(editor, { key: "Tab" });
+    expect(tableOf(editor)!.rows).toHaveLength(3);
+    editor.undo();
+    expect(tableOf(editor)!.rows).toHaveLength(2);
+    expect(bordersProp(editor)?.v).toEqual(["202", "202"]);
+  });
+
+  it("edit guides show only while editing, and can be hidden", () => {
+    // Read-only views and the Hide edit guides switch draw no guide.
+    expect(indexCss).toMatch(/\[contenteditable="false"\][^{]*\[data-b[trbl]="0"\]/);
+    expect(indexCss).toMatch(/\[data-guides="off"\][^{]*\[data-b[trbl]="0"\]/);
+    const editor = makeEditor([tableBorderView], plainTable(2, 2));
+    editor.isEditable = false;
+    expect(cells(editor)[0]![0]!.dataset.bt).toBe("2");
+  });
+
+  it("marks each table with its preset; only Notion tints the header", () => {
+    const notion = dumpBorders(presetLines(2, 2, 1, "notion"));
+    const editor = makeEditor([tableBorderView], [...plainTable(2, 2, notion), ...plainTable(2, 2, "", "u")]);
+    const tables = [...editor._tiptapEditor.view.dom.querySelectorAll('[data-content-type="table"]')];
+    expect(tables.map((t) => t.getAttribute("data-table-preset"))).toEqual(["notion", "paper"]);
+    expect(indexCss).toMatch(/\[data-table-preset="notion"\][^{]*th\s*\{[^}]*background/);
+    expect(indexCss).not.toMatch(/data-table-style/);
   });
 });

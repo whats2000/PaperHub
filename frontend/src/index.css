@@ -652,27 +652,12 @@
 .paperhub-notes .tableWrapper[data-clip-right] {
     --note-table-fade-r: 28px;
 }
-.paperhub-notes [data-content-type="table"] th,
-.paperhub-notes [data-content-type="table"] td {
-    border-color: var(--border);
-}
-.paperhub-notes [data-content-type="table"] th {
-    background: color-mix(in oklab, var(--muted-foreground) 9%, transparent);
-    font-weight: 600;
-}
-.paperhub-notes [data-content-type="table"] table,
-.paperhub-notes [data-content-type="table"] th,
-.paperhub-notes [data-content-type="table"] td {
-    transition: border-color 150ms ease-out, background-color 150ms ease-out;
-}
-/* Table style (the notes ⋯ menu; NoteEditor's data-table-style). Three-line,
-   the default, draws a table as a paper does (booktabs): a heavy rule above
-   the header, a light rule under it, a heavy rule at the end; no vertical
-   rules, none between rows; the header bold without a tint. The borders
-   collapse, so the 2px table rules win over the cells' 1px ones, and a
-   header cell's bottom wins over the cell under it. While the caret is in
-   the table or the pointer is over it, the cells show faint lines for
-   editing. Grid keeps every border and the header tint (the rules above).
+/* Each table draws its own lines (tableBorderView.ts): every cell carries
+   its edges' weights, data-bt / data-br / data-bb / data-bl = 0 none, 1
+   thin, 2 thick. An edge with no line is a dashed guide while editing,
+   never in a read-only view or with the guides hidden (the table ⋯ menu;
+   NoteEditor's data-guides). The borders collapse, so a line wins over a
+   neighbour's guide. The header is bold; only the Notion preset tints it.
    The colours are opaque: a translucent one paints twice where borders
    meet, darkening the joints. They are mixed with the surface the table
    sits on (--note-table-surface: the pane's card colour, the sticky note's
@@ -680,27 +665,43 @@
 .notes-pane {
     --note-table-surface: var(--card);
 }
-.paperhub-notes[data-table-style="threeLine"] {
+.paperhub-notes {
     --note-table-rule: color-mix(in oklab, var(--foreground) 72%, var(--note-table-surface, var(--background)));
-    --note-table-faint: color-mix(in oklab, var(--border) 70%, var(--note-table-surface, var(--background)));
+    --note-table-guide: color-mix(in oklab, var(--foreground) 38%, var(--note-table-surface, var(--background)));
 }
-.paperhub-notes[data-table-style="threeLine"] [data-content-type="table"] table {
-    border-top: 2px solid var(--note-table-rule);
-    border-bottom: 2px solid var(--note-table-rule);
+.paperhub-notes [data-content-type="table"] table {
+    border-collapse: collapse;
 }
-.paperhub-notes[data-table-style="threeLine"] [data-content-type="table"] th,
-.paperhub-notes[data-table-style="threeLine"] [data-content-type="table"] td {
-    border-color: transparent;
-}
-.paperhub-notes[data-table-style="threeLine"] [data-content-type="table"] th {
+.paperhub-notes [data-content-type="table"] th {
     background: transparent;
+    font-weight: 600;
 }
-.paperhub-notes[data-table-style="threeLine"] [data-content-type="table"]:is(:hover, :focus-within) :is(th, td) {
-    border-color: var(--note-table-faint);
+.paperhub-notes [data-content-type="table"][data-table-preset="notion"] th {
+    background: color-mix(in oklab, var(--muted-foreground) 9%, var(--note-table-surface, var(--background)));
 }
-.paperhub-notes[data-table-style="threeLine"] [data-content-type="table"] tr:first-child:not(:has(> td)) > th {
-    border-bottom-color: var(--note-table-rule);
+.paperhub-notes [data-content-type="table"] :is(th, td) {
+    transition: border-color 150ms ease-out, background-color 150ms ease-out;
 }
+.paperhub-notes [data-content-type="table"] :is(th, td)[data-bt="0"] { border-top: 1px dashed var(--note-table-guide); }
+.paperhub-notes [data-content-type="table"] :is(th, td)[data-br="0"] { border-right: 1px dashed var(--note-table-guide); }
+.paperhub-notes [data-content-type="table"] :is(th, td)[data-bb="0"] { border-bottom: 1px dashed var(--note-table-guide); }
+.paperhub-notes [data-content-type="table"] :is(th, td)[data-bl="0"] { border-left: 1px dashed var(--note-table-guide); }
+.paperhub-notes [data-content-type="table"] :is(th, td)[data-bt="1"] { border-top: 1px solid var(--note-table-rule); }
+.paperhub-notes [data-content-type="table"] :is(th, td)[data-br="1"] { border-right: 1px solid var(--note-table-rule); }
+.paperhub-notes [data-content-type="table"] :is(th, td)[data-bb="1"] { border-bottom: 1px solid var(--note-table-rule); }
+.paperhub-notes [data-content-type="table"] :is(th, td)[data-bl="1"] { border-left: 1px solid var(--note-table-rule); }
+.paperhub-notes [data-content-type="table"] :is(th, td)[data-bt="2"] { border-top: 2px solid var(--note-table-rule); }
+.paperhub-notes [data-content-type="table"] :is(th, td)[data-br="2"] { border-right: 2px solid var(--note-table-rule); }
+.paperhub-notes [data-content-type="table"] :is(th, td)[data-bb="2"] { border-bottom: 2px solid var(--note-table-rule); }
+.paperhub-notes [data-content-type="table"] :is(th, td)[data-bl="2"] { border-left: 2px solid var(--note-table-rule); }
+.paperhub-notes[data-guides="off"] [data-content-type="table"] :is(th, td)[data-bt="0"],
+.paperhub-notes [contenteditable="false"] [data-content-type="table"] :is(th, td)[data-bt="0"] { border-top-color: transparent; }
+.paperhub-notes[data-guides="off"] [data-content-type="table"] :is(th, td)[data-br="0"],
+.paperhub-notes [contenteditable="false"] [data-content-type="table"] :is(th, td)[data-br="0"] { border-right-color: transparent; }
+.paperhub-notes[data-guides="off"] [data-content-type="table"] :is(th, td)[data-bb="0"],
+.paperhub-notes [contenteditable="false"] [data-content-type="table"] :is(th, td)[data-bb="0"] { border-bottom-color: transparent; }
+.paperhub-notes[data-guides="off"] [data-content-type="table"] :is(th, td)[data-bl="0"],
+.paperhub-notes [contenteditable="false"] [data-content-type="table"] :is(th, td)[data-bl="0"] { border-left-color: transparent; }
 /* The table's ⋯ sits with the grips, a touch apart from the column grip. */
 .note-table-more {
     padding-inline: 2px;
@@ -713,9 +714,7 @@
 @media (prefers-reduced-motion: reduce) {
     .paperhub-notes .tableWrapper { transition: none; }
     .bn-table-handle-menu { animation: none !important; }
-    .paperhub-notes [data-content-type="table"] table,
-    .paperhub-notes [data-content-type="table"] th,
-    .paperhub-notes [data-content-type="table"] td { transition: none; }
+    .paperhub-notes [data-content-type="table"] :is(th, td) { transition: none; }
 }
 
 /* The floating table of contents' list (TocRail.tsx): scrolls without a

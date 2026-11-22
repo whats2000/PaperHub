@@ -80,6 +80,7 @@ import { NoteTableHandles } from "./NoteTableHandles";
 import { TableCaptions } from "./TableCaption";
 import { createCaptionHosts, tableCaptions } from "./tableCaptions";
 import { insertNoteTable, notePasteHandler, tableClean, tableKeys } from "./tableKeys";
+import { tableBorderView } from "./tableBorderView";
 import { tableMotion } from "./tableMotion";
 import { UnsavedDrafts } from "./UnsavedDrafts";
 import {
@@ -238,7 +239,6 @@ function LoadedNoteEditor({
   const reload = useNotesStore((s) => s.reloads[noteId]);
   const retrying = useNotesStore((s) => s.retrying[noteId] ?? false);
   const focusOn = useNotesStore((s) => s.focusOn);
-  const tableStyle = useNotesStore((s) => s.tableStyle);
   const activePart = useNotesStore((s) => s.activePart[noteId] ?? null);
   const folded = useNotesStore((s) => s.folded[noteId]);
   const setActivePart = useNotesStore((s) => s.setActivePart);
@@ -269,6 +269,7 @@ function LoadedNoteEditor({
         tableKeys,
         tableClean,
         tableMotion,
+        tableBorderView,
         mathInput,
         atomCaret,
         commentKeys,
@@ -790,7 +791,6 @@ function LoadedNoteEditor({
           useCanvasStore.getState().openPaper(target.paperId);
         }}
         data-lang={i18n.language}
-        data-table-style={tableStyle}
         className={cn(
           "paperhub-notes min-w-0 animate-in fade-in-0 duration-200 motion-reduce:animate-none",
           variant === "pane" ? "h-full overflow-y-auto py-2" : "py-1 text-[13px]",

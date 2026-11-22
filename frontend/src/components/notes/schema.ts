@@ -42,14 +42,17 @@ const {
   table,
 } = defaultBlockSpecs;
 
-const TABLE_PROP_SCHEMA = { caption: { default: "" }, notes: { default: "" } } as const;
+/** A table's caption and notes, and its lines (`borders`, a JSON string;
+ * "" draws as the Paper preset — tableBorders.ts). */
+const TABLE_PROP_SCHEMA = { caption: { default: "" }, notes: { default: "" }, borders: { default: "" } } as const;
 
-/** BlockNote's table node with the caption and notes as node attributes
- * (its own node has none for a prop schema to fill). Copied or dragged
- * HTML carries them on the block's `data-caption` / `data-notes`. */
+/** BlockNote's table node with the caption, notes and lines as node
+ * attributes (its own node has none for a prop schema to fill). Copied or
+ * dragged HTML carries them on the block's `data-caption` / `data-notes` /
+ * `data-borders`; `tableBorderView` marks the table's `data-table-preset`. */
 const tableNode = table.implementation.node.extend({
   addAttributes() {
-    const attr = (name: "caption" | "notes") => ({
+    const attr = (name: "caption" | "notes" | "borders") => ({
       default: "",
       parseHTML: (el: HTMLElement) =>
         el.closest?.('[data-content-type="table"]')?.getAttribute(`data-${name}`) ?? "",
@@ -58,7 +61,12 @@ const tableNode = table.implementation.node.extend({
         return typeof v === "string" && v ? { [`data-${name}`]: v } : {};
       },
     });
-    return { ...(this.parent?.() ?? {}), caption: attr("caption"), notes: attr("notes") };
+    return {
+      ...(this.parent?.() ?? {}),
+      caption: attr("caption"),
+      notes: attr("notes"),
+      borders: attr("borders"),
+    };
   },
 });
 
