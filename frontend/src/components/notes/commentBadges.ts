@@ -63,8 +63,13 @@ function badgeDecorations(doc: PMNode, view: BadgeView): DecorationSet {
     const id = String(node.attrs.id);
     const content = node.firstChild;
     if (!view.badges.has(id) || !content) return true;
+    // At the end of a line's text; after a block with no text of its own
+    // (a table: past the table and its notes, never in its rows), as the
+    // suggestion bar is placed.
+    const at = content.isTextblock ? pos + 2 + content.content.size : pos + 1 + content.nodeSize;
     decos.push(
-      Decoration.widget(pos + 2 + content.content.size, () => view.host(id), {
+      Decoration.widget(at, () => view.host(id), {
+        // After the table notes' host (side 1) at the same place.
         side: 2,
         key: `cbadge:${id}`,
         ignoreSelection: true,
