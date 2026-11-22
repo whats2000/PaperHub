@@ -169,23 +169,28 @@ describe("the This chat tab", () => {
     });
     await waitFor(() => expect(chatTab(pane)).toBeNull());
   });
+});
 
-  it("falls back to the paper's note when the selected chat note empties", async () => {
+describe("the This chat tab while it is selected", () => {
+  it("stays when its text is deleted, and goes once the paper tab is chosen", async () => {
     chatNote = { title: "", blocks: [textBlock("b1", "hello", 12)] };
     render(<ChatPage />);
     const pane = await openNotes();
     await userEvent.click(await within(pane).findByRole("tab", { name: "This chat" }));
     expect(await screen.findByText("note 12")).toBeInTheDocument();
-    // The text is deleted (the server agrees, so a reload keeps it empty).
     chatNote = { title: "", blocks: [] };
     act(() => {
       useNotesStore.setState((s) => ({
         notes: { ...s.notes, 12: { ...s.notes[12]!, blocks: [] } },
       }));
     });
+    // No jump: the tab and the editor stay while the user is in them.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(within(pane).getByRole("tab", { name: "This chat" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("note 12")).toBeInTheDocument();
+    // Choosing the paper tab re-evaluates: the empty chat tab leaves.
+    await userEvent.click(within(pane).getByRole("tab", { name: PAPER_TITLE }));
     expect(await screen.findByText("note 11")).toBeInTheDocument();
-    expect(within(pane).getByRole("tab", { name: PAPER_TITLE })).toHaveAttribute("aria-selected", "true");
-    // The tab leaves with an exit motion, not at once.
     expect(chatTab(pane)).toHaveClass("animate-out", "motion-reduce:animate-none");
     await waitFor(() => expect(chatTab(pane)).toBeNull());
   });

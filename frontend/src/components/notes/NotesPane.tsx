@@ -73,7 +73,14 @@ export function NotesPane({ onClose }: Props) {
   const chatHasContent = useNotesStore((s) =>
     chatNoteId === undefined ? false : noteHasContent(s.notes[chatNoteId]),
   );
-  const chatShown = session !== null && chatHasContent;
+  // Once shown, the chat tab stays while it is the selected tab, even if
+  // its note empties (never move the user off the page they type in); it
+  // is re-evaluated on switching chats or tabs.
+  const chatSelected = paperId === null || chosen === "chat";
+  const [pin, setPin] = useState<number | null>(null);
+  if (pin !== null && (pin !== activeSessionId || !chatSelected)) setPin(null);
+  else if (pin === null && chatHasContent && chatSelected && activeSessionId !== null) setPin(activeSessionId);
+  const chatShown = session !== null && (chatHasContent || (pin !== null && pin === activeSessionId && chatSelected));
   const tab: NoteTab = !chatShown ? (paperId === null ? "chat" : "paper") : paperId === null ? "chat" : chosen;
   // The chat tab names the chat by its local id: it stays the same note
   // when the chat reaches the server (its first message, or the note's
