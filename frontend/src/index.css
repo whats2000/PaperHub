@@ -422,9 +422,11 @@
    comment badge, nested blocks, which keep their own marks). */
 .paperhub-notes {
   --note-select: oklch(0.55 0.12 250);
+  --note-sel-cell: oklch(0.62 0.09 250 / 0.16);
 }
 .dark .paperhub-notes {
   --note-select: oklch(0.7 0.12 250);
+  --note-sel-cell: oklch(0.62 0.09 250 / 0.25);
 }
 .paperhub-notes .bn-block-outer[data-object-selected] > .bn-block,
 .paperhub-notes .bn-block-outer[data-atom-caret] > .bn-block {
@@ -693,6 +695,19 @@
 .paperhub-notes [contenteditable="false"] [data-content-type="table"] :is(th, td)[data-bb="0"] { border-bottom-color: transparent; }
 .paperhub-notes[data-guides="off"] [data-content-type="table"] :is(th, td)[data-bl="0"],
 .paperhub-notes [contenteditable="false"] [data-content-type="table"] :is(th, td)[data-bl="0"] { border-left-color: transparent; }
+/* Selected cells (a cell selection) take the note's selection blue, laid
+   over the cell's own fill (a header's tint stays under it), not
+   BlockNote's lavender overlay. A table with the caret beside it holds all
+   its cells selected: that shows as the block's tint instead (above). */
+.paperhub-notes [data-content-type="table"] :is(th, td).selectedCell {
+    background-image: linear-gradient(var(--note-sel-cell), var(--note-sel-cell));
+}
+.paperhub-notes .ProseMirror .selectedCell::after {
+    content: none;
+}
+.paperhub-notes .bn-block-outer[data-object-selected] [data-content-type="table"] :is(th, td).selectedCell {
+    background-image: none;
+}
 /* The table's ⋯ sits with the grips, a touch apart from the column grip. */
 .note-table-more {
     padding-inline: 2px;

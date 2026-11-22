@@ -439,6 +439,13 @@ describe("cell selection and wide tables (user report, 2026-11-22)", () => {
     await waitFor(() => expect(document.querySelector('[data-test="bold"]')).toBeNull());
   });
 
+  it("selected cells are tinted with the demo's blue, not BlockNote's lavender overlay", () => {
+    expect(indexCss).toMatch(/\.paperhub-notes\s*\{[^}]*--note-sel-cell:\s*oklch\(0\.62 0\.09 250 \/ 0\.16\)/);
+    expect(indexCss).toMatch(/\.dark \.paperhub-notes\s*\{[^}]*--note-sel-cell:\s*oklch\(0\.62 0\.09 250 \/ 0\.25\)/);
+    expect(indexCss).toMatch(/\.selectedCell\s*\{[^}]*var\(--note-sel-cell\)/);
+    expect(indexCss).toMatch(/\.selectedCell::after\s*\{[^}]*content:\s*none/);
+  });
+
 });
 
 // ---------------------------------------------------------------- motion
