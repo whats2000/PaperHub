@@ -164,6 +164,38 @@ def _own_images_only(node: Any, files: dict[str, str]) -> Any:
     return node
 
 
+def _heading_ids(node: Any, ids: set[str]) -> set[str]:
+    """Every heading id in ``node`` (pandoc JSON AST), added to ``ids``."""
+    if isinstance(node, list):
+        for item in node:
+            _heading_ids(item, ids)
+    elif isinstance(node, dict):
+        if node.get("t") == "Header":
+            ident = node["c"][1][0]
+            if ident:
+                ids.add(ident)
+        for v in node.values():
+            _heading_ids(v, ids)
+    return ids
+
+
+def _link_headings(node: Any, ids: set[str]) -> None:
+    """In ``node`` (changed in place), each link to ``#x`` where ``x`` is
+    a heading id (before ``_own_images_only`` prefixed it) pointed at
+    ``#h-x``, so the contents list jumps to the heading's bookmark."""
+    if isinstance(node, list):
+        for item in node:
+            _link_headings(item, ids)
+    elif isinstance(node, dict):
+        if node.get("t") == "Link":
+            target = node["c"][2]
+            url = target[0]
+            if isinstance(url, str) and url.startswith("#") and url[1:] in ids:
+                target[0] = "#h-" + url[1:]
+        for v in node.values():
+            _link_headings(v, ids)
+
+
 def _mark_table_notes(node: Any, flags: Sequence[bool], seen: list[int]) -> None:
     """In ``node`` (pandoc JSON AST, changed in place), the paragraph right
     after the n-th table, when ``flags[n]``, put in the Table Note style.
@@ -222,7 +254,10 @@ def markdown_to_docx(md: str, resources: dict[str, bytes], *,
         ast = _run(root, ["pandoc", "note.md", "--sandbox", "--from", _READER,
                           "--to", "json", "--output", "note.json"], "note.json")
         try:
-            doc = _own_images_only(json.loads(ast), files)
+            raw = json.loads(ast)
+            ids = _heading_ids(raw.get("blocks", []), set())
+            doc = _own_images_only(raw, files)
+            _link_headings(doc.get("blocks", []), ids)
             _mark_table_notes(doc.get("blocks", []), table_notes, [0])
             (root / "note.json").write_text(json.dumps(doc), encoding="utf-8")
         except (ValueError, TypeError, KeyError, OSError) as exc:

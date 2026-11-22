@@ -1,9 +1,11 @@
 """The ``toc`` block: stored, exported as a linked list, read by the agent."""
 from __future__ import annotations
 
+import io
 import re
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,7 @@ from paperhub.app import create_app
 from paperhub.db.migrate import apply_schema
 from paperhub.notes.export import note_to_markdown, pandoc_slug
 from paperhub.notes.models import Block, Note
+from paperhub.notes.pandoc import markdown_to_docx
 
 NOTE = Note(id=1, target_kind="session", target_id="1", title="Notes",
             revision=1, updated_at="")
@@ -97,6 +100,19 @@ def test_every_toc_link_matches_a_pandoc_heading_id() -> None:
     ids = set(re.findall(r'<h[1-6] id="([^"]*)"', html))
     targets = re.findall(r"\]\(#([^)]*)\)", md)
     assert targets and set(targets) <= ids
+
+
+@pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not installed")
+def test_every_docx_toc_link_has_a_bookmark() -> None:
+    """In Word every contents entry jumps to its heading: each
+    ``w:hyperlink w:anchor`` names a ``w:bookmarkStart``."""
+    md = note_to_markdown(NOTE, _doc(), {})[0]
+    with zipfile.ZipFile(io.BytesIO(markdown_to_docx(md, {}))) as z:
+        xml = z.read("word/document.xml").decode("utf-8")
+    anchors = re.findall(r'<w:hyperlink [^>]*w:anchor="([^"]*)"', xml)
+    marks = set(re.findall(r'<w:bookmarkStart [^>]*w:name="([^"]*)"', xml))
+    assert len(anchors) == 4
+    assert set(anchors) <= marks
 
 
 def test_a_note_without_headings_exports_no_list() -> None:
