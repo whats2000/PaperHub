@@ -781,7 +781,7 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
           onChange={onChange}
           onSelectionChange={onSelectionChange}
         >
-          <NoteFormattingBar onComment={comments.start} />
+          <NoteFormattingBar onComment={comments.start} hidden={findOpen} />
           <NoteTableHandles />
           <TableCaptions hosts={captionHosts} />
           {/* No blocks inside a table cell (as BlockNote's own slash menu). */}

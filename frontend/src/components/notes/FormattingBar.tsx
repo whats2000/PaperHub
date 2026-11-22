@@ -129,6 +129,15 @@ function Bar({ onComment }: { onComment?: () => void }) {
 
 /** Mounts the bar in place of BlockNote's default (pass `formattingToolbar={false}`
  * to the view). */
-export function NoteFormattingBar({ onComment }: { onComment?: () => void }) {
-  return <FormattingToolbarController formattingToolbar={() => <Bar onComment={onComment} />} />;
+export function NoteFormattingBar({ onComment, hidden = false }: { onComment?: () => void; hidden?: boolean }) {
+  // `hidden`: find is open, its match selected in the note: the bar closes
+  // (with its own fade) instead of covering the lines around the match.
+  return (
+    <FormattingToolbarController
+      formattingToolbar={() => <Bar onComment={onComment} />}
+      floatingUIOptions={hidden ? HIDDEN : undefined}
+    />
+  );
 }
+
+const HIDDEN = { useFloatingOptions: { open: false } };

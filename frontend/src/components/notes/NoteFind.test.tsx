@@ -223,6 +223,26 @@ describe("find in a note", () => {
     }
   });
 
+  it("keeps the formatting toolbar away while find selects a match", async () => {
+    seed([para("p1", "Alpha"), para("p2", "needle here")]);
+    const pm = mount();
+    await screen.findByText("needle here");
+    act(() => {
+      ctrlF(pm);
+    });
+    typeQuery("needle");
+    expect(selected(pm)).toBe("needle");
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(document.querySelector(".bn-formatting-toolbar")).toBeNull();
+    // Closed, the selected words are the user's selection: the toolbar is back.
+    act(() => {
+      fireEvent.keyDown(findBox(), { key: "Escape" });
+    });
+    await waitFor(() => expect(document.querySelector(".bn-formatting-toolbar")).not.toBeNull());
+  });
+
   it("finds CJK text", async () => {
     seed([para("p1", "注意力機制很重要"), para("p2", "自注意力")]);
     const pm = mount();
