@@ -334,3 +334,66 @@ describe("accepting a suggestion on commented words", () => {
     await waitFor(() => expect(screen.queryByTestId("lost-comments-badge")).toBeNull());
   });
 });
+
+describe("a suggestion on a table's caption or notes (Task 13 fix round 1)", () => {
+  const table = (props: Record<string, unknown>): NoteBlock => ({
+    id: "t",
+    note_id: 7,
+    parent_id: null,
+    type: "table",
+    props,
+    content: {
+      type: "tableContent",
+      columnWidths: [null],
+      headerRows: 1,
+      rows: [{ cells: ["k"] }, { cells: ["v"] }],
+    } as never,
+    text: "k\nv",
+    author: "user",
+    section_key: null,
+    changed_rev: 1,
+  });
+  const tableSuggestion = (props: Record<string, unknown>): NoteSuggestion => ({
+    id: "sg_1",
+    block_id: "t",
+    change_set_id: "cs_1",
+    kind: "update",
+    proposed: {
+      type: "table",
+      props,
+      content: { type: "tableContent", columnWidths: [null], headerRows: 1, rows: [{ cells: ["k"] }, { cells: ["v"] }] },
+    },
+    status: "open",
+    created_at: "2026-11-16T00:00:00Z",
+  });
+
+  it("shows the old notes struck through and the new ones inserted, the caption untouched", async () => {
+    seed([table({ caption: "Rates", notes: "ORR, objective response" })], [tableSuggestion({ notes: "NR, not reached" })]);
+    mount();
+    const change = await screen.findByTestId("suggestion-part-notes");
+    expect(change).toHaveTextContent("Table notes");
+    expect(change.querySelector(".note-sug-del")).toHaveTextContent("ORR, objective response");
+    expect(change.querySelector(".note-sug-ins")).toHaveTextContent("NR, not reached");
+    // The caption is not in the proposal: it stays, and is not shown as a change.
+    expect(screen.queryByTestId("suggestion-part-caption")).toBeNull();
+    // The cells are shown once, without the caption or notes folded into them.
+    const bar = screen.getByTestId("suggestion-mark");
+    expect(bar.textContent).not.toContain("Rates");
+  });
+
+  it("a new caption shows as added; a removed one as struck through", async () => {
+    seed([table({ notes: "N" })], [tableSuggestion({ caption: "Response rates" })]);
+    mount();
+    const added = await screen.findByTestId("suggestion-part-caption");
+    expect(added.querySelector(".note-sug-del")).toBeNull();
+    expect(added.querySelector(".note-sug-ins")).toHaveTextContent("Response rates");
+  });
+
+  it("an empty proposed caption is a removal", async () => {
+    seed([table({ caption: "Old" })], [tableSuggestion({ caption: "" })]);
+    mount();
+    const gone = await screen.findByTestId("suggestion-part-caption");
+    expect(gone.querySelector(".note-sug-del")).toHaveTextContent("Old");
+    expect(gone.querySelector(".note-sug-ins")).toBeNull();
+  });
+});

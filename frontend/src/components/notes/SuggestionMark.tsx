@@ -19,6 +19,9 @@ export interface SuggestionMarkProps {
   deletes: boolean;
   /** The proposal, shown here when the block has no text to mark it in. */
   detached: string | null;
+  /** A table's caption / notes the proposal changes (they are props, with
+   * no text in the note to mark): shown here, old struck, new inserted. */
+  partChanges?: readonly TablePartChange[];
   /** Posts the decision and shows the saved note, calling `exit` (the
    * change animating out) in between. Rejects when the decision failed;
    * resolves "kept" when the suggestion stays open (shown again). */
@@ -33,7 +36,13 @@ function markLeaving(id: string, on: boolean) {
   });
 }
 
-export function SuggestionMark({ suggestionId, deletes, detached, onDecide }: SuggestionMarkProps) {
+export interface TablePartChange {
+  part: "caption" | "notes";
+  from: string;
+  to: string;
+}
+
+export function SuggestionMark({ suggestionId, deletes, detached, partChanges = [], onDecide }: SuggestionMarkProps) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState<"accept" | "reject" | null>(null);
   const [leaving, setLeaving] = useState(false);
@@ -72,6 +81,31 @@ export function SuggestionMark({ suggestionId, deletes, detached, onDecide }: Su
         "animate-in fade-in-0 motion-reduce:animate-none motion-reduce:transition-none",
       )}
     >
+      {partChanges.map((c) => (
+        <span
+          key={c.part}
+          data-testid={`suggestion-part-${c.part}`}
+          className="basis-full whitespace-pre-wrap text-foreground"
+        >
+          <span className="font-medium">
+            {c.part === "caption"
+              ? t("notes:table.captionField", "Table caption")
+              : t("notes:table.notesField", "Table notes")}
+            {": "}
+          </span>
+          {c.from && (
+            <del className="note-sug-del" data-suggestion-id={suggestionId}>
+              {c.from}
+            </del>
+          )}
+          {c.from && c.to && " "}
+          {c.to && (
+            <ins className="note-sug-ins" data-suggestion-id={suggestionId}>
+              {c.to}
+            </ins>
+          )}
+        </span>
+      ))}
       {detached !== null && (
         <ins className="note-sug-ins basis-full" data-suggestion-id={suggestionId}>
           {detached}

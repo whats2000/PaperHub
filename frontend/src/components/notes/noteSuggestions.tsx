@@ -21,7 +21,7 @@ import { useNotesStore } from "@/store/notes";
 import type { ApplyResult, NoteSuggestion } from "@/types/notes";
 
 import { commentAnchor, type ReanchorHint } from "./noteComments";
-import { SuggestionMark } from "./SuggestionMark";
+import { SuggestionMark, type TablePartChange } from "./SuggestionMark";
 
 // The suggestion code works on any schema; it reads block ids and text only.
 type Ed = BlockNoteEditor<any, any, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -39,7 +39,28 @@ export function proposedText(s: NoteSuggestion): string {
   const p = s.proposed;
   if (s.kind === "delete" || !p) return "";
   const type = typeof p.type === "string" ? p.type : "paragraph";
-  return blockText(type, (p.props as Record<string, unknown> | undefined) ?? {}, p.content);
+  // A table's caption and notes are shown as their own change
+  // (`tablePartChanges`), not folded into the cells.
+  const props = type === "table" ? {} : ((p.props as Record<string, unknown> | undefined) ?? {});
+  return blockText(type, props, p.content);
+}
+
+/** The caption / notes a table suggestion changes against the block's
+ * current props. A part the proposal leaves out is kept by the accept
+ * (the props merge), so it is no change. */
+export function tablePartChanges(s: NoteSuggestion, current: Record<string, unknown>): TablePartChange[] {
+  const p = s.proposed;
+  if (s.kind !== "update" || !p || p.type !== "table") return [];
+  const props = (p.props as Record<string, unknown> | undefined) ?? {};
+  const out: TablePartChange[] = [];
+  for (const part of ["caption", "notes"] as const) {
+    const to = props[part];
+    if (typeof to !== "string") continue;
+    const cur = current[part];
+    const from = typeof cur === "string" ? cur : "";
+    if (from !== to) out.push({ part, from, to });
+  }
+  return out;
 }
 
 /** Whether an accept came back `stale`: the block changed since the
@@ -268,19 +289,20 @@ export function useNoteSuggestions(
   };
 
   return (suggestions ?? []).map((s) => {
-    const inText = (() => {
+    const block = (() => {
       try {
-        const block = editor.getBlock(s.block_id) as { content?: unknown } | undefined;
-        return Array.isArray(block?.content);
+        return editor.getBlock(s.block_id) as { content?: unknown; props?: Record<string, unknown> } | undefined;
       } catch {
-        return false;
+        return undefined;
       }
     })();
+    const inText = Array.isArray(block?.content);
     return createPortal(
       <SuggestionMark
         suggestionId={s.id}
         deletes={s.kind === "delete"}
         detached={inText || s.kind === "delete" ? null : proposedText(s)}
+        partChanges={tablePartChanges(s, block?.props ?? {})}
         onDecide={(accept, exit) => decide(s, accept, exit)}
       />,
       host(s.id),
