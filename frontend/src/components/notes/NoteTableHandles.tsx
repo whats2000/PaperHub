@@ -41,7 +41,7 @@ import { useTranslation } from "react-i18next";
 import type { TableContent } from "@/types/notes";
 
 import type { TablePart } from "./noteFind";
-import { requestTablePart } from "./tableCaptions";
+import { partRequests } from "./tableCaptions";
 import { columnAlignment, deleteRowOrColumn, setColumnAlignment, type Alignment } from "./tableKeys";
 import { shrinkAway } from "./tableMotion";
 
@@ -194,7 +194,7 @@ function TableMoreMenu() {
       if (has) editor.updateBlock(block.id, { props: { [part]: "" } });
       else {
         keepFocus.current = true;
-        requestTablePart(block.id, part);
+        partRequests(editor).request(block.id, part);
       }
     };
     const text =

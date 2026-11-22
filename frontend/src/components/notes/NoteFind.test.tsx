@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -373,5 +373,75 @@ describe("find in a table's caption and notes", () => {
     expect(notes.querySelector(".ph-find-current")?.textContent).toBe("needle");
     expect(caption.querySelector(".ph-find-current")).toBeNull();
     expect(caption.querySelector(".ph-find")?.textContent).toBe("Needle");
+  });
+});
+
+describe("closing find on a caption or notes match (fix round 1)", () => {
+  it("Esc leaves the notes open with the match selected, so typing edits there", async () => {
+    seed([
+      para("p1", "intro"),
+      blk("t", {
+        type: "table",
+        props: { notes: "ORR, objective response" },
+        content: {
+          type: "tableContent",
+          columnWidths: [null],
+          headerRows: 1,
+          rows: [{ cells: ["head"] }, { cells: ["a"] }],
+        } as never,
+        text: "head\na\nORR, objective response",
+      }),
+    ]);
+    const pm = mount();
+    await screen.findByText("intro");
+    act(() => {
+      ctrlF(pm);
+    });
+    typeQuery("objective");
+    expect(count()).toBe("1 / 1");
+    act(() => {
+      fireEvent.keyDown(findBox(), { key: "Enter" });
+    });
+    act(() => {
+      fireEvent.keyDown(findBox(), { key: "Escape" });
+    });
+    const field = await waitFor(() => {
+      const el = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Table notes" });
+      expect(document.activeElement).toBe(el);
+      return el;
+    });
+    expect([field.selectionStart, field.selectionEnd]).toEqual([5, 14]);
+    expect(field.value.slice(field.selectionStart, field.selectionEnd)).toBe("objective");
+  });
+
+  it("a caption match closes into the caption field the same way", async () => {
+    seed([
+      blk("t", {
+        type: "table",
+        props: { caption: "Response rates" },
+        content: {
+          type: "tableContent",
+          columnWidths: [null],
+          headerRows: 1,
+          rows: [{ cells: ["head"] }, { cells: ["a"] }],
+        } as never,
+        text: "Response rates\nhead\na",
+      }),
+    ]);
+    const pm = mount();
+    await screen.findByText("Response rates", { exact: false });
+    act(() => {
+      ctrlF(pm);
+    });
+    typeQuery("rates");
+    act(() => {
+      fireEvent.keyDown(findBox(), { key: "Escape" });
+    });
+    const field = await waitFor(() => {
+      const el = screen.getByRole<HTMLInputElement>("textbox", { name: "Table caption" });
+      expect(document.activeElement).toBe(el);
+      return el;
+    });
+    expect([field.selectionStart, field.selectionEnd]).toEqual([9, 14]);
   });
 });

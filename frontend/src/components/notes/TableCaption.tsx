@@ -19,13 +19,7 @@ import { prefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 import { noteFindKey, type TablePart } from "./noteFind";
-import {
-  subscribeTablePart,
-  tablePartRequest,
-  tablesOf,
-  type CaptionHosts,
-  type PartRequest,
-} from "./tableCaptions";
+import { partRequests, tablesOf, type CaptionHosts, type PartRequest } from "./tableCaptions";
 
 const EXIT_MS = 200;
 /** `$…$` math (an escaped `\$` is a dollar sign), as the export reads it. */
@@ -79,15 +73,17 @@ interface PartProps {
   /** The caption's N (0 for the notes). */
   number: number;
   hits: Hit[];
-  /** A request from the table menu to open this part. */
+  /** A request to open this part (the table menu, or find closing on a
+   * match in it): its number, and what to select. */
   request: number;
+  select?: [number, number];
   onCommit: (value: string) => void;
   onEditing: (editing: boolean) => void;
   onLeave: () => void;
 }
 
 /** One part (caption or notes) of one table. */
-function TablePartView({ part, value, number, hits, request, onCommit, onEditing, onLeave }: PartProps) {
+function TablePartView({ part, value, number, hits, request, select, onCommit, onEditing, onLeave }: PartProps) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -116,28 +112,44 @@ function TablePartView({ part, value, number, hits, request, onCommit, onEditing
   const open = () => {
     setDraft(value);
     setEditing(true);
-    onEditing(true);
   };
 
-  // "Add caption" / "Add notes": opened with the caret in it.
-  const seen = useRef(request);
+  // A request ("Add caption" / "Add notes", or find closing on a match
+  // here): opened with the caret in it, or the match selected. Taken in
+  // render (React's "previous props" pattern).
+  const [seen, setSeen] = useState(request);
+  const [focusAsk, setFocusAsk] = useState<{ n: number; select: [number, number] | null }>({ n: 0, select: null });
+  if (request !== 0 && request !== seen) {
+    setSeen(request);
+    setFocusAsk((f) => ({ n: f.n + 1, select: select ?? null }));
+    if (!editing) {
+      setDraft(value);
+      setEditing(true);
+    }
+  }
+  // The parent counts a caption being written in the numbering.
+  const reported = useRef(editing);
   useEffect(() => {
-    if (request === 0 || request === seen.current) return;
-    seen.current = request;
-    open();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request]);
+    if (reported.current === editing) return;
+    reported.current = editing;
+    onEditing(editing);
+  }, [editing, onEditing]);
   useEffect(() => {
     if (!editing) return;
-    // After the menu that opened it has closed (it gives focus back).
-    const timer = setTimeout(() => field.current?.focus(), 0);
+    // After the menu (or the find bar) that opened it has closed and
+    // handed the focus back.
+    const timer = setTimeout(() => {
+      const el = field.current;
+      if (!el) return;
+      el.focus();
+      if (focusAsk.select) el.setSelectionRange(focusAsk.select[0], focusAsk.select[1]);
+    }, 0);
     return () => clearTimeout(timer);
-  }, [editing]);
+  }, [editing, focusAsk]);
 
   const finish = (leave: boolean) => {
     if (!editing) return;
     setEditing(false);
-    onEditing(false);
     const next = draft.trim();
     if (next !== value) onCommit(next);
     if (leave) onLeave();
@@ -250,7 +262,8 @@ export function TableCaptions({ hosts }: { hosts: CaptionHosts }) {
       return out;
     },
   });
-  const request = useSyncExternalStore(subscribeTablePart, tablePartRequest);
+  const requests = partRequests(editor);
+  const request = useSyncExternalStore(requests.subscribe, requests.get);
   // Captions being written (still empty) count in the numbering.
   const [adding, setAdding] = useState<ReadonlySet<string>>(new Set());
 
@@ -287,6 +300,7 @@ export function TableCaptions({ hosts }: { hosts: CaptionHosts }) {
                 number={part === "caption" ? (numbers.get(tb.id) ?? 0) : 0}
                 hits={hits?.[`${tb.id}:${part}`] ?? []}
                 request={seqOf(request, tb.id, part)}
+                select={seqOf(request, tb.id, part) ? request?.select : undefined}
                 onCommit={commit(tb.id, part)}
                 onEditing={editingOf(tb.id, part)}
                 onLeave={() => editor.focus()}

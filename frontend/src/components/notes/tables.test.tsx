@@ -13,6 +13,7 @@ import { clearPendingNoteOps, useNotesStore } from "@/store/notes";
 import type { ApplyResult, NoteBlock, NoteOpsBody, TableContent } from "@/types/notes";
 
 import { cleanPastedTable, notePasteHandler, pickAlignments, tableClean, tableKeys } from "./tableKeys";
+import { createCaptionHosts, partRequests, tableCaptions } from "./tableCaptions";
 import { shrinkAway, tableMotion } from "./tableMotion";
 import { cleanupEditors, makeEditor, press, type AnyEditor } from "./testEditor";
 
@@ -918,5 +919,64 @@ describe("table caption and notes", () => {
       expect(el.textContent).toBe("");
       expect(el.className).toContain("motion-reduce:transition-none");
     }
+  });
+});
+
+describe("caption hosts and part requests (fix round 1)", () => {
+  it("a deleted table's caption and notes hosts are let go", () => {
+    const hosts = createCaptionHosts();
+    const editor = makeEditor([tableCaptions(hosts)], [...grid(), { ...grid()[0] as object, id: "t2" }]);
+    expect(hosts.size()).toBe(4);
+    const first = hosts.host("t", "caption");
+    editor.removeBlocks(["t2"]);
+    expect(hosts.size()).toBe(2);
+    expect(hosts.host("t", "caption")).toBe(first);
+  });
+
+  it("a part request reaches only its own editor", () => {
+    const a = makeEditor([], grid());
+    const b = makeEditor([], grid());
+    const seen: string[] = [];
+    const offA = partRequests(a).subscribe(() => seen.push("a"));
+    const offB = partRequests(b).subscribe(() => seen.push("b"));
+    partRequests(a).request("t", "caption");
+    expect(seen).toEqual(["a"]);
+    expect(partRequests(a).get()?.blockId).toBe("t");
+    expect(partRequests(b).get()).toBeNull();
+    offA();
+    offB();
+  });
+
+  it("two editors on one note: Add caption in one opens the part only there", async () => {
+    seed([seededTable]);
+    act(() => {
+      render(
+        <>
+          <NoteEditor noteId={7} variant="pane" />
+          <NoteEditor noteId={7} variant="card" />
+        </>,
+      );
+    });
+    const [pane] = [...document.querySelectorAll<HTMLElement>(".ProseMirror")] as PM[];
+    hoverCell(pane!, 1, 0);
+    const more = await waitFor(() => tableOptions());
+    act(() => {
+      fireEvent.click(more);
+    });
+    const menu = await screen.findByRole("menu", HIDDEN);
+    act(() => {
+      fireEvent.click(within(menu).getByText("Add caption"));
+    });
+    expect(document.querySelectorAll(".ProseMirror")).toHaveLength(2);
+    expect(document.querySelectorAll("[data-table-caption='caption']")).toHaveLength(2);
+    await waitFor(() => expect(screen.getAllByRole("textbox", { name: "Table caption" })).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 20));
+    const fields = screen.getAllByRole("textbox", { name: "Table caption" });
+    expect(fields).toHaveLength(1);
+    // The one opened is in the editor whose menu was used, and has the caret.
+    expect(pane!.contains(fields[0]!)).toBe(true);
+    expect(document.activeElement).toBe(fields[0]);
+    // The other editor never opened its caption (no empty caption written).
+    expect(useNotesStore.getState().notes[7]!.blocks.find((x) => x.id === "t")!.props).toEqual({});
   });
 });

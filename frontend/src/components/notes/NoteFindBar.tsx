@@ -20,6 +20,7 @@ import { setAtomCaret } from "./atomCaret";
 import { findMatches, setFindMatches, type FindMatch } from "./noteFind";
 import { partOf, type PartBlock } from "./parts";
 import { foldedRanges } from "./partsDecorations";
+import { partRequests } from "./tableCaptions";
 
 interface FindEditor {
   _tiptapEditor: { view: EditorView };
@@ -187,7 +188,12 @@ export function NoteFindBar({ editor, noteId, cardPart, focusSeq, open, onClose,
         /* the old place is gone: the caret stays */
       }
     }
-    v.focus();
+    // On a match in a table's caption or notes: that part opens with the
+    // match selected, so the next key edits there.
+    const m = current >= 0 ? matches[current] : undefined;
+    if ((m?.kind === "caption" || m?.kind === "notes") && m.at) {
+      partRequests(editor).request(m.blockId, m.kind, m.at);
+    } else v.focus();
     onClose();
   };
 

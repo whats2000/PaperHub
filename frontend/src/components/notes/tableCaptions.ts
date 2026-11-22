@@ -15,11 +15,21 @@ export interface CaptionHosts {
   /** The element a table's caption (or notes) is rendered into; the same
    * one every time, so a redrawn widget keeps what React put in it. */
   host: (blockId: string, part: TablePart) => HTMLElement;
+  /** Lets go of the hosts of tables no longer in the note. */
+  keep: (blockIds: ReadonlySet<string>) => void;
+  /** How many hosts are held. */
+  size: () => number;
 }
 
 export function createCaptionHosts(): CaptionHosts {
   const hosts = new Map<string, HTMLElement>();
   return {
+    keep(blockIds) {
+      for (const key of [...hosts.keys()]) {
+        if (!blockIds.has(key.slice(0, key.lastIndexOf(":")))) hosts.delete(key);
+      }
+    },
+    size: () => hosts.size,
     host(blockId, part) {
       const key = `${blockId}:${part}`;
       let el = hosts.get(key);
@@ -62,11 +72,13 @@ export function tablesOf(doc: PMNode): TableInfo[] {
 function widgets(doc: PMNode, hosts: CaptionHosts): DecorationSet {
   const decos: Decoration[] = [];
   const spec = { ignoreSelection: true, stopEvent: () => true, marks: [] };
+  const ids = new Set<string>();
   doc.descendants((node, pos) => {
     if (node.type.name !== "blockContainer") return true;
     const content = node.firstChild;
     if (content?.type.name === "table") {
       const id = String(node.attrs.id);
+      ids.add(id);
       // Inside the block: before its table, and after it (before any
       // nested blocks).
       decos.push(
@@ -80,6 +92,9 @@ function widgets(doc: PMNode, hosts: CaptionHosts): DecorationSet {
     }
     return true;
   });
+  // A deleted table's hosts go (an undo makes new ones; React re-renders
+  // into them).
+  hosts.keep(ids);
   return DecorationSet.create(doc, decos);
 }
 
@@ -105,26 +120,48 @@ export function tableCaptions(hosts: CaptionHosts) {
   });
 }
 
-// ------------------------------------------------- "Add caption" / "Add notes"
+// ------------------------------------------------- opening a part for editing
 
 export interface PartRequest {
   blockId: string;
   part: TablePart;
   seq: number;
+  /** Characters to select once it is open (a find match). */
+  select?: [number, number];
 }
 
-let request: PartRequest | null = null;
-const listeners = new Set<() => void>();
-
-/** Opens a table's caption (or notes) for editing, from the table menu. */
-export function requestTablePart(blockId: string, part: TablePart): void {
-  request = { blockId, part, seq: (request?.seq ?? 0) + 1 };
-  listeners.forEach((f) => f());
+export interface PartRequests {
+  /** Opens a table's caption (or notes) for editing, the caret in it (or
+   * `select` selected): "Add caption" in the table menu, or find closing
+   * on a match there. */
+  request: (blockId: string, part: TablePart, select?: [number, number]) => void;
+  subscribe: (f: () => void) => () => void;
+  get: () => PartRequest | null;
 }
 
-export function subscribeTablePart(f: () => void): () => void {
-  listeners.add(f);
-  return () => listeners.delete(f);
-}
+// One per editor: two editors on one note (the pane and the card) never
+// both open a part.
+const requestsByEditor = new WeakMap<object, PartRequests>();
 
-export const tablePartRequest = (): PartRequest | null => request;
+export function partRequests(editor: object): PartRequests {
+  let out = requestsByEditor.get(editor);
+  if (!out) {
+    let current: PartRequest | null = null;
+    const listeners = new Set<() => void>();
+    out = {
+      request(blockId, part, select) {
+        current = { blockId, part, seq: (current?.seq ?? 0) + 1, ...(select ? { select } : {}) };
+        listeners.forEach((f) => f());
+      },
+      subscribe(f) {
+        listeners.add(f);
+        return () => {
+          listeners.delete(f);
+        };
+      },
+      get: () => current,
+    };
+    requestsByEditor.set(editor, out);
+  }
+  return out;
+}
