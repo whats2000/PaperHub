@@ -288,8 +288,9 @@ function refreshNote(noteId: number | undefined): void {
 
 /** Where in the paper's note a new mark should go: right after the block
  * "Quote from the paper" marked, else right after the block the caret was
- * last in (pane or card). Null (never placed, or that block is gone) lets
- * the server append it at the end of the note. [user, 2026-11-19] */
+ * last in this visit (pane or card). Null (never placed, a reload, or that
+ * block is gone) lets the server put it right after the block the user
+ * last edited, else at the end of the note. [user, 2026-11-19 / 11-22] */
 export function markHint(paperId: number): string | null {
   const n = useNotesStore.getState();
   const noteId = n.byTarget[`paper:${paperId}`];
@@ -304,9 +305,10 @@ export function markHint(paperId: number): string | null {
 }
 
 /** Where a short mark's inline citation goes: the note's last caret block
- * and offset (unknown offset: the block's end), else a new paragraph at
- * the note's end. Null when "Quote from the paper" asked for a reference
- * block. [user, 2026-11-21] */
+ * and offset (unknown offset: the block's end), else no block, and the
+ * server takes the end of the block the user last edited (else a new
+ * paragraph at the note's end). Null when "Quote from the paper" asked
+ * for a reference block. [user, 2026-11-21 / 11-22] */
 export function inlineCiteAt(paperId: number): CiteAt | null {
   const n = useNotesStore.getState();
   const noteId = n.byTarget[`paper:${paperId}`];

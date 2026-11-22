@@ -6,6 +6,7 @@ import { waitFor } from "@testing-library/react";
 import { API_BASE_URL } from "@/lib/api";
 import {
   MarkOpTimeout,
+  inlineCiteAt,
   markHint,
   queueMarkOp,
   groupMarkActions,
@@ -193,6 +194,25 @@ describe("markHint", () => {
       pieces: MARK.pieces, section_key: null, hint_block_id: "p1",
     });
     expect(useNotesStore.getState().lastCaret[7]).toBe("b_new");
+  });
+});
+
+describe("where a mark goes with no caret this visit (a reload, another device)", () => {
+  // [user, 2026-11-22] The server puts it after the block the user last
+  // edited (the agent's blocks do not count), else at the note's end: the
+  // reader sends no block of its own.
+  it("markHint sends none, and none for a caret block deleted since", () => {
+    expect(markHint(3)).toBeNull();
+    useNotesStore.getState().setLastCaret(7, "gone");
+    expect(markHint(3)).toBeNull();
+  });
+
+  it("inlineCiteAt names no block (offset: the block's end)", () => {
+    expect(inlineCiteAt(3)).toEqual({ block_id: null, offset: null });
+    useNotesStore.getState().setLastCaret(7, "gone", 4);
+    expect(inlineCiteAt(3)).toEqual({ block_id: null, offset: null });
+    useNotesStore.getState().setLastCaret(7, "p1", 2);
+    expect(inlineCiteAt(3)).toEqual({ block_id: "p1", offset: 2 });
   });
 });
 

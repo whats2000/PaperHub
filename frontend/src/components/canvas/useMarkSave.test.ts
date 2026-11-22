@@ -100,7 +100,7 @@ describe("a new mark goes to the note in the form its length asks for", () => {
     expect(sent.map((b) => b.cite_at)).toEqual([undefined, undefined]);
   });
 
-  it("with no caret in the note yet: a new paragraph at its end", async () => {
+  it("with no caret this visit: no block, the server takes the last edited one", async () => {
     useNotesStore.setState({ lastCaret: {}, lastCaretOffset: {} });
     await save("62%");
     expect(sent[0]!.cite_at).toEqual({ block_id: null, offset: null });
@@ -110,6 +110,30 @@ describe("a new mark goes to the note in the form its length asks for", () => {
     cite = { block_id: "p1", offset: 6, new_block: false };
     await save("62%");
     expect(useNotesStore.getState().caretAfter).toMatchObject({ noteId: 7, blockId: "p1", offset: 6, in: "card" });
+    expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mk_1" });
+  });
+});
+
+describe("the new block in the notes pane [user, 2026-11-22]", () => {
+  it("scrolls into view and flashes there when the pane shows (no card)", async () => {
+    useNotesPaneStore.setState({ open: true, activeTab: "notes", request: null });
+    await save("a passage longer than twenty-four characters");
+    // The pane's request is "Open in notes": revealBlock scrolls + flashes.
+    expect(useNotesPaneStore.getState().request).toMatchObject({ kind: "paper", id: 3, noteId: 7, blockId: "b_q" });
+    expect(useMarkNavStore.getState().card).toBeNull();
+  });
+
+  it("an inline citation reveals the paragraph holding the chip", async () => {
+    useNotesPaneStore.setState({ open: true, activeTab: "notes", request: null });
+    cite = { block_id: "p2", offset: 3, new_block: false };
+    await save("62%");
+    expect(useNotesPaneStore.getState().request).toMatchObject({ noteId: 7, blockId: "p2" });
+  });
+
+  it("with the pane closed: no reveal, the note card opens", async () => {
+    useNotesPaneStore.setState({ open: false, request: null });
+    await save("a passage longer than twenty-four characters");
+    expect(useNotesPaneStore.getState().request).toBeNull();
     expect(useMarkNavStore.getState().card).toMatchObject({ paperId: 3, markId: "mk_1" });
   });
 });
