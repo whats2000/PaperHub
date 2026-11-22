@@ -13,6 +13,25 @@ export interface FigureRequest {
 
 /** A `[view:P/N/box]` citation: a region of a page the agent viewed — 1-based
  *  page, box `[x0, y0, x1, y1]` in 0-1000 page coordinates. */
+/** A paper this chat shows but does not have among its enabled papers (a
+ *  `[[` link, a citation to a switched-off paper, a library paper): its
+ *  dashed tab in both the reader and the notes pane. `preview`: opened by
+ *  looking (italic), replaced by the next one; editing its note or a double
+ *  click keeps it. */
+export interface OutsideTab {
+  paperId: number;
+  preview: boolean;
+}
+
+/** A dashed tab closed in either pane: both panes showing it land on
+ *  `neighbour` (null: the chat's first paper). */
+export interface ClosedTab {
+  chat: number;
+  paperId: number;
+  neighbour: number | null;
+  n: number;
+}
+
 export interface ViewRequest {
   paper: number;
   page: number;
@@ -79,6 +98,27 @@ interface CanvasState {
   /** References panel "Open in canvas": open the canvas (if closed) and switch
    *  its active paper to `paperContentId`. */
   openPaper: (paperContentId: number) => void;
+  /** Switches the reader's paper without opening it (the notes pane's
+   *  paper tabs: both panes show the same paper). */
+  selectPaper: (paperContentId: number) => void;
+  /** Per chat (its local id), its dashed tabs, in the order they opened.
+   *  Kept for this page load only. */
+  outsideByChat: Record<number, OutsideTab[]>;
+  /** Shows a paper as a dashed tab: a temporary one, replacing the chat's
+   *  temporary tab; a paper that has a tab keeps it. */
+  showOutside: (chat: number, paperContentId: number) => void;
+  /** The temporary tab stays (no longer replaced by the next one). */
+  keepOutside: (chat: number, paperContentId: number) => void;
+  /** Closes a dashed tab in both panes (see `closedTab`). */
+  closeOutside: (chat: number, paperContentId: number, neighbour: number | null) => void;
+  /** Forgets a dashed tab quietly (its paper was added to the chat). */
+  forgetOutside: (chat: number, paperContentId: number) => void;
+  /** The dashed tab closed last, for the panes that showed it. */
+  closedTab: ClosedTab | null;
+  /** A paper's title as the reader looked it up (a library paper this chat
+   *  does not have), for the notes pane's tab. */
+  paperTitles: Record<number, string>;
+  setPaperTitle: (paperContentId: number, title: string) => void;
   /** Cleared by the canvas once it has switched to the requested paper, so a
    *  later browse-mode reopen doesn't re-jump to it. */
   consumePaperRequest: () => void;
@@ -93,7 +133,7 @@ interface CanvasState {
   toggleCanvas: () => void;
   closeCanvas: () => void;
   /** The chat changed: close the reader and forget the paper it showed
-   *  (that paper belongs to the chat left behind). */
+   *  (that paper belongs to the chat left behind); temporary tabs close. */
   resetForSessionChange: () => void;
   setWidth: (width: number) => void;
 }
@@ -173,6 +213,53 @@ export const useCanvasStore = create<CanvasState>()(
           requestedPaperId: paperContentId,
           paperRequestNonce: s.paperRequestNonce + 1,
         })),
+      selectPaper: (paperContentId) =>
+        set((s) => ({
+          requestedPaperId: paperContentId,
+          paperRequestNonce: s.paperRequestNonce + 1,
+        })),
+      outsideByChat: {},
+      showOutside: (chat, paperContentId) =>
+        set((s) => {
+          const tabs = s.outsideByChat[chat] ?? [];
+          if (tabs.some((t) => t.paperId === paperContentId)) return {};
+          const next = [...tabs.filter((t) => !t.preview), { paperId: paperContentId, preview: true }];
+          return { outsideByChat: { ...s.outsideByChat, [chat]: next } };
+        }),
+      keepOutside: (chat, paperContentId) =>
+        set((s) => {
+          const tabs = s.outsideByChat[chat] ?? [];
+          if (!tabs.some((t) => t.paperId === paperContentId && t.preview)) return {};
+          const next = tabs.map((t) => (t.paperId === paperContentId ? { ...t, preview: false } : t));
+          return { outsideByChat: { ...s.outsideByChat, [chat]: next } };
+        }),
+      closeOutside: (chat, paperContentId, neighbour) =>
+        set((s) => ({
+          outsideByChat: {
+            ...s.outsideByChat,
+            [chat]: (s.outsideByChat[chat] ?? []).filter((t) => t.paperId !== paperContentId),
+          },
+          closedTab: { chat, paperId: paperContentId, neighbour, n: (s.closedTab?.n ?? 0) + 1 },
+        })),
+      forgetOutside: (chat, paperContentId) =>
+        set((s) =>
+          (s.outsideByChat[chat] ?? []).some((t) => t.paperId === paperContentId)
+            ? {
+                outsideByChat: {
+                  ...s.outsideByChat,
+                  [chat]: (s.outsideByChat[chat] ?? []).filter((t) => t.paperId !== paperContentId),
+                },
+              }
+            : {},
+        ),
+      closedTab: null,
+      paperTitles: {},
+      setPaperTitle: (paperContentId, title) =>
+        set((s) =>
+          s.paperTitles[paperContentId] === title
+            ? {}
+            : { paperTitles: { ...s.paperTitles, [paperContentId]: title } },
+        ),
       consumePaperRequest: () => set({ requestedPaperId: null }),
       setActivePaperId: (paperContentId) =>
         set({ activePaperId: paperContentId }),
@@ -193,7 +280,15 @@ export const useCanvasStore = create<CanvasState>()(
       toggleCanvas: () => set((s) => ({ open: !s.open })),
       closeCanvas: () => set({ open: false }),
       resetForSessionChange: () =>
-        set({ open: false, activePaperId: null, readerView: null, readingSection: null }),
+        set((s) => ({
+          open: false,
+          activePaperId: null,
+          readerView: null,
+          readingSection: null,
+          outsideByChat: Object.fromEntries(
+            Object.entries(s.outsideByChat).map(([chat, tabs]) => [chat, tabs.filter((t) => !t.preview)]),
+          ),
+        })),
       setWidth: (width) => set({ width }),
     }),
     {
