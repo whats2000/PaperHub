@@ -42,6 +42,21 @@ describe("revealBlock", () => {
     expect(el).not.toHaveAttribute("data-flash");
   });
 
+  it("keeps the ring when the editor redraws the block right after (a new mark's note reloading)", async () => {
+    // Live bug [2026-11-22]: the ring went on a node the editor replaced
+    // a moment later, so a new mark's block never flashed.
+    const first = outer("b_new");
+    root.appendChild(first);
+    await expect(revealBlock(root, "b_new")).resolves.toBe(true);
+    const redrawn = outer("b_new");
+    first.replaceWith(redrawn);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(redrawn).toHaveAttribute("data-flash");
+    expect(scrolled).toEqual([first, redrawn]);
+    await new Promise((r) => setTimeout(r, 1650));
+    expect(redrawn).not.toHaveAttribute("data-flash");
+  });
+
   it("waits for a block that is not there yet", async () => {
     const p = revealBlock(root, "late");
     const el = outer("late");

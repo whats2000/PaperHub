@@ -39,10 +39,7 @@ export function revealBlock(root: HTMLElement, blockId: string, opts: RevealOpti
       }
       return false;
     }
-    el.scrollIntoView?.({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
-    el.setAttribute("data-flash", "");
-    // Outlives the caller (a consumed request re-renders the pane).
-    setTimeout(() => el.removeAttribute("data-flash"), FLASH_MS);
+    flash(root, blockId, el);
     return true;
   };
 
@@ -66,6 +63,32 @@ export function revealBlock(root: HTMLElement, blockId: string, opts: RevealOpti
     const timer = setTimeout(() => finish(false), REVEAL_GIVE_UP_MS);
     signal?.addEventListener("abort", onAbort);
   });
+}
+
+/** Scrolls `el` to the middle and rings it for FLASH_MS. The editor may
+ * redraw the block meanwhile (a new mark's note reloading): the ring and
+ * the scroll follow the redrawn node. Outlives the caller (a consumed
+ * request re-renders the pane). */
+function flash(root: HTMLElement, blockId: string, el: HTMLElement): void {
+  const show = (node: HTMLElement) => {
+    node.scrollIntoView?.({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    node.setAttribute("data-flash", "");
+  };
+  let cur = el;
+  show(cur);
+  const follow = new MutationObserver(() => {
+    if (cur.isConnected) return;
+    const next = root.querySelector<HTMLElement>(blockSelector(blockId));
+    if (next) {
+      cur = next;
+      show(cur);
+    }
+  });
+  follow.observe(root, { childList: true, subtree: true });
+  setTimeout(() => {
+    follow.disconnect();
+    cur.removeAttribute("data-flash");
+  }, FLASH_MS);
 }
 
 /** An `unfold` for note `noteId`: opens the folded part holding a block. */
