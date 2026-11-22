@@ -128,7 +128,9 @@ describe("the This chat tab", () => {
     chatNote = { title: "", blocks: [textBlock("b1", "hello", 12)] };
     render(<ChatPage />);
     const pane = await openNotes();
-    expect(await within(pane).findByRole("tab", { name: "This chat" })).toBeInTheDocument();
+    const tab = await within(pane).findByRole("tab", { name: "This chat" });
+    // A tab already there when the pane opens does not animate in.
+    expect(tab).not.toHaveClass("animate-in");
   });
 
   it("appears once the first block is written, with the tab motion", async () => {
@@ -191,7 +193,67 @@ describe("the This chat tab while it is selected", () => {
     // Choosing the paper tab re-evaluates: the empty chat tab leaves.
     await userEvent.click(within(pane).getByRole("tab", { name: PAPER_TITLE }));
     expect(await screen.findByText("note 11")).toBeInTheDocument();
-    expect(chatTab(pane)).toHaveClass("animate-out", "motion-reduce:animate-none");
+    const leaving = pane.querySelector<HTMLElement>('[data-note-tab="chat"]');
+    expect(leaving).not.toBeNull();
+    expect(leaving).toHaveClass("animate-out", "motion-reduce:animate-none", "pointer-events-none");
+    // While it leaves it cannot be reached.
+    expect(within(pane).queryByRole("tab", { name: "This chat" })).toBeNull();
+    expect(leaving).toHaveAttribute("aria-hidden", "true");
+    expect(leaving).toHaveAttribute("tabindex", "-1");
+    await waitFor(() => expect(pane.querySelector('[data-note-tab="chat"]')).toBeNull());
+  });
+});
+
+describe("the pane's tab choice and loading", () => {
+  it("stays on the paper when a new chat's note is written after the chat tab was left", async () => {
+    chatNote = { title: "", blocks: [textBlock("b1", "hello", 12)] };
+    render(<ChatPage />);
+    const pane = await openNotes();
+    await userEvent.click(await within(pane).findByRole("tab", { name: "This chat" }));
+    expect(await screen.findByText("note 12")).toBeInTheDocument();
+    // Another chat with no note: the paper shows.
+    chatNote = null;
+    let other = 0;
+    act(() => {
+      other = useChatStore.getState().newSession();
+      useChatStore.getState().patchSessionBackendId(other, 43);
+    });
+    expect(await screen.findByText("note 11")).toBeInTheDocument();
     await waitFor(() => expect(chatTab(pane)).toBeNull());
+    await waitFor(() => expect(useNotesStore.getState().byTarget["session:43"]).toBeDefined());
+    // The agent writes this chat's note: the tab appears, unselected.
+    server.use(
+      http.get(`${API_BASE_URL}/notes/13`, () =>
+        HttpResponse.json(noteBody(13, "session", "43", "", [textBlock("b2", "agent", 13)])),
+      ),
+    );
+    act(() => {
+      useChatStore.getState().applyAgentEvent(other, 7, "notes_changed", { note_id: 13 });
+    });
+    const tab = await within(pane).findByRole("tab", { name: "This chat" });
+    expect(tab).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByText("note 11")).toBeInTheDocument();
+  });
+
+  it("shows no empty state while a chat's note is still loading (no paper)", async () => {
+    useCanvasStore.setState({ activePaperId: null });
+    chatNote = { title: "", blocks: [textBlock("b1", "hello", 12)] };
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    server.use(
+      http.get(`${API_BASE_URL}/notes/target`, async () => {
+        await gate;
+        return HttpResponse.json(noteBody(12, "session", "42", "", chatNote!.blocks));
+      }),
+    );
+    render(<ChatPage />);
+    const pane = await openNotes();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(screen.queryByText("Open a paper or start a chat to take notes.")).toBeNull();
+    release();
+    expect(await within(pane).findByRole("tab", { name: "This chat" })).toBeInTheDocument();
+    expect(await screen.findByText("note 12")).toBeInTheDocument();
   });
 });

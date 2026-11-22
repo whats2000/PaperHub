@@ -19,6 +19,9 @@ interface Props {
   chatTitle: string;
   /** False when the chat has no note worth a tab (it leaves with a motion). */
   chatAvailable: boolean;
+  /** The chat tab grows in (a note that just got content), rather than
+   * simply being there when the pane opens. */
+  animateChatIn?: boolean;
   onSelect: (tab: NoteTab) => void;
   onClose: () => void;
 }
@@ -35,6 +38,7 @@ export function NotesTabs({
   paperTitle,
   chatTitle,
   chatAvailable,
+  animateChatIn = false,
   onSelect,
   onClose,
 }: Props) {
@@ -102,15 +106,17 @@ export function NotesTabs({
             id={noteTabId(idBase, "chat")}
             aria-controls={notePanelId(idBase)}
             aria-selected={active === "chat"}
-            tabIndex={active === "chat" ? 0 : -1}
+            tabIndex={active === "chat" && chatAvailable ? 0 : -1}
+            aria-hidden={chatAvailable ? undefined : true}
+            disabled={!chatAvailable}
             onClick={() => onSelect("chat")}
             title={t("pane.chatTitle", "Notes for this chat only: {{title}}", { title: chatTitle })}
             className={cn(
               tabClass("chat"),
               "shrink-0 fill-mode-forwards motion-reduce:animate-none",
               chatAvailable
-                ? "animate-in fade-in-0 slide-in-from-right-2 duration-200"
-                : "animate-out fade-out-0 slide-out-to-right-2 duration-200",
+                ? animateChatIn && "animate-in fade-in-0 slide-in-from-right-2 duration-200"
+                : "pointer-events-none animate-out fade-out-0 slide-out-to-right-2 duration-200",
             )}
           >
             <MessageSquare className="h-3 w-3 shrink-0" aria-hidden />

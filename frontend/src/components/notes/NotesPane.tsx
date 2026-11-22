@@ -51,6 +51,12 @@ export function NotesPane({ onClose }: Props) {
   const paperId = paper.id;
 
   const [chosen, setChosen] = useState<NoteTab>("paper");
+  // A chat starts on the paper's tab: a tab choice belongs to one chat.
+  const [chosenFor, setChosenFor] = useState(activeSessionId);
+  if (chosenFor !== activeSessionId) {
+    setChosenFor(activeSessionId);
+    setChosen("paper");
+  }
   // "Open in notes" (the agent's change card): the note's tab comes forward.
   const request = useNotesPaneStore((s) => s.request);
   const consumeRequest = useNotesPaneStore((s) => s.consumeRequest);
@@ -78,8 +84,16 @@ export function NotesPane({ onClose }: Props) {
   // is re-evaluated on switching chats or tabs.
   const chatSelected = paperId === null || chosen === "chat";
   const [pin, setPin] = useState<number | null>(null);
+  // (Adjusted while rendering, the React way to derive state from props:
+  // an effect would lag a frame and the lint rule forbids it.)
   if (pin !== null && (pin !== activeSessionId || !chatSelected)) setPin(null);
   else if (pin === null && chatHasContent && chatSelected && activeSessionId !== null) setPin(activeSessionId);
+  // The tab animates in only for a note seen empty (or missing) first.
+  const [seenEmpty, setSeenEmpty] = useState<number | null>(null);
+  if (seenEmpty !== activeSessionId) {
+    if (chatNoteId !== undefined && !chatHasContent) setSeenEmpty(activeSessionId);
+    else if (seenEmpty !== null) setSeenEmpty(null);
+  }
   const chatShown = session !== null && (chatHasContent || (pin !== null && pin === activeSessionId && chatSelected));
   const tab: NoteTab = !chatShown ? (paperId === null ? "chat" : "paper") : paperId === null ? "chat" : chosen;
   // The chat tab names the chat by its local id: it stays the same note
@@ -119,6 +133,7 @@ export function NotesPane({ onClose }: Props) {
 
   // A chat's note started while the chat was local (only on this page)
   // keeps showing after the chat reaches the server.
+  const [probeFailed, setProbeFailed] = useState(false);
   const hasDraft = useNotesStore((s) => draftKey !== null && s.byTarget[draftKey] !== undefined);
   const localChat = target?.kind === "chat" && backendSessionId === null;
 
@@ -131,7 +146,7 @@ export function NotesPane({ onClose }: Props) {
       return;
     }
     if (hasDraft) return;
-    loadTarget("session", backendSessionId).catch(() => undefined);
+    loadTarget("session", backendSessionId).catch(() => setProbeFailed(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId, backendSessionId, session === null, target?.kind, hasDraft, loadTarget, openChatDraft]);
 
@@ -214,6 +229,7 @@ export function NotesPane({ onClose }: Props) {
         paperTitle={paperTitle}
         chatTitle={session?.title ?? ""}
         chatAvailable={chatShown}
+        animateChatIn={seenEmpty !== null && seenEmpty === activeSessionId}
         onSelect={setChosen}
         onClose={onClose}
       />
@@ -252,6 +268,14 @@ export function NotesPane({ onClose }: Props) {
         ) : current?.failed ? (
           <p role="alert" className="px-4 py-3 text-sm text-muted-foreground">
             {t("pane.loadFailed", "Couldn't load this note.")}
+          </p>
+        ) : target === null && session !== null && chatNoteId === undefined && !probeFailed ? (
+          // The chat's note is still being looked up: no empty state yet.
+          <p
+            role="status"
+            className="px-4 py-3 text-sm text-muted-foreground animate-in fade-in-0 duration-200 motion-reduce:animate-none"
+          >
+            {t("loading", "Loading the note…")}
           </p>
         ) : target === null ? (
           <p className="px-4 py-3 text-sm text-muted-foreground">
