@@ -295,6 +295,20 @@ describe("a [[ link chip", () => {
     expect(chip()).not.toHaveAttribute("data-dead", "true");
   });
 
+  it("hovering a dead paper chip checks it again even when a note with the same id is loaded", async () => {
+    server.use(http.get(`${API_BASE_URL}/papers/content/7/info`, () => new HttpResponse(null, { status: 404 })));
+    seed([link({ targetKind: "paper", targetId: 7 })]);
+    useNotesStore.setState({ linkTargets: { "paper:7": { status: "dead", checkedAt: Date.now() } } });
+    mount();
+    await waitFor(() => expect(chip()).toHaveAttribute("data-dead", "true"));
+    // The verdict ages past the re-check window; note 7 (the open note) is loaded.
+    useNotesStore.setState({ linkTargets: { "paper:7": { status: "dead", checkedAt: Date.now() - 60_000 } } });
+    const spy = vi.spyOn(useNotesStore.getState(), "resolveLinkTarget");
+    fireEvent.mouseEnter(chip()!);
+    expect(spy).toHaveBeenCalledWith("paper", 7, expect.anything());
+    spy.mockRestore();
+  });
+
   it("an agent change to the target note refreshes its looked-up outline", async () => {
     note12();
     seed([link({ blockId: "h1" })]);

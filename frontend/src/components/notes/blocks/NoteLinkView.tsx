@@ -155,7 +155,7 @@ export function NoteLinkView({
     clearTimeout(timer.current);
     if (editing) return;
     // A chip drawn dead from an older lookup: hovering checks it again.
-    if (on && dead && targetId > 0 && !useNotesStore.getState().notes[targetId]) {
+    if (on && dead && targetId > 0 && (targetKind !== "note" || !useNotesStore.getState().notes[targetId])) {
       void useNotesStore.getState().resolveLinkTarget(targetKind, targetId, { maxAgeMs: DEAD_RECHECK_MS });
     }
     timer.current = setTimeout(() => setPreview(on), on ? OPEN_DELAY_MS : CLOSE_DELAY_MS);
