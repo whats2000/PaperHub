@@ -34,6 +34,16 @@ function markClipped(wrapper: HTMLElement) {
   setFlag(wrapper, "data-clip-right", scrollLeft + clientWidth < scrollWidth - padR - 1);
 }
 
+/** The part of a table its scroll box (BlockNote's .tableWrapper) shows. */
+export function visibleRect(table: Element): DOMRect {
+  const r = table.getBoundingClientRect();
+  const box = table.closest(".tableWrapper")?.getBoundingClientRect();
+  if (!box) return r;
+  const left = Math.max(r.left, box.left);
+  const right = Math.max(left, Math.min(r.right, box.right));
+  return new DOMRect(left, r.top, right - left, r.height);
+}
+
 /** The tables a change touched in `doc` (only the changed range is
  * walked), by block id. */
 function touchedTables(doc: PMNode, from: number, to: number): Map<string, PMNode> {

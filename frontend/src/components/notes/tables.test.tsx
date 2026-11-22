@@ -15,7 +15,7 @@ import type { ApplyResult, NoteBlock, NoteOpsBody, TableContent } from "@/types/
 
 import { cleanPastedTable, deleteRowOrColumn, insertNoteTable, notePasteHandler, pickAlignments, tableClean, tableKeys } from "./tableKeys";
 import { createCaptionHosts, partRequests, tableCaptions } from "./tableCaptions";
-import { shrinkAway, tableMotion } from "./tableMotion";
+import { shrinkAway, tableMotion, visibleRect } from "./tableMotion";
 import { tableBorderStats, tableBorderView } from "./tableBorderView";
 import { canMerge, deleteSelectedRows, mergeSelected, selectCells, splitSelected } from "./tableMerge";
 import { dumpBorders, parseBorders, presetLines } from "./tableBorders";
@@ -439,6 +439,20 @@ describe("cell selection and wide tables (user report, 2026-11-22)", () => {
     await waitFor(() => expect(document.querySelector('[data-test="bold"]')).toBeNull());
   });
 
+  it("a table wider than its box keeps its ⋯ at the box's visible top right", () => {
+    const box = document.createElement("div");
+    box.className = "tableWrapper";
+    const table = document.createElement("table");
+    box.append(table);
+    document.body.append(box);
+    onTestFinished(() => box.remove());
+    const at = (x: number, w: number) => ({ x, y: 10, left: x, top: 10, right: x + w, bottom: 40, width: w, height: 30, toJSON: () => ({}) }) as DOMRect;
+    Object.defineProperty(box, "getBoundingClientRect", { value: () => at(100, 600) });
+    Object.defineProperty(table, "getBoundingClientRect", { value: () => at(-50, 950) });
+    const r = visibleRect(table);
+    expect([r.left, r.right, r.top, r.height]).toEqual([100, 700, 10, 30]);
+  });
+
   it("selected cells are tinted with the demo's blue, not BlockNote's lavender overlay", () => {
     expect(indexCss).toMatch(/\.paperhub-notes\s*\{[^}]*--note-sel-cell:\s*oklch\(0\.62 0\.09 250 \/ 0\.16\)/);
     expect(indexCss).toMatch(/\.dark \.paperhub-notes\s*\{[^}]*--note-sel-cell:\s*oklch\(0\.62 0\.09 250 \/ 0\.25\)/);
@@ -446,6 +460,23 @@ describe("cell selection and wide tables (user report, 2026-11-22)", () => {
     expect(indexCss).toMatch(/\.selectedCell::after\s*\{[^}]*content:\s*none/);
   });
 
+  it("a table whose every column has a width keeps that width, past its box (it scrolls there)", () => {
+    // prosemirror-tables gives such a table an inline width, which BlockNote's
+    // `width: auto !important` overrides: the table was squeezed into its box.
+    const editor = makeEditor([tableMotion], [
+      {
+        id: "t",
+        type: "table",
+        content: { type: "tableContent", columnWidths: [300, 300, 400], rows: [{ cells: ["a", "b", "c"] }] },
+      },
+    ]);
+    const table = editor._tiptapEditor.view.dom.querySelector("table")!;
+    // What the CSS keys on: the width written after another property.
+    expect(table.getAttribute("style")).toMatch(/; width: 1000px;/);
+    // The fixed layout's own width (the columns' sum), not the box's.
+    const rule = /table:is\(\[style\^="width:"\], \[style\*="; width:"\]\)\s*\{([^}]*)\}/.exec(indexCss)?.[1] ?? "";
+    expect(rule).toMatch(/width:\s*max-content\s*!important/);
+  });
 });
 
 // ---------------------------------------------------------------- motion

@@ -665,6 +665,16 @@
 .paperhub-notes [data-content-type="table"] table {
     border-collapse: collapse;
 }
+/* Once every column has a width (dragged), prosemirror-tables sets their
+   sum as the table's inline width, which BlockNote's `width: auto
+   !important` overrode: the table was squeezed into its box and dragging
+   the last column's edge could not widen it. Its fixed layout's own width
+   is that sum, wider than the box if need be (the box scrolls, the pane
+   never does). With some columns unsized it sets a min-width instead,
+   which already works. */
+.paperhub-notes .bn-editor [data-content-type="table"] table:is([style^="width:"], [style*="; width:"]) {
+    width: max-content !important;
+}
 .paperhub-notes [data-content-type="table"] th {
     background: transparent;
     font-weight: 600;

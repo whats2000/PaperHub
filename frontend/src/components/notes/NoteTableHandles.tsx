@@ -50,7 +50,7 @@ import type { TablePart } from "./noteFind";
 import { TableBordersPicker } from "./TableBordersPicker";
 import { partRequests } from "./tableCaptions";
 import { columnAlignment, deleteRowOrColumn, setColumnAlignment, type Alignment } from "./tableKeys";
-import { shrinkAway } from "./tableMotion";
+import { shrinkAway, visibleRect } from "./tableMotion";
 import { bordersOf, dumpBorders, presetLines, tableShape, type Preset, type Selection } from "./tableBorders";
 import { headerDepth, tableGrid } from "./tableGrid";
 import {
@@ -356,7 +356,10 @@ function TableMoreMenu() {
     const info = getNodeById(state.block.id, editor.prosemirrorState.doc);
     if (!info) return undefined;
     const table = editor.prosemirrorView.domAtPos(info.posBeforeNode + 2).node;
-    return table instanceof Element ? { element: table } : undefined;
+    if (!(table instanceof Element)) return undefined;
+    // A table wider than its scroll box: the ⋯ stays at the box's visible
+    // top right, not off past the pane at the table's own corner.
+    return { element: table, getBoundingClientRect: () => visibleRect(table) };
   }, [editor, state]);
 
   const block = state?.block;
