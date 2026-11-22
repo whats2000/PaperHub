@@ -459,9 +459,15 @@ describe("the [[ picker", () => {
       (e) => !e.parentElement?.closest(".bn-suggestion-menu-item"),
     );
 
-  // On a line inside the editor: the menu listens in the capture phase.
-  const pressInMenu = (key: string) =>
+  // On a line inside the editor: the menu listens in the capture phase. The
+  // menu draws its rows before a passive effect hands its key listener those
+  // rows; until then Enter goes to the listener holding the old (empty)
+  // rows and picks nothing. Flush the effects first: a key pressed between
+  // the two was the noteLink tests' flake under a loaded full-suite run.
+  const pressInMenu = async (key: string) => {
+    await act(async () => {});
     fireEvent.keyDown(document.querySelector(".ProseMirror .bn-inline-content")!, { key });
+  };
 
   async function openAtEnd() {
     posted.length = 0;
@@ -538,7 +544,7 @@ describe("the [[ picker", () => {
     await openAtEnd();
     typeIn("[[robo|見此");
     await screen.findByText("Robot idea");
-    pressInMenu("Enter");
+    await pressInMenu("Enter");
     await waitFor(() => expect(sentLink()).toHaveLength(1));
     expect(sentLink()[0]!.props).toEqual({
       targetKind: "note",
@@ -559,7 +565,7 @@ describe("the [[ picker", () => {
     await openAtEnd();
     typeIn("[[[robo");
     await screen.findByText("Robot idea");
-    pressInMenu("Enter");
+    await pressInMenu("Enter");
     await waitFor(() => expect(sentLink()).toHaveLength(1));
     const content = allOps().at(-1)!.block!.content as { type: string; text?: string }[];
     expect(content[0]!.text).toBe("see ");
@@ -571,7 +577,7 @@ describe("the [[ picker", () => {
     await openAtEnd();
     typeIn("[[robo|");
     await screen.findByText("Robot idea");
-    pressInMenu("Enter");
+    await pressInMenu("Enter");
     await waitFor(() => expect(sentLink()).toHaveLength(1));
     expect(sentLink()[0]!.props.label).toBe("");
   });
@@ -589,7 +595,7 @@ describe("the [[ picker", () => {
     expect(screen.getByText("Headings")).toBeInTheDocument();
     // Only exact titles list headings: "Robots at scale" adds no sections.
     expect(screen.queryByText("Paper sections")).toBeNull();
-    pressInMenu("Enter");
+    await pressInMenu("Enter");
     await waitFor(() => expect(sentLink()).toHaveLength(1));
     expect(sentLink()[0]!.props).toMatchObject({ targetId: 12, blockId: "h1", name: "RoboTTT › 閘控" });
   });
@@ -609,8 +615,8 @@ describe("the [[ picker", () => {
     await waitFor(() => expect(menuItems()).toHaveLength(2));
     expect(errors.mock.calls.flat().join(" ")).not.toMatch(/same key/);
     errors.mockRestore();
-    pressInMenu("ArrowDown");
-    pressInMenu("Enter");
+    await pressInMenu("ArrowDown");
+    await pressInMenu("Enter");
     await waitFor(() => expect(sentLink()).toHaveLength(1));
     expect(sentLink()[0]!.props).toMatchObject({ targetKind: "paper", targetId: 5, name: "Attention" });
   });
@@ -631,11 +637,11 @@ describe("the [[ picker", () => {
     await openAtEnd();
     typeIn("[[Robo#");
     await screen.findByText("RoboTTT");
-    pressInMenu("Enter");
+    await pressInMenu("Enter");
     await screen.findByText("閘控");
     expect(lineText()).toBe("see [[RoboTTT#");
     expect(sentLink()).toHaveLength(0);
-    pressInMenu("Enter");
+    await pressInMenu("Enter");
     await waitFor(() => expect(sentLink()).toHaveLength(1));
     expect(sentLink()[0]!.props).toMatchObject({ targetId: 12, blockId: "h1", name: "RoboTTT › 閘控" });
     const content = allOps().at(-1)!.block!.content as { type: string; text?: string }[];
@@ -650,7 +656,7 @@ describe("the [[ picker", () => {
     await openAtEnd();
     typeIn("[[zzzzzz");
     await screen.findByText("No matching notes or papers");
-    pressInMenu("Enter");
+    await pressInMenu("Enter");
     await screen.findByText("No matching notes or papers");
     expect(lineText()).toBe("see [[zzzzzz");
     expect(sentLink()).toHaveLength(0);
