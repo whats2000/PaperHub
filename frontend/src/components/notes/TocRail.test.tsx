@@ -192,6 +192,25 @@ describe("TocRail", () => {
     expect(rail).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("leaving after a click on an entry closes the list with focus back on the rail, never inside the hidden list", () => {
+    vi.useFakeTimers();
+    render(<TocRail noteId={7} root={root} />);
+    const wrap = screen.getByTestId("toc-rail");
+    fireEvent.mouseEnter(wrap);
+    const entry = screen.getByRole("button", { name: "1 Introduction" });
+    entry.focus(); // a mouse click focuses the entry
+    fireEvent.mouseLeave(wrap);
+    act(() => {
+      vi.advanceTimersByTime(TOC_RAIL_CLOSE_MS);
+    });
+    const list = screen.getByTestId("toc-rail-list");
+    expect(list).toHaveAttribute("data-state", "closed");
+    expect(list.contains(document.activeElement)).toBe(false);
+    expect(screen.getByRole("button", { name: "Table of contents" })).toHaveFocus();
+    // Focus coming back to the rail does not reopen the list.
+    expect(list).toHaveAttribute("data-state", "closed");
+  });
+
   it("a tap or a click while hovering leaves the list open", async () => {
     const user = userEvent.setup();
     render(<TocRail noteId={7} root={root} />);

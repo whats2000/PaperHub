@@ -205,18 +205,29 @@ export function TocRail({ noteId, root }: { noteId: number | null; root: HTMLEle
     cancelClose();
     setOpen(true);
   };
+  const railRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLElement>(null);
+  /** Closes the list. Focus in it (a clicked entry) goes back to the rail
+   * first, quietly: a hidden, inert list must not hold the focus. */
+  const close = () => {
+    cancelClose();
+    if (listRef.current?.contains(document.activeElement)) {
+      quietFocus.current = true;
+      railRef.current?.focus();
+    }
+    setOpen(false);
+  };
   const hideSoon = () => {
     cancelClose();
     closeTimer.current = setTimeout(() => {
       closeTimer.current = null;
-      setOpen(false);
+      close();
     }, TOC_RAIL_CLOSE_MS);
   };
   useEffect(() => cancelClose, []);
   if (!visible && open) setOpen(false);
 
   const { current, pin, arm } = useScrollSpy(root, outline, mounted, foldKey);
-  const railRef = useRef<HTMLButtonElement>(null);
 
   const go = (blockId: string) => {
     if (!root || noteId === null) return;
@@ -244,12 +255,7 @@ export function TocRail({ noteId, root }: { noteId: number | null; root: HTMLEle
       onKeyDown={(e) => {
         if (e.key === "Escape" && open) {
           e.stopPropagation();
-          cancelClose();
-          setOpen(false);
-          if (document.activeElement !== railRef.current) {
-            quietFocus.current = true;
-            railRef.current?.focus();
-          }
+          close();
         }
       }}
     >
@@ -281,6 +287,7 @@ export function TocRail({ noteId, root }: { noteId: number | null; root: HTMLEle
       </button>
       {/* Content being read: opaque, slides in from the rail, back out to it. */}
       <nav
+        ref={listRef}
         id={listId}
         data-testid="toc-rail-list"
         data-state={open ? "open" : "closed"}
