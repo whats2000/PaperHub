@@ -811,13 +811,20 @@ export const useChatStore = create<ChatState>()(
           // The agent changed a note: an open editor shows it at once.
           const noteId = (data as { note_id?: number }).note_id;
           if (typeof noteId === "number") noteMarksChanged(noteId);
+          const notes = useNotesStore.getState();
+          // Other notes the recolour redrew (part of this one change, no
+          // card of their own): open ones reload too.
+          for (const r of (data as { redrawn?: { note_id?: unknown }[] }).redrawn ?? []) {
+            if (typeof r.note_id === "number" && notes.notes[r.note_id]) {
+              void notes.loadNote(r.note_id).catch(() => undefined);
+            }
+          }
           // A recoloured mark may live on another note's paper (a chat
           // note's copy): its reader redraws too.
           const marks = (data as { marks?: { paper_id?: unknown }[] }).marks ?? [];
           paperMarksChanged([
             ...new Set(marks.flatMap((m) => (typeof m.paper_id === "number" ? [m.paper_id] : []))),
           ]);
-          const notes = useNotesStore.getState();
           if (typeof noteId === "number" && notes.notes[noteId]) {
             void notes.loadNote(noteId).catch(() => undefined);
           } else if (typeof noteId === "number") {

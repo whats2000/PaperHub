@@ -54,7 +54,13 @@ from paperhub.notes.ops import BlockIn, Op, apply_ops
 from paperhub.notes.papers import _section_order
 from paperhub.notes.run_text import read_runs
 from paperhub.notes.scope import is_unsaved, note_ref, notes_in_scope, ref_of
-from paperhub.notes.store import block_text, get_note, list_blocks, new_block_id
+from paperhub.notes.store import (
+    block_text,
+    display_title,
+    get_note,
+    list_blocks,
+    new_block_id,
+)
 
 # A table's notes in read_note, after its GFM body.
 TABLE_NOTES = "table_notes"
@@ -894,22 +900,25 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             section, await _structural_ids(ctx.conn, record["applied"]),
             await _table_sizes(ctx.conn, record["applied"]),
             {b for m in record.get("marks", []) for b in m["blocks"]})
-        marks = ({"marks": record["marks"]} if record.get("marks") else {})
+        extra: dict[str, Any] = {}
+        if record.get("marks"):
+            extra["marks"] = record["marks"]
+        if record.get("redrawn"):
+            # A recoloured mark's copies in other notes: one change, one
+            # card (its Undo reverts them all); the card names those notes
+            # and the client reloads them. Their change sets stay in the
+            # DB, for each note's history, without cards of their own.
+            redrawn = []
+            for r in record["redrawn"]:
+                other = await get_note(ctx.conn, r["note_id"])
+                redrawn.append({**r, "note_title": (
+                    await display_title(ctx.conn, other) if other is not None
+                    else "")})
+            extra["redrawn"] = redrawn
         events.append(("notes_changed", {
             "change_set_id": record["change_set_id"], "note_id": note.id,
             "note_title": note.title, "summary": record["summary"],
-            "revision": revision, **marks}))
-        for r in record.get("redrawn", []):
-            # A recoloured mark's copies in another note: that note changed
-            # too, and an open editor of it reloads.
-            other = await get_note(ctx.conn, r["note_id"])
-            events.append(("notes_changed", {
-                "change_set_id": r["change_set_id"], "note_id": r["note_id"],
-                "note_title": other.title if other is not None else "",
-                "summary": {"added": 0, "updated": len(r["blocks"]),
-                            "deleted": 0, "suggested": 0, "rejected": 0,
-                            "section": None},
-                "revision": r["revision"], **marks}))
+            "revision": revision, **extra}))
     return ToolOutcome(
         content=json.dumps(result, ensure_ascii=False), record=record,
         events=events)

@@ -215,13 +215,26 @@ async def test_agent_recolour_tells_the_other_notes(
                      base_revision=note.revision, ops=[
         {"op": "update", "block_id": "q1",
          "block": {"type": "paperQuote", "props": {"color": "blue"}}}])
-    [(_, own), (name, there)] = out.events
-    assert name == "notes_changed" and there["note_id"] == other
+    # One recolour, one change card: the other note is named on it, not
+    # given a card (and an Undo) of its own.
+    [(name, own)] = out.events
+    assert name == "notes_changed" and own["note_id"] == nid
     after = await get_note(migrated_db, other)
-    assert after is not None and there["revision"] == after.revision
-    assert there["change_set_id"] == out.record["redrawn"][0]["change_set_id"]
-    assert there["summary"]["updated"] == 1 and there["summary"]["added"] == 0
+    assert after is not None
+    [r] = own["redrawn"]
+    assert r == {"note_id": other, "note_title": "Idea",
+                 "revision": after.revision,
+                 "change_set_id": out.record["redrawn"][0]["change_set_id"],
+                 "blocks": ["q9"]}
     # The same-note copy is an update, not an added block.
     assert own["summary"]["updated"] == 2 and own["summary"]["added"] == 0
     assert own["marks"] == out.record["marks"]
-    assert there["marks"] == out.record["marks"]
+    # Its Undo reverts every copy, in this note and the other.
+    from paperhub.notes.ops import undo_change_set
+    undo = await undo_change_set(migrated_db, own["change_set_id"])
+    assert undo.rejected == []
+    for note_id in (nid, other):
+        assert {b.props["color"] for b in await list_blocks(migrated_db, note_id)} == {"green"}
+    async with migrated_db.execute(
+            "SELECT color FROM note_marks WHERE id = 'mk_1'") as cur:
+        assert (await cur.fetchone()) == ("green",)

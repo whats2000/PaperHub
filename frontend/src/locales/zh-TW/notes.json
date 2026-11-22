@@ -353,6 +353,8 @@
     "kept_one": "你之後編輯過的 {{count}} 則筆記已保留。",
     "kept_other": "你之後編輯過的 {{count}} 則筆記已保留。",
     "changed": "修改了你的筆記",
+    "redrawnOther_one": "同時更新了另外 {{count}} 份筆記中的標記：{{names}}",
+    "redrawnOther_other": "同時更新了另外 {{count}} 份筆記中的標記：{{names}}",
     "open": "在筆記中開啟",
     "undo": "復原",
     "applyAgain": "重新套用",

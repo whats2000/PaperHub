@@ -111,6 +111,47 @@ describe("NotesChangeCard", () => {
     expect(screen.queryByText(/Added \d+ note/)).not.toBeInTheDocument();
   });
 
+  it("names the other notes a mark recolour redrew, on its one card (Task 16)", () => {
+    server.use(http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => HttpResponse.json(detail())));
+    render(
+      <NotesChangeCard
+        data={{
+          ...data,
+          summary: { ...data.summary, added: 0, updated: 1, suggested: 0, section: null },
+          redrawn: [
+            { note_id: 8, note_title: "Idea", revision: 3, change_set_id: "cs_8", blocks: ["q8"] },
+            { note_id: 9, note_title: "Chat", revision: 2, change_set_id: "cs_9", blocks: ["q9", "q10"] },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText("Also updated the mark in 2 other notes: Idea, Chat")).toBeInTheDocument();
+  });
+
+  it("its Undo reloads the other notes the undo redrew back (Task 16)", async () => {
+    const loads: number[] = [];
+    useNotesStore.setState({
+      notes: { 8: {} as never },
+      loadNote: (id: number) => {
+        loads.push(id);
+        return Promise.resolve();
+      },
+    } as never);
+    server.use(
+      http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => HttpResponse.json(detail())),
+      http.post(`${API_BASE_URL}/notes/change-sets/cs_1/undo`, () =>
+        HttpResponse.json({
+          note_id: 7, revision: 6, change_set_id: "cs_1", applied: ["q7"], suggested: [], rejected: [], reparented: [],
+          marks: [{ mark_id: "mk_1", paper_id: 3, block_id: "q7", color: { from: "blue", to: "green" }, blocks: ["q8"] }],
+          redrawn: [{ note_id: 8, revision: 4, change_set_id: "cs_10", blocks: ["q8"] }],
+        }),
+      ),
+    );
+    render(<NotesChangeCard data={{ ...data, redrawn: [{ note_id: 8, note_title: "Idea", revision: 3, change_set_id: "cs_8", blocks: ["q8"] }] }} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Undo/ }));
+    await waitFor(() => expect(loads).toContain(8));
+  });
+
   it("Undo turns into Apply again and back, each call on the set live at the time", async () => {
     server.use(
       http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () => HttpResponse.json(detail())),

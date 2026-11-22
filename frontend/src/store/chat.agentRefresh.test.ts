@@ -129,3 +129,39 @@ describe("notes_changed of a mark recolour (Task 16)", () => {
     expect(papers).toEqual([[4]]);
   });
 });
+
+describe("notes_changed naming other notes a recolour redrew (Task 16)", () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    useChatStore.setState({
+      sessions: [
+        {
+          id: 1,
+          title: "t",
+          backend_session_id: 5,
+          messages: [{ role: "assistant", content: "", run_id: 7, status: "processing" }],
+        },
+      ],
+      activeSessionId: 1,
+    });
+  });
+
+  it("reloads each open note it names, and keeps one card", async () => {
+    const { useNotesStore } = await import("@/store/notes");
+    const loadNote = vi.fn(() => Promise.resolve());
+    useNotesStore.setState({ notes: { 9: {} as never, 8: {} as never }, loadNote } as never);
+    const ev = {
+      change_set_id: "cs_2",
+      note_id: 9,
+      note_title: "Chat",
+      summary: { added: 0, updated: 1, deleted: 0, suggested: 0, rejected: 0, section: null },
+      revision: 3,
+      redrawn: [{ note_id: 8, note_title: "Idea", revision: 4, change_set_id: "cs_8", blocks: ["q8"] }],
+    };
+    useChatStore.getState().applyAgentEvent(1, 7, "notes_changed", ev);
+    expect(loadNote).toHaveBeenCalledWith(9);
+    expect(loadNote).toHaveBeenCalledWith(8);
+    const events = useChatStore.getState().sessions[0]!.messages[0]!.agent_events ?? [];
+    expect(events).toHaveLength(1);
+  });
+});

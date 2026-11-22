@@ -353,6 +353,8 @@
     "kept_one": "{{count}} note you edited since was kept.",
     "kept_other": "{{count}} notes you edited since were kept.",
     "changed": "Changed your notes",
+    "redrawnOther_one": "Also updated the mark in {{count}} other note: {{names}}",
+    "redrawnOther_other": "Also updated the mark in {{count}} other notes: {{names}}",
     "open": "Open in notes",
     "undo": "Undo",
     "applyAgain": "Apply again",

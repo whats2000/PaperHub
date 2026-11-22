@@ -353,6 +353,8 @@
     "kept_one": "その後あなたが編集したノート {{count}} 件はそのままです。",
     "kept_other": "その後あなたが編集したノート {{count}} 件はそのままです。",
     "changed": "ノートを変更しました",
+    "redrawnOther_one": "他の {{count}} 件のノートのマークも更新しました：{{names}}",
+    "redrawnOther_other": "他の {{count}} 件のノートのマークも更新しました：{{names}}",
     "open": "ノートで開く",
     "undo": "元に戻す",
     "applyAgain": "もう一度適用",

@@ -1,4 +1,4 @@
-import type { MarkRedraw } from "./notes";
+import type { MarkRedraw, NoteRedrawn } from "./notes";
 
 export type Intent =
   | "paper_search"
@@ -345,6 +345,9 @@ export interface NotesChangedData {
   revision: number;
   /** Marks the change recoloured: the reader redraws their papers. */
   marks?: MarkRedraw[];
+  /** Other notes those marks were redrawn in (part of this one change:
+   * no cards of their own; the card names them, the client reloads them). */
+  redrawn?: (NoteRedrawn & { note_title: string })[];
 }
 
 /** A tool UI event of an agent turn, live (SSE) or replayed (agent_events). */

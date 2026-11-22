@@ -353,6 +353,8 @@
     "kept_one": "你之后编辑过的 {{count}} 条笔记已保留。",
     "kept_other": "你之后编辑过的 {{count}} 条笔记已保留。",
     "changed": "修改了你的笔记",
+    "redrawnOther_one": "同时更新了另外 {{count}} 份笔记中的标记：{{names}}",
+    "redrawnOther_other": "同时更新了另外 {{count}} 份笔记中的标记：{{names}}",
     "open": "在笔记中打开",
     "undo": "撤销",
     "applyAgain": "重新应用",

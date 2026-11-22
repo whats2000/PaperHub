@@ -170,6 +170,18 @@ export function NotesChangeCard({ data }: { data: NotesChangedData }) {
       text: t("notes:card.suggested", { count: s.suggested }),
     });
   }
+  const redrawn = data.redrawn ?? [];
+  if (redrawn.length) {
+    // A recoloured mark's copies in other notes: part of this one change
+    // (this card's Undo reverts them too), named rather than carded.
+    parts.push({
+      key: "redrawn",
+      text: t("notes:card.redrawnOther", {
+        count: redrawn.length,
+        names: redrawn.map((r) => r.note_title).join(", "),
+      }),
+    });
+  }
   if (!parts.length) parts.push({ key: "changed", text: t("notes:card.changed", "Changed your notes") });
 
   const label = undone ? t("notes:card.applyAgain", "Apply again") : t("notes:card.undo", "Undo");
