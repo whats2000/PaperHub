@@ -128,6 +128,10 @@ class ApplyResult(BaseModel):
     # {mark_id, block_id, color / style: {from, to}, blocks}, ``blocks``
     # the other blocks showing the mark that were redrawn with it.
     marks: list[dict[str, Any]] = []
+    # The changes those redraws made in other notes (each its own change
+    # set there): {note_id, revision, change_set_id, blocks}. A client
+    # reloads these notes.
+    redrawn: list[dict[str, Any]] = []
 
 
 def _now() -> str:
@@ -212,6 +216,7 @@ class _Ctx:
         self.merge = merge or actor == "agent"
         self.inline: list[dict[str, Any]] = []
         self.marks: list[dict[str, Any]] = []
+        self.redrawn: list[dict[str, Any]] = []
         # Ids of inserts that failed: an op naming one fails with them.
         self.failed: set[str] = set()
         self.op_index: int | None = None
@@ -235,7 +240,7 @@ class _Ctx:
             suggested=self.suggested, rejected=self.rejected,
             reparented=self.reparented, withdrawn=self.withdrawn,
             renamed=self.renamed_list(), inline=self.inline,
-            marks=self.marks,
+            marks=self.marks, redrawn=self.redrawn,
         )
 
     def renamed_list(self) -> list[dict[str, str]]:
@@ -366,6 +371,7 @@ class _Ctx:
                 (changed.get("color", mark["color"]),
                  changed.get("style", mark["style"]), mark["id"]))
             entry: dict[str, Any] = {"mark_id": mark["id"],
+                                     "paper_id": mark["paper_id"],
                                      "block_id": block_id}
             for k in sorted(changed):
                 entry[k] = {"from": mark[k], "to": changed[k]}
@@ -387,39 +393,47 @@ class _Ctx:
         ) as cur:
             rows = await cur.fetchall()
         redrawn: list[str] = []
+        others: dict[int, list[Op]] = {}
         for bid, note_id in rows:
-            if note_id == self.note_id:
-                row = await self.get(bid)
-                assert row is not None
-                props = _drawn(row.props, mark)
-                if props == row.props:
-                    continue
-                before = row.state()
-                after = {**before, "props": props}
-                await self.write_state(bid, after)
-                await self.history(bid, "update", before, after)
-                if bid not in self.applied:
-                    self.applied.append(bid)
-            else:
+            if note_id != self.note_id:
                 async with self.conn.execute(
                     f"SELECT {_COLS} FROM note_blocks WHERE id = ?",  # noqa: S608
                     (bid,),
                 ) as cur:
                     other = _row(await cur.fetchone())
                 props = _drawn(other.props, mark)
-                if props == other.props:
-                    continue
-                note = await get_note(self.conn, note_id)
-                assert note is not None
-                res = await _apply_in_tx(
-                    self.conn, note_id, base_revision=note.revision,
-                    ops=[Op(op="update", block_id=bid, block=BlockIn(
-                        type=other.type, props=props, content=other.content,
-                        section_key=other.section_key))],
-                    actor="system", run_id=self.run_id, summary="Redraw mark")
-                if bid not in res.applied:
-                    continue
+                if props != other.props:
+                    others.setdefault(note_id, []).append(Op(
+                        op="update", block_id=bid, block=BlockIn(
+                            type=other.type, props=props,
+                            content=other.content,
+                            section_key=other.section_key)))
+                continue
+            row = await self.get(bid)
+            assert row is not None
+            props = _drawn(row.props, mark)
+            if props == row.props:
+                continue
+            before = row.state()
+            after = {**before, "props": props}
+            await self.write_state(bid, after)
+            await self.history(bid, "update", before, after)
+            if bid not in self.applied:
+                self.applied.append(bid)
             redrawn.append(bid)
+        for note_id, ops in others.items():
+            note = await get_note(self.conn, note_id)
+            assert note is not None
+            res = await _apply_in_tx(
+                self.conn, note_id, base_revision=note.revision, ops=ops,
+                actor="system", run_id=self.run_id, summary="Redraw mark")
+            landed = [o.block_id for o in ops if o.block_id in res.applied]
+            redrawn += [b for b in landed if b is not None]
+            if landed and res.change_set_id is not None:
+                self.redrawn.append({
+                    "note_id": note_id, "revision": res.revision,
+                    "change_set_id": res.change_set_id,
+                    "blocks": landed})
         return redrawn
 
     async def _revive_marks(self, block_id: str) -> None:

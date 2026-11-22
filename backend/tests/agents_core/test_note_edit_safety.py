@@ -166,7 +166,7 @@ async def test_agent_recolour_records_the_mark(
          "block": {"type": "paperQuote", "props": {"color": "blue"}}}])
     data = json.loads(out.content)
     assert data["rejected"] == []
-    marks = [{"mark_id": "mk_1", "block_id": "q1",
+    marks = [{"mark_id": "mk_1", "paper_id": 7, "block_id": "q1",
               "color": {"from": "green", "to": "blue"}, "blocks": ["q2"]}]
     assert out.record["marks"] == marks and data["marks"] == marks
     async with migrated_db.execute(
@@ -195,3 +195,33 @@ async def test_agent_unknown_colour_is_refused_with_the_reason(
     async with migrated_db.execute(
             "SELECT color FROM note_marks WHERE id = 'mk_1'") as cur:
         assert (await cur.fetchone()) == ("green",)
+
+
+async def test_agent_recolour_tells_the_other_notes(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    await _quote_mark(migrated_db)
+    nid = await _note(migrated_db, [("q1", _quote_block()),
+                                    ("q2", _quote_block())], actor="agent")
+    other = (await get_or_create_note(migrated_db, target_kind="idea",
+                                      target_id="5", title="Idea")).id
+    o = await get_note(migrated_db, other)
+    assert o is not None
+    await apply_ops(migrated_db, other, base_revision=o.revision, actor="agent",
+                    ops=[Op(op="insert", block_id="q9", block=_quote_block())])
+    note = await get_note(migrated_db, nid)
+    assert note is not None
+    out = await _run(_ctx(migrated_db, fake_tracer), "edit_note", note="chat",
+                     base_revision=note.revision, ops=[
+        {"op": "update", "block_id": "q1",
+         "block": {"type": "paperQuote", "props": {"color": "blue"}}}])
+    [(_, own), (name, there)] = out.events
+    assert name == "notes_changed" and there["note_id"] == other
+    after = await get_note(migrated_db, other)
+    assert after is not None and there["revision"] == after.revision
+    assert there["change_set_id"] == out.record["redrawn"][0]["change_set_id"]
+    assert there["summary"]["updated"] == 1 and there["summary"]["added"] == 0
+    # The same-note copy is an update, not an added block.
+    assert own["summary"]["updated"] == 2 and own["summary"]["added"] == 0
+    assert own["marks"] == out.record["marks"]
+    assert there["marks"] == out.record["marks"]

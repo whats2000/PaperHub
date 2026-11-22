@@ -54,7 +54,7 @@ from paperhub.notes.ops import BlockIn, Op, apply_ops
 from paperhub.notes.papers import _section_order
 from paperhub.notes.run_text import read_runs
 from paperhub.notes.scope import is_unsaved, note_ref, notes_in_scope, ref_of
-from paperhub.notes.store import block_text, list_blocks, new_block_id
+from paperhub.notes.store import block_text, get_note, list_blocks, new_block_id
 
 # A table's notes in read_note, after its GFM body.
 TABLE_NOTES = "table_notes"
@@ -460,7 +460,8 @@ def _section_ops(
 
 def _summary(ops: list[Op], applied: list[str], suggested: int, rejected: int,
              section: str | None, structural: set[str],
-             tables: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
+             tables: dict[str, dict[str, int]] | None = None,
+             redrawn: set[str] | None = None) -> dict[str, Any]:
     """Counts for the notes_changed card. ``added`` counts content blocks
     only: dividers and sections (``structural``) are left out.
     ``tables_added`` (only when a table was added) gives each new table's
@@ -469,10 +470,13 @@ def _summary(ops: list[Op], applied: list[str], suggested: int, rejected: int,
     done = set(applied)
     touched = [o for o in ops if o.op != "insert" and o.block_id in done]
     touched_ids = {o.block_id for o in touched}
+    # Other blocks showing a mark the change recoloured: updated with it.
+    copies = (redrawn or set()) & done - touched_ids
     out: dict[str, Any] = {
         "added": sum(a not in touched_ids and a not in structural
-                     for a in applied),
-        "updated": sum(o.op in ("update", "move") for o in touched),
+                     and a not in copies for a in applied),
+        "updated": sum(o.op in ("update", "move") for o in touched)
+        + len(copies),
         "deleted": sum(o.op == "delete" for o in touched),
         "suggested": suggested, "rejected": rejected, "section": section,
     }
@@ -835,6 +839,9 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
             # The mark rows a colour / style change wrote: id, old and new
             # values, and the other blocks redrawn with it.
             record["marks"] = res.marks
+        if res.redrawn:
+            # Those redraws' changes in other notes (a change set each).
+            record["redrawn"] = res.redrawn
         for r in res.rejected:
             entry = {**r, "current": _current(r.get("current"))}
             pos = entry.pop("op", None)
@@ -885,11 +892,24 @@ async def _edit_note(ctx: ToolContext, args: dict[str, Any]) -> ToolOutcome:
         record["summary"] = _summary(
             valid, record["applied"], len(record["suggested"]), len(rejected),
             section, await _structural_ids(ctx.conn, record["applied"]),
-            await _table_sizes(ctx.conn, record["applied"]))
+            await _table_sizes(ctx.conn, record["applied"]),
+            {b for m in record.get("marks", []) for b in m["blocks"]})
+        marks = ({"marks": record["marks"]} if record.get("marks") else {})
         events.append(("notes_changed", {
             "change_set_id": record["change_set_id"], "note_id": note.id,
             "note_title": note.title, "summary": record["summary"],
-            "revision": revision}))
+            "revision": revision, **marks}))
+        for r in record.get("redrawn", []):
+            # A recoloured mark's copies in another note: that note changed
+            # too, and an open editor of it reloads.
+            other = await get_note(ctx.conn, r["note_id"])
+            events.append(("notes_changed", {
+                "change_set_id": r["change_set_id"], "note_id": r["note_id"],
+                "note_title": other.title if other is not None else "",
+                "summary": {"added": 0, "updated": len(r["blocks"]),
+                            "deleted": 0, "suggested": 0, "rejected": 0,
+                            "section": None},
+                "revision": r["revision"], **marks}))
     return ToolOutcome(
         content=json.dumps(result, ensure_ascii=False), record=record,
         events=events)

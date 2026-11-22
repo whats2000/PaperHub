@@ -84,7 +84,7 @@ async def test_agent_colour_change_writes_the_mark_and_every_block(
     assert (await _props_of(conn, n, "q1"))["color"] == "blue"
     # The second block showing the same mark reads blue too.
     assert (await _props_of(conn, n, "q2"))["color"] == "blue"
-    assert res.marks == [{"mark_id": "mk_1", "block_id": "q1",
+    assert res.marks == [{"mark_id": "mk_1", "paper_id": 7, "block_id": "q1",
                           "color": {"from": "green", "to": "blue"},
                           "blocks": ["q2"]}]
 
