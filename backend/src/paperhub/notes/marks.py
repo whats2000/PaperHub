@@ -444,6 +444,23 @@ async def _insert_row(conn: aiosqlite.Connection, rec: dict[str, Any]) -> None:
         rec.get("style")))
 
 
+async def _last_user_edit(conn: aiosqlite.Connection, note_id: int,
+                          blocks: list[Block]) -> str | None:
+    """The live block the user changed last (highest ``changed_rev`` among
+    the user's changes; a tie: the last in the note). A block whose last
+    change was the agent's or the system's does not count."""
+    async with conn.execute(
+        "SELECT id, changed_rev FROM note_blocks WHERE note_id = ? "
+        "AND deleted_at IS NULL AND changed_by = 'user'", (note_id,),
+    ) as cur:
+        revs = {str(r[0]): int(r[1]) for r in await cur.fetchall()}
+    if not revs:
+        return None
+    top = max(revs.values())
+    return next((b.id for b in reversed(blocks) if revs.get(b.id) == top),
+                None)
+
+
 async def create_mark(conn: aiosqlite.Connection, m: MarkIn,
                       ) -> tuple[dict[str, Any], SavedTo]:
     kind, style = normalized(m.kind, m.style)
@@ -458,14 +475,17 @@ async def create_mark(conn: aiosqlite.Connection, m: MarkIn,
         if m.join_to is not None:
             return await _join(conn, m)
         note = await paper_note(conn, m.paper_content_id)
-        # [user, 2026-11-19] No section heading is added: the block goes
-        # right after the user's last caret block in this note (the
-        # frontend's ``hint_block_id``), else at the end of the note.
+        # [user, 2026-11-19 / 2026-11-22] No section heading is added: the
+        # block goes right after the user's last caret block in this note
+        # (the frontend's ``hint_block_id``), else right after the block
+        # the user last edited, else at the end of the note.
+        blocks = await list_blocks(conn, note.id)
         after: str | None = None
         if m.hint_block_id is not None and any(
-                b.id == m.hint_block_id
-                for b in await list_blocks(conn, note.id)):
+                b.id == m.hint_block_id for b in blocks):
             after = m.hint_block_id
+        else:
+            after = await _last_user_edit(conn, note.id, blocks)
         rec: dict[str, Any] = {
             "id": _mark_id(), "paper_content_id": m.paper_content_id,
             "block_id": new_block_id(), "kind": m.kind, "style": m.style,
@@ -477,9 +497,13 @@ async def create_mark(conn: aiosqlite.Connection, m: MarkIn,
         }
         if (m.cite_at is not None and m.kind == "text"
                 and is_short_quote(joined_quote(live_pieces(rec["pieces"])))):
-            # A short quote: an inline citation at the caret, its own
-            # block id kept for a later Turn into reference block.
-            cite, _ = await _place_cite(conn, note.id, rec, m.cite_at)
+            # A short quote: an inline citation at the caret (no caret:
+            # the end of the block the user last edited), its own block id
+            # kept for a later Turn into reference block.
+            at = m.cite_at
+            if at.block_id is None:
+                at = CiteAt(block_id=after, offset=None)
+            cite, _ = await _place_cite(conn, note.id, rec, at)
             await _insert_row(conn, rec)
             return {**rec, "cite": cite}, await _saved_to(conn, rec)
         await _insert_mark(conn, note.id, rec, after, "Add mark")

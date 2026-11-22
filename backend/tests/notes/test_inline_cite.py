@@ -48,10 +48,10 @@ def _text(s):
     return {"type": "text", "text": s, "styles": {}}
 
 
-async def _para(conn, block_id, runs, after=None):
+async def _para(conn, block_id, runs, after=None, actor="user"):
     note = await paper_note(conn, 1)
     cur = await get_note(conn, note.id)
-    await apply_ops(conn, note.id, base_revision=cur.revision, actor="user",
+    await apply_ops(conn, note.id, base_revision=cur.revision, actor=actor,
                     ops=[Op(op="insert", block_id=block_id, after=after,
                             block=BlockIn(type="paragraph", content=runs))])
     return note.id
@@ -130,9 +130,27 @@ async def test_chip_without_offset_goes_at_the_block_end(conn):
     assert m["cite"]["offset"] == 5
 
 
-async def test_chip_with_no_caret_block_is_a_new_paragraph_at_the_end(conn):
+async def test_chip_with_no_caret_goes_at_the_end_of_the_last_edit(conn):
+    # No caret this visit (a reload): the block the user last changed,
+    # at its end. [user, 2026-11-22]
     await _paper(conn)
     note_id = await _para(conn, "p1", [_text("first")])
+    await _para(conn, "p2", [_text("second")], after="p1")
+    cur = await get_note(conn, note_id)
+    await apply_ops(conn, note_id, base_revision=cur.revision, actor="user",
+                    ops=[Op(op="update", block_id="p1", block=BlockIn(
+                        type="paragraph", content=[_text("first!")]))])
+    m, _ = await create_mark(conn, _in(
+        [_piece("62%")], cite_at=CiteAt(block_id=None, offset=None)))
+    blocks = await list_blocks(conn, note_id)
+    assert [b.id for b in blocks] == ["p1", "p2"]
+    assert _cites(blocks[0]) == [m["id"]]
+    assert m["cite"] == {"block_id": "p1", "offset": 7, "new_block": False}
+
+
+async def test_chip_in_a_note_never_edited_is_a_new_paragraph_at_the_end(conn):
+    await _paper(conn)
+    note_id = await _para(conn, "p1", [_text("first")], actor="agent")
     m, _ = await create_mark(conn, _in(
         [_piece("62%")], cite_at=CiteAt(block_id=None, offset=None)))
     blocks = await list_blocks(conn, note_id)
@@ -193,7 +211,8 @@ async def test_undo_of_a_short_mark_removes_its_chip_and_redo_restores(conn):
 
 async def test_undo_drops_the_paragraph_made_for_the_chip(conn):
     await _paper(conn)
-    note_id = await _para(conn, "p1", [_text("first")])
+    # The agent's paragraph: never edited by the user, so the chip makes one.
+    note_id = await _para(conn, "p1", [_text("first")], actor="agent")
     m, _ = await create_mark(conn, _in([_piece("62%")], cite_at=CiteAt()))
     made = m["cite"]["block_id"]
     await delete_mark(conn, m["id"], remove_cite=True, drop_block=made)

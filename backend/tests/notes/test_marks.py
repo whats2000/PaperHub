@@ -467,7 +467,7 @@ async def test_mark_lands_right_after_the_caret_block_in_a_row(conn):
     assert ids == [x, m1["block_id"], m2["block_id"], y]
 
 
-async def test_no_caret_or_deleted_caret_block_appends_at_the_end(conn):
+async def test_no_caret_or_deleted_caret_block_goes_after_the_last_edit(conn):
     await _paper(conn)
     note = await paper_note(conn, 1)
     x = await _para_after(conn, note.id, None, "x")
@@ -481,6 +481,76 @@ async def test_no_caret_or_deleted_caret_block_appends_at_the_end(conn):
                                         hint_block_id="b_unknown"))
     ids = [b.id for b in await list_blocks(conn, note.id)]
     assert ids == [y, m1["block_id"], m2["block_id"], m3["block_id"]]
+
+
+async def _edit(conn, note_id, block_id, text, actor="user"):
+    n = await get_note(conn, note_id)
+    await apply_ops(conn, note_id, base_revision=n.revision, actor=actor,
+                    ops=[Op(op="update", block_id=block_id,
+                            block=BlockIn(type="paragraph", content=text))])
+
+
+async def test_no_caret_goes_after_the_block_the_user_edited_last(conn):
+    # After a page reload (no caret this visit) the mark goes right after
+    # the block the user last changed, not at the end. [user, 2026-11-22]
+    await _paper(conn)
+    note = await paper_note(conn, 1)
+    x = await _para_after(conn, note.id, None, "x")
+    y = await _para_after(conn, note.id, x, "y")
+    z = await _para_after(conn, note.id, y, "z")
+    await _edit(conn, note.id, x, "x edited")
+    m, _ = await create_mark(conn, _in([_piece("one")]))
+    ids = [b.id for b in await list_blocks(conn, note.id)]
+    assert ids == [x, m["block_id"], y, z]
+
+
+async def test_a_block_the_agent_wrote_does_not_count_as_an_edit(conn):
+    await _paper(conn)
+    note = await paper_note(conn, 1)
+    x = await _para_after(conn, note.id, None, "x")
+    n = await get_note(conn, note.id)
+    res = await apply_ops(conn, note.id, base_revision=n.revision,
+                          actor="agent", ops=[Op(op="insert", after=x,
+                          block=BlockIn(type="paragraph", content="ai"))])
+    ai = res.applied[0]
+    y = await _para_after(conn, note.id, ai, "y")
+    await _edit(conn, note.id, x, "x again")
+    await _edit(conn, note.id, ai, "ai again", actor="agent")
+    m, _ = await create_mark(conn, _in([_piece("one")]))
+    ids = [b.id for b in await list_blocks(conn, note.id)]
+    assert ids == [x, m["block_id"], ai, y]
+
+
+async def test_a_deleted_last_edit_falls_back_to_the_one_before(conn):
+    await _paper(conn)
+    note = await paper_note(conn, 1)
+    x = await _para_after(conn, note.id, None, "x")
+    y = await _para_after(conn, note.id, x, "y")
+    await _edit(conn, note.id, x, "x edited")
+    n = await get_note(conn, note.id)
+    await apply_ops(conn, note.id, base_revision=n.revision, actor="user",
+                    ops=[Op(op="delete", block_id=x)])
+    z = await _para_after(conn, note.id, y, "z")
+    await _edit(conn, note.id, y, "y edited")
+    m, _ = await create_mark(conn, _in([_piece("one")]))
+    ids = [b.id for b in await list_blocks(conn, note.id)]
+    assert ids == [y, m["block_id"], z]
+
+
+async def test_a_note_the_user_never_edited_takes_the_mark_at_the_end(conn):
+    await _paper(conn)
+    note = await paper_note(conn, 1)
+    n = await get_note(conn, note.id)
+    res = await apply_ops(conn, note.id, base_revision=n.revision,
+                          actor="agent", ops=[
+                              Op(op="insert", block=BlockIn(
+                                  type="paragraph", content="a")),
+                              Op(op="insert", block=BlockIn(
+                                  type="paragraph", content="b"))])
+    a, b = res.applied
+    m, _ = await create_mark(conn, _in([_piece("one")]))
+    ids = [x.id for x in await list_blocks(conn, note.id)]
+    assert ids == [a, b, m["block_id"]]
 
 
 async def test_a_heading_does_not_decide_placement(conn):
