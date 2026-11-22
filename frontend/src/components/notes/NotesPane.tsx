@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
 import { useNotesPaneStore } from "@/store/notesPane";
-import { isUnsavedNote, useNotesStore } from "@/store/notes";
+import { isUnsavedNote, noteHasContent, useNotesStore } from "@/store/notes";
 
 import { NoteEditor } from "./NoteEditor";
 import { notePanelId, noteTabId } from "./noteTabIds";
@@ -62,14 +62,26 @@ export function NotesPane({ onClose }: Props) {
     }
     else if (request.kind === "paper") setChosen("paper");
   }
-  const tab: NoteTab = paperId === null ? "chat" : session === null ? "paper" : chosen;
+  // The chat's note earns its tab once it has content (a block with text,
+  // or a title the user set). Its state is kept up to date here even while
+  // the paper's note is on screen.
+  const draftKey = activeSessionId === null ? null : `local:${activeSessionId}`;
+  const chatNoteId = useNotesStore((s) => {
+    const draft = draftKey === null ? undefined : s.byTarget[draftKey];
+    return draft ?? (backendSessionId === null ? undefined : s.byTarget[`session:${backendSessionId}`]);
+  });
+  const chatHasContent = useNotesStore((s) =>
+    chatNoteId === undefined ? false : noteHasContent(s.notes[chatNoteId]),
+  );
+  const chatShown = session !== null && chatHasContent;
+  const tab: NoteTab = !chatShown ? (paperId === null ? "chat" : "paper") : paperId === null ? "chat" : chosen;
   // The chat tab names the chat by its local id: it stays the same note
   // when the chat reaches the server (its first message, or the note's
   // first write).
   const target: Target | null =
     tab === "paper" && paperId !== null
       ? { kind: "paper", id: paperId }
-      : session !== null && activeSessionId !== null
+      : chatShown && activeSessionId !== null
         ? { kind: "chat", id: activeSessionId }
         : null;
 
@@ -100,9 +112,21 @@ export function NotesPane({ onClose }: Props) {
 
   // A chat's note started while the chat was local (only on this page)
   // keeps showing after the chat reaches the server.
-  const draftKey = target?.kind === "chat" ? `local:${target.id}` : null;
   const hasDraft = useNotesStore((s) => draftKey !== null && s.byTarget[draftKey] !== undefined);
   const localChat = target?.kind === "chat" && backendSessionId === null;
+
+  // Looks at the chat's note while the paper's shows: its tab needs to
+  // know whether it has content (an empty look creates nothing).
+  useEffect(() => {
+    if (session === null || activeSessionId === null || target?.kind === "chat") return;
+    if (backendSessionId === null) {
+      openChatDraft(activeSessionId);
+      return;
+    }
+    if (hasDraft) return;
+    loadTarget("session", backendSessionId).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId, backendSessionId, session === null, target?.kind, hasDraft, loadTarget, openChatDraft]);
 
   useEffect(() => {
     if (!target || hasDraft) return;
@@ -131,7 +155,7 @@ export function NotesPane({ onClose }: Props) {
   }, [targetKey, hasDraft, localChat, loadTarget, openChatDraft]);
 
   const current = loaded.key === targetKey ? loaded : null;
-  const storeKey = hasDraft ? draftKey : localChat ? null : (current?.storeKey ?? null);
+  const storeKey = hasDraft && target?.kind === "chat" ? draftKey : localChat ? null : (current?.storeKey ?? null);
   const shownId = useNotesStore((s) => (storeKey === null ? undefined : s.byTarget[storeKey]));
   const noteId = shownId ?? null;
   // What the server knows the note by (export, the guide's tools): none
@@ -182,7 +206,7 @@ export function NotesPane({ onClose }: Props) {
         idBase={idBase}
         paperTitle={paperTitle}
         chatTitle={session?.title ?? ""}
-        chatAvailable={session !== null}
+        chatAvailable={chatShown}
         onSelect={setChosen}
         onClose={onClose}
       />

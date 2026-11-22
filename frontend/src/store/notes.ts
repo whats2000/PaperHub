@@ -300,6 +300,14 @@ export function setNoteSessionCreator(fn: (localSessionId: number) => Promise<nu
   sessionCreator = fn;
 }
 
+/** A note worth a tab: a block with text, or a title the user set (the
+ * target's own title, shown while the note's is empty, is not content). */
+export function noteHasContent(state: NoteState | undefined): boolean {
+  if (!state) return false;
+  if (state.note.title.trim()) return true;
+  return state.blocks.some((b) => blockText(b.type, b.props, b.content).trim() !== "");
+}
+
 /** A placeholder for a note the server does not have yet. */
 export const isUnsavedNote = (id: number | null | undefined): boolean => typeof id === "number" && id < 0;
 

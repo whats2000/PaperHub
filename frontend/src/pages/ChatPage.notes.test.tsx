@@ -399,9 +399,10 @@ describe("ChatPage Notes pane: nothing is created by looking", () => {
     expect(useChatStore.getState().sessions.find((s) => s.id === useChatStore.getState().activeSessionId)?.backend_session_id).toBeNull();
     render(<ChatPage />);
     await userEvent.click(notesButton());
-    const editor = await screen.findByTestId("note-editor");
-    // An empty editor on a local placeholder: no chat, no note created.
-    expect(editor.textContent).toMatch(/note -\d+/);
+    // A chat with no note and no paper: the empty state, no chat tab, and
+    // no chat or note created by looking.
+    expect(await screen.findByText("Open a paper or start a chat to take notes.")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "This chat" })).toBeNull();
     expect(sent).toEqual([]);
   });
 
