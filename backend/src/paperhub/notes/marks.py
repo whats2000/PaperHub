@@ -426,10 +426,11 @@ async def save_pieces(conn: aiosqlite.Connection, m: dict[str, Any]) -> None:
 
 async def _insert_mark(conn: aiosqlite.Connection, note_id: int,
                        rec: dict[str, Any], after: str | None,
-                       summary: str) -> None:
+                       summary: str, *, before: str | None = None) -> None:
     await _apply(
         conn, note_id,
-        Op(op="insert", block_id=rec["block_id"], after=after,
+        Op(op="insert", block_id=rec["block_id"],
+           after=None if before is not None else after, before=before,
            block=BlockIn(type=BLOCK_TYPE[rec["kind"]],
                          props=block_props(rec))),
         summary, rec["block_id"])
@@ -461,6 +462,12 @@ async def _last_user_edit(conn: aiosqlite.Connection, note_id: int,
                 None)
 
 
+def _empty_line(b: Block, blocks: list[Block]) -> bool:
+    """A paragraph with nothing in it and nothing under it."""
+    return (b.type == "paragraph" and not b.content
+            and not any(c.parent_id == b.id for c in blocks))
+
+
 async def create_mark(conn: aiosqlite.Connection, m: MarkIn,
                       ) -> tuple[dict[str, Any], SavedTo]:
     kind, style = normalized(m.kind, m.style)
@@ -479,11 +486,17 @@ async def create_mark(conn: aiosqlite.Connection, m: MarkIn,
         # block goes right after the user's last caret block in this note
         # (the frontend's ``hint_block_id``), else right after the block
         # the user last edited, else at the end of the note.
+        # The caret on an empty line (an Enter): the quote takes the
+        # line's place and the line, still the caret's, moves under it
+        # (Notion). [user, 2026-11-23]
         blocks = await list_blocks(conn, note.id)
         after: str | None = None
-        if m.hint_block_id is not None and any(
-                b.id == m.hint_block_id for b in blocks):
-            after = m.hint_block_id
+        before: str | None = None
+        hint = next((b for b in blocks if b.id == m.hint_block_id), None)
+        if hint is not None:
+            after = hint.id
+            if _empty_line(hint, blocks):
+                before = hint.id
         else:
             after = await _last_user_edit(conn, note.id, blocks)
         rec: dict[str, Any] = {
@@ -506,7 +519,8 @@ async def create_mark(conn: aiosqlite.Connection, m: MarkIn,
             cite, _ = await _place_cite(conn, note.id, rec, at)
             await _insert_row(conn, rec)
             return {**rec, "cite": cite}, await _saved_to(conn, rec)
-        await _insert_mark(conn, note.id, rec, after, "Add mark")
+        await _insert_mark(conn, note.id, rec, after, "Add mark",
+                           before=before)
         return rec, await _saved_to(conn, rec)
 
 

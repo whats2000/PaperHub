@@ -568,3 +568,39 @@ async def test_a_heading_does_not_decide_placement(conn):
     m, _ = await create_mark(conn, _in([_piece("two")], hint_block_id=sec))
     ids = [b.id for b in await list_blocks(conn, note.id)]
     assert ids == [sec, m["block_id"], tail, p]
+
+
+async def test_a_caret_on_an_empty_line_puts_the_quote_in_its_place(conn):
+    # Enter, then a mark: the quote goes where the empty line is and the
+    # line, the caret's, moves under it to write on (Notion). A line with
+    # words keeps the quote after it. [user, 2026-11-23]
+    await _paper(conn)
+    note = await paper_note(conn, 1)
+    x = await _para_after(conn, note.id, None, "x")
+    line = await _para_after(conn, note.id, x, [])  # as the editor sends
+    y = await _para_after(conn, note.id, line, "y")
+    await _edit(conn, note.id, y, "y edited")
+    m1, _ = await create_mark(conn, _in([_piece("one")], hint_block_id=line))
+    ids = [b.id for b in await list_blocks(conn, note.id)]
+    assert ids == [x, m1["block_id"], line, y]
+    # The next mark (its hint: the new quote) follows it, above the line.
+    m2, _ = await create_mark(conn, _in([_piece("two")],
+                                        hint_block_id=m1["block_id"]))
+    ids = [b.id for b in await list_blocks(conn, note.id)]
+    assert ids == [x, m1["block_id"], m2["block_id"], line, y]
+
+
+async def test_a_short_mark_at_an_empty_line_goes_into_that_line(conn):
+    from paperhub.notes.marks import CiteAt
+    await _paper(conn)
+    note = await paper_note(conn, 1)
+    x = await _para_after(conn, note.id, None, "x")
+    line = await _para_after(conn, note.id, x, [])  # as the editor sends
+    y = await _para_after(conn, note.id, line, "y")
+    await _edit(conn, note.id, y, "y edited")
+    m, _ = await create_mark(conn, _in([_piece("62%")], hint_block_id=line,
+                                       cite_at=CiteAt(block_id=line, offset=0)))
+    assert m["cite"] == {"block_id": line, "offset": 1, "new_block": False}
+    blocks = await list_blocks(conn, note.id)
+    assert [b.id for b in blocks] == [x, line, y]
+    assert blocks[1].content[0]["type"] == "markCite"
