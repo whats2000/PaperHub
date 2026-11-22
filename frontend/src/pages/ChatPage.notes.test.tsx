@@ -410,6 +410,8 @@ describe("ChatPage Notes pane: nothing is created by looking", () => {
     render(<ChatPage />);
     await userEvent.click(notesButton());
     const panel = within(await screen.findByRole("region", { name: "Notes" })).getByRole("tabpanel");
-    expect(panel).toHaveClass("overflow-x-clip", "overflow-y-auto");
+    // Clipped, never scrolled: the note editor inside scrolls itself.
+    expect(panel).toHaveClass("overflow-clip");
+    expect(panel).not.toHaveClass("overflow-y-auto");
   });
 });
