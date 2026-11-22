@@ -974,7 +974,7 @@ export function CitationCanvas({ standalone }: CitationCanvasProps = {}) {
         )}
       >
         <div className="overflow-hidden">
-          <div className="flex items-center gap-1 border-b border-border px-2 py-1">
+          <div className="@container/readerbar flex items-center gap-1 border-b border-border px-2 py-1">
             <div
               role="tablist"
               aria-label={t("tabs.label")}

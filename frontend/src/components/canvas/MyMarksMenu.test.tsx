@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MyMarksMenu } from "@/components/canvas/MyMarksMenu";
+import { ShowMarksToggle } from "@/components/canvas/ShowMarksToggle";
 import { addMarkColor, deleteMarkColor, patchMarkColor, reorderMarkColors } from "@/lib/api";
 import { chunkMap } from "@/lib/marks/anchor";
 import { markPositions } from "@/lib/marks/pieces";
@@ -78,6 +79,25 @@ async function openMenu(count = 3) {
 }
 
 describe("My marks", () => {
+  it("keeps the reader bar's labels on one line: a narrow bar shows the icons, named by their titles", () => {
+    render(
+      <>
+        <MyMarksMenu paperId={3} shown />
+        <ShowMarksToggle shown />
+      </>,
+    );
+    for (const name of [/My marks/, /Show my marks/]) {
+      const button = screen.getByRole("button", { name });
+      expect(button.className).toMatch(/whitespace-nowrap/);
+      expect(button.title).not.toBe("");
+      const label = within(button).getByText(name);
+      expect(label.className).toMatch(/@max-\S*\/readerbar:sr-only/);
+    }
+    // Icons the narrow bar tells apart: showing marks is an eye, not the
+    // Highlighter's pen.
+    expect(screen.getByRole("button", { name: /Show my marks/ }).querySelector("svg")?.getAttribute("class")).toMatch(/lucide-eye/);
+  });
+
   it("names an unnumbered section once", async () => {
     useMarksStore.setState({ marksByPaper: { 3: [mark("m1", "Introduction", 12)] } });
     const menu = await openMenu(1);

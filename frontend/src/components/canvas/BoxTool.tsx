@@ -50,7 +50,7 @@ export function BoxToolButton({ shown }: { shown: boolean }) {
         setOn(!on);
       }}
       className={cn(
-        "inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium transition-[color,background-color,opacity,box-shadow] duration-150 motion-reduce:transition-none",
+        "inline-flex shrink-0 items-center gap-1 rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,background-color,opacity,box-shadow] duration-150 motion-reduce:transition-none",
         on
           ? "bg-foreground/10 text-foreground shadow-[inset_0_-2px_0_var(--foreground)]"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",

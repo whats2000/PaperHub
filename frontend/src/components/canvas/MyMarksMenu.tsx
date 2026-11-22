@@ -105,17 +105,19 @@ export function MyMarksMenu({ paperId, shown }: { paperId: number; shown: boolea
         render={
           <button
             type="button"
+            title={t("myMarks.label", "My marks")}
             aria-hidden={!shown}
             inert={!shown ? true : undefined}
             className={cn(
-              "inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium text-muted-foreground transition-[color,background-color,opacity] duration-150 hover:bg-muted hover:text-foreground data-popup-open:bg-foreground/10 data-popup-open:text-foreground motion-reduce:transition-none",
+              "inline-flex shrink-0 items-center gap-1 rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap text-muted-foreground transition-[color,background-color,opacity] duration-150 hover:bg-muted hover:text-foreground data-popup-open:bg-foreground/10 data-popup-open:text-foreground motion-reduce:transition-none",
               !shown && "opacity-0",
             )}
           />
         }
       >
         <Layers aria-hidden className="size-3.5" />
-        {t("myMarks.button", "My marks")}
+        {/* A narrow reader bar shows the icon only (named by the title). */}
+        <span className="@max-[32rem]/readerbar:sr-only">{t("myMarks.button", "My marks")}</span>
         <span data-testid="my-marks-count" className="tabular-nums">
           {shownMarks.length}
         </span>
