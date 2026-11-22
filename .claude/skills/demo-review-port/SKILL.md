@@ -26,7 +26,7 @@ A UI change is designed in the **review demo** first, the user approves it there
 6. **Pick up decisions** (start of every UI session, and when the user says they reviewed): `list` `features`.
    - `approved` → port it (step 7).
    - `changes` → its `note` is the user's request: revise the demo, back to step 4.
-7. **Port.** Set `status: "porting"`. One porting agent per worktree area at a time (shared CSS / components collide). Its brief:
+7. **Port.** Dispatch as soon as an item is `approved` — the user does not review plans; their bar is step 9. A large port (backend data, export, migration) gets a written plan first, and the plan is dispatched without waiting for the user. A migration runs on a workspace copy (dry run, then real run); running it on the live workspace (`D:\GitHub\PaperHub\backend\workspace`) changes the user's real data — stop, show the copy's counts, and run it there only with the user's explicit approval and a backup taken first. Set `status: "porting"`. One porting agent per worktree area at a time (shared CSS / components collide). Its brief:
    - First list the concrete differences between the shipped UI and the demo, with screenshots.
    - Port the demo's design; **keep every shipped behaviour the demo lacks** (name them).
    - TDD; i18n keys in en / zh-TW / zh-CN / ja; appear and disappear both animate; reduced motion.
