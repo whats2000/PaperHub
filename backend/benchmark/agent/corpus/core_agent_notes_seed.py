@@ -123,7 +123,7 @@ async def seed(workspace: Path) -> dict[str, int]:
         await _fill(conn, 48, PAPER_48)
         await _fill(conn, 47, PAPER_47)
         moe = await _session(conn, "MoE reading group", [47, 48])
-        chat = await note_ref(conn, "chat", moe)
+        chat = await note_ref(conn, "chat", moe, create=True)
         if not await _has_blocks(conn, chat.id):
             await apply_ops(conn, chat.id, base_revision=chat.revision, actor="user", ops=[
                 Op(op="insert", block=_para(
