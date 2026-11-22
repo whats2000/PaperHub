@@ -158,6 +158,18 @@ describe("the selected cells' outline and ⋮ handle (Notion)", () => {
     expect([handle().style.left, handle().style.top]).toEqual(["300px", "160px"]);
   });
 
+  it("the outline takes the table box's edge fade (it sits under it, as the cells do)", async () => {
+    const pm = mount();
+    const wrap = pm.querySelector<HTMLElement>(".tableWrapper")!;
+    wrap.style.setProperty("--note-table-fade-r", "28px");
+    caretIn(pm, 1, 0);
+    await waitFor(() => expect(handle()).toHaveAttribute("data-on"));
+    // Box 0..1000 (fake layout), outline from 100: fade from 872 to 900 px in it.
+    expect(outline().style.maskImage).toBe(
+      "linear-gradient(to right, transparent -100px, rgb(0, 0, 0) -100px, rgb(0, 0, 0) 872px, transparent 900px)",
+    );
+  });
+
   it("leaving the table hides both, kept in place to animate out", async () => {
     const pm = mount();
     caretIn(pm, 1, 0);

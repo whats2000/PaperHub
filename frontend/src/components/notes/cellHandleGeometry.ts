@@ -35,6 +35,17 @@ export function outlineClip(sel: Box, box: Box): { left: number; right: number }
   return { left: Math.max(0, box.left - sel.left), right: Math.max(0, sel.right - box.right) };
 }
 
+/** The table's scroll box fades on a side it is clipped (tableMotion.ts,
+ * `--note-table-fade-l` / `-r`); the outline is outside that box, so it
+ * takes the same fade as a mask, in its own pixels: it then sits under the
+ * fade as the cells do. No fade: no mask. */
+export function outlineMask(sel: Box, box: Box, fadeL: number, fadeR: number): string {
+  if (!fadeL && !fadeR) return "";
+  const start = box.left - sel.left;
+  const end = box.right - sel.left;
+  return `linear-gradient(to right, transparent ${start}px, #000 ${start + fadeL}px, #000 ${end - fadeR}px, transparent ${end}px)`;
+}
+
 /** The handle's centre: on the selection's right border, halfway down the
  * part of it in view (`view`: the table's scroll box and the pane). Hidden
  * when that border is scrolled out of the box, or no part is in view. */

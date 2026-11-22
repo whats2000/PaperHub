@@ -48,6 +48,7 @@ import {
   isCellMenuKey,
   MENU_SIZE,
   outlineClip,
+  outlineMask,
   PICKER_SIZE,
   unionBox,
   type Box,
@@ -193,7 +194,15 @@ export function TableCellHandle({
     const { sel } = m;
     selBox.current = sel;
     const clip = outlineClip(sel, box);
+    const fades = getComputedStyle(m.wrap);
+    const mask = outlineMask(
+      sel,
+      box,
+      parseFloat(fades.getPropertyValue("--note-table-fade-l")) || 0,
+      parseFloat(fades.getPropertyValue("--note-table-fade-r")) || 0,
+    );
     Object.assign(ol.style, {
+      maskImage: mask,
       left: `${sel.left - L.left}px`,
       top: `${sel.top - L.top}px`,
       width: `${sel.right - sel.left}px`,
@@ -235,6 +244,20 @@ export function TableCellHandle({
     const onScroll = () => layout();
     document.addEventListener("scroll", onScroll, { capture: true, passive: true });
     window.addEventListener("resize", onScroll);
+    // A table box's edge fade eases in or out (200 ms) after its scroll:
+    // the outline's mask follows it frame by frame.
+    let fadeUntil = 0;
+    const follow = () => {
+      layout();
+      if (performance.now() < fadeUntil) requestAnimationFrame(follow);
+    };
+    const onFade = (e: Event) => {
+      if (!(e.target instanceof HTMLElement) || !e.target.classList.contains("tableWrapper")) return;
+      const running = performance.now() < fadeUntil;
+      fadeUntil = performance.now() + 260;
+      if (!running) requestAnimationFrame(follow);
+    };
+    document.addEventListener("transitionrun", onFade, true);
     const ro = typeof ResizeObserver === "function" ? new ResizeObserver(onScroll) : null;
     ro?.observe(view.dom);
     // Focus leaving the editor ends the selection's marks (focusout runs
@@ -287,6 +310,8 @@ export function TableCellHandle({
       offChange?.();
       document.removeEventListener("scroll", onScroll, { capture: true });
       window.removeEventListener("resize", onScroll);
+      fadeUntil = 0;
+      document.removeEventListener("transitionrun", onFade, true);
       ro?.disconnect();
       document.removeEventListener("focusin", onFocus);
       document.removeEventListener("focusout", onFocus);

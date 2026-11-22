@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { handleSpot, isCellMenuKey, menuSide, outlineClip, unionBox } from "./cellHandleGeometry";
+import { handleSpot, isCellMenuKey, menuSide, outlineClip, outlineMask, unionBox } from "./cellHandleGeometry";
 import { TextSelection } from "@tiptap/pm/state";
 
 import { clearCells, filledCells, restoreCells, selectCells, selectedAlignment, tableSelection } from "./tableMerge";
@@ -32,6 +32,15 @@ describe("the cell handle's geometry", () => {
   it("the outline is clipped where the box hides the selection", () => {
     expect(outlineClip(box(-40, 0, 700, 10), box(0, 0, 500, 900))).toEqual({ left: 40, right: 200 });
     expect(outlineClip(box(10, 0, 200, 10), box(0, 0, 500, 900))).toEqual({ left: 0, right: 0 });
+  });
+
+  it("the outline fades under the table box's edge fades, as the cells do", () => {
+    // Box 0..500, fades 28 / 28; the outline from 300 to 520 (box right at 200 in its own px).
+    expect(outlineMask(box(300, 0, 520, 10), box(0, 0, 500, 900), 28, 28)).toBe(
+      "linear-gradient(to right, transparent -300px, #000 -272px, #000 172px, transparent 200px)",
+    );
+    // No fade on either side: no mask.
+    expect(outlineMask(box(300, 0, 520, 10), box(0, 0, 500, 900), 0, 0)).toBe("");
   });
 
   it("the menu opens right of the handle with room, else under the selection, else over it", () => {
