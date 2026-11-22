@@ -148,22 +148,24 @@ def test_a_block_merge_writes_and_reads_like_the_demo() -> None:
     assert _texts(back) == _texts(t)
 
 
-def test_a_fully_covered_row_has_no_cells() -> None:
+def test_a_fully_covered_row_is_refused() -> None:
+    """The editor's table row needs a cell of its own: a merge that covers
+    a whole row is refused with the row named."""
     t = {"type": "tableContent", "headerRows": 1, "rows": [
         {"cells": [_c("h1"), _c("h2")]},
         {"cells": [_c("A", rowspan=2, colspan=2)]},
         {"cells": []},
     ]}
-    check_table(t)
-    gfm = table_to_gfm(t)
-    assert gfm.splitlines()[2:] == ["| A | < |", "| ^ | < |"]
-    assert parse_gfm_table(gfm)["rows"] == t["rows"]
+    with pytest.raises(ValueError, match="row 3"):
+        check_table(t)
+    with pytest.raises(ValueError, match="row 3"):
+        parse_gfm_table("| h1 | h2 |\n| --- | --- |\n| A | < |\n| ^ | < |")
 
 
 def test_escaped_markers_are_text() -> None:
-    content = parse_gfm_table("| a | b |\n| --- | --- |\n| \< | \^ |")
+    content = parse_gfm_table("| a | b |\n| --- | --- |\n| \\< | \\^ |")
     assert _texts(content) == [["a", "b"], ["<", "^"]]
-    assert table_to_gfm(content).splitlines()[2] == "| \< | \^ |"
+    assert table_to_gfm(content).splitlines()[2] == "| \\< | \\^ |"
 
 
 def test_inline_lt_and_caret_are_unchanged() -> None:

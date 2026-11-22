@@ -256,6 +256,11 @@ def check_table(content: dict[str, Any]) -> dict[str, Any]:
     _, height, width = table_grid(content)
     if not width:
         raise ValueError("every table row needs cells")
+    for i, row in enumerate(rows):
+        if not row["cells"]:
+            # The editor's table row needs a cell of its own.
+            raise ValueError(f"row {i + 1}: a merged cell covers the whole row; "
+                             "every row needs a cell of its own")
     v = content.get("headerRows", 0)
     if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= height:
         raise ValueError(f"headerRows must be 0 to {height} (the row count)")

@@ -163,6 +163,10 @@ def parse_gfm_table(text: str) -> dict[str, Any]:
     content: dict[str, Any] = {
         "type": "tableContent", "columnWidths": [None] * width,
         "headerRows": 1, "rows": apply_merge_markers(rows, aligns)}
+    for i, row in enumerate(content["rows"]):
+        if not row["cells"]:
+            raise ValueError(f"row {i + 1}: a merged cell covers the whole row; "
+                             "every row needs a cell of its own")
     content["headerRows"] = header_depth(content)
     return content
 
