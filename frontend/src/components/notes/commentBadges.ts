@@ -31,6 +31,10 @@ export interface BadgeView {
 
 const key = new PluginKey<number>("paperhubCommentBadges");
 const EXIT_MS = 200;
+/** Widgets at one place draw by side: the table notes' host (1), then a
+ * suggestion's bar (1 on a line, 2 after a block), then the badge, so the
+ * bar always comes first whatever order the extensions are registered. */
+const BADGE_SIDE = 3;
 
 /** The open threads of `threads` whose block is in `doc` but whose id is on
  * no text there. */
@@ -69,8 +73,7 @@ function badgeDecorations(doc: PMNode, view: BadgeView): DecorationSet {
     const at = content.isTextblock ? pos + 2 + content.content.size : pos + 1 + content.nodeSize;
     decos.push(
       Decoration.widget(at, () => view.host(id), {
-        // After the table notes' host (side 1) at the same place.
-        side: 2,
+        side: BADGE_SIDE,
         key: `cbadge:${id}`,
         ignoreSelection: true,
         stopEvent: () => true,
