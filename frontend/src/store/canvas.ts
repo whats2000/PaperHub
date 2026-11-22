@@ -92,6 +92,9 @@ interface CanvasState {
   /** References button: open in browse mode if closed, else close. */
   toggleCanvas: () => void;
   closeCanvas: () => void;
+  /** The chat changed: close the reader and forget the paper it showed
+   *  (that paper belongs to the chat left behind). */
+  resetForSessionChange: () => void;
   setWidth: (width: number) => void;
 }
 
@@ -189,6 +192,8 @@ export const useCanvasStore = create<CanvasState>()(
         ),
       toggleCanvas: () => set((s) => ({ open: !s.open })),
       closeCanvas: () => set({ open: false }),
+      resetForSessionChange: () =>
+        set({ open: false, activePaperId: null, readerView: null, readingSection: null }),
       setWidth: (width) => set({ width }),
     }),
     {

@@ -128,6 +128,69 @@ describe("NotesPane: the paper it opens on", () => {
     expect(posts).toEqual([]);
   });
 
+  it("switching chats never carries the other chat's reader paper over", async () => {
+    // Chat A: the reader shows paper 7, so the pane shows its note.
+    useChatStore.getState().setReferences(42, [ref(7), ref(8)]);
+    useCanvasStore.setState({ open: true, activePaperId: 7 });
+    render(<NotesPane onClose={() => undefined} />);
+    expect(await screen.findByText("note 107")).toBeInTheDocument();
+    // Chat B has paper 9. The reader still names A's paper for a moment
+    // (it closes after the switch): B's own paper note shows.
+    let chatB = 0;
+    act(() => {
+      chatB = useChatStore.getState().newSession();
+      useChatStore.getState().patchSessionBackendId(chatB, 43);
+      useChatStore.getState().setReferences(43, [ref(9)]);
+    });
+    expect(await screen.findByText("note 109")).toBeInTheDocument();
+    expect(paperTab()).toHaveAccessibleName("World Models");
+    expect(screen.queryByText("note 107")).toBeNull();
+    // A brand-new chat with no papers: its own empty state, no paper tab.
+    act(() => {
+      useChatStore.getState().newSession();
+    });
+    expect(await screen.findByText(HINT)).toBeInTheDocument();
+    expect(paperTab()).toBeNull();
+    // Back to A (the reader is closed by now): A's last-viewed paper.
+    act(() => {
+      useCanvasStore.setState({ open: false, activePaperId: null });
+      useChatStore.getState().selectSession(chatA);
+    });
+    expect(await screen.findByText("note 107")).toBeInTheDocument();
+    expect(paperTab()).toHaveAccessibleName("RoboTTT");
+  });
+
+  it("a chat whose papers are not loaded yet does not take the reader's paper", async () => {
+    useChatStore.getState().setReferences(42, [ref(7)]);
+    useCanvasStore.setState({ open: true, activePaperId: 7 });
+    render(<NotesPane onClose={() => undefined} />);
+    expect(await screen.findByText("note 107")).toBeInTheDocument();
+    act(() => {
+      const other = useChatStore.getState().newSession();
+      useChatStore.getState().patchSessionBackendId(other, 44);
+    });
+    expect(await screen.findByText(HINT)).toBeInTheDocument();
+    expect(paperTab()).toBeNull();
+    // Its papers arrive: its own first paper, not the reader's.
+    act(() => {
+      useChatStore.getState().setReferences(44, [ref(8)]);
+    });
+    expect(await screen.findByText("note 108")).toBeInTheDocument();
+  });
+
+  it("the paper tab stays after the reader closes within the chat", async () => {
+    useChatStore.getState().setReferences(42, [ref(8), ref(7)]);
+    useCanvasStore.setState({ open: true, activePaperId: 7 });
+    render(<NotesPane onClose={() => undefined} />);
+    expect(await screen.findByText("note 107")).toBeInTheDocument();
+    act(() => {
+      useCanvasStore.getState().closeCanvas();
+      useCanvasStore.setState({ activePaperId: null });
+    });
+    expect(screen.getByText("note 107")).toBeInTheDocument();
+    expect(paperTab()).toHaveAccessibleName("RoboTTT");
+  });
+
   it("the reader's paper still wins once it shows one", async () => {
     useChatStore.getState().setReferences(42, [ref(8), ref(7)]);
     render(<NotesPane onClose={() => undefined} />);

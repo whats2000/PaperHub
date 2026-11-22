@@ -211,12 +211,25 @@ describe("the pane's tab choice and loading", () => {
     const pane = await openNotes();
     await userEvent.click(await within(pane).findByRole("tab", { name: "This chat" }));
     expect(await screen.findByText("note 12")).toBeInTheDocument();
-    // Another chat with no note: the paper shows.
+    // Another chat with no note, whose paper is 7: its paper shows.
     chatNote = null;
+    const paper7 = {
+      papers_id: 107,
+      paper_content_id: 7,
+      enabled: true,
+      added_at: "2026-11-16T00:00:00Z",
+      arxiv_id: null,
+      title: PAPER_TITLE,
+      year: 2026,
+      kind: "arxiv",
+      is_private: false,
+    } as const;
+    server.use(http.get(`${API_BASE_URL}/papers`, () => HttpResponse.json([paper7])));
     let other = 0;
     act(() => {
       other = useChatStore.getState().newSession();
       useChatStore.getState().patchSessionBackendId(other, 43);
+      useChatStore.getState().setReferences(43, [paper7]);
     });
     expect(await screen.findByText("note 11")).toBeInTheDocument();
     await waitFor(() => expect(chatTab(pane)).toBeNull());

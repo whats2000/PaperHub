@@ -45,18 +45,22 @@ export function NotesPane({ onClose }: Props) {
   // reader closes; a paper opened from an agent's change card comes forward
   // at once (the reader catches up after). `reader`: the reader's paper last
   // seen, so a change in it (not a mere difference) wins.
+  const refs = useChatStore((s) =>
+    backendSessionId === null ? undefined : s.referencesBySession[backendSessionId],
+  );
   const [paper, setPaper] = useState({ id: readerPaperId, session: activeSessionId, reader: readerPaperId });
   if (paper.session !== activeSessionId) {
-    setPaper({ id: readerPaperId, session: activeSessionId, reader: readerPaperId });
+    // Entering a chat: the reader may still show the chat left behind (it
+    // closes after the switch), so its paper is taken only when it is one
+    // of this chat's papers; papers not loaded yet are not known to be.
+    const ours = readerPaperId !== null && refs?.some((r) => r.paper_content_id === readerPaperId) === true;
+    setPaper({ id: ours ? readerPaperId : null, session: activeSessionId, reader: readerPaperId });
   } else if (readerPaperId !== paper.reader) {
     setPaper({ id: readerPaperId ?? paper.id, session: activeSessionId, reader: readerPaperId });
   }
   // A chat whose reader has shown no paper yet opens on the paper whose
   // note was last on screen in it, else its first paper (Obsidian / Notion
   // reopen the last page): never an empty pane while the chat has papers.
-  const refs = useChatStore((s) =>
-    backendSessionId === null ? undefined : s.referencesBySession[backendSessionId],
-  );
   const lastViewed = useNotesPaneStore((s) =>
     activeSessionId === null ? undefined : s.lastPaperByChat[activeSessionId],
   );
