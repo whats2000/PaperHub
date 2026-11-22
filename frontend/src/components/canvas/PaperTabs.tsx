@@ -157,9 +157,11 @@ export function PaperTabs({
   useEffect(() => {
     revealRef.current = reveal;
   });
+  // (Its title arriving later widens it: reveal again.)
+  const selectedTitle = tabs.find((x) => x.id === selected)?.title;
   useEffect(() => {
     revealRef.current();
-  }, [selected, papers.length, outside.length]);
+  }, [selected, papers.length, outside.length, selectedTitle]);
 
   const titleOf = (tab: Tab) => {
     if (!tab.dashed) return tabTitle ? tabTitle(tab) : tab.title;
