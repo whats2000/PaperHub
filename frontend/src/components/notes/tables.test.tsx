@@ -15,11 +15,11 @@ import type { ApplyResult, NoteBlock, NoteOpsBody, TableContent } from "@/types/
 import { cleanPastedTable, deleteRowOrColumn, insertNoteTable, notePasteHandler, pickAlignments, tableClean, tableKeys } from "./tableKeys";
 import { createCaptionHosts, partRequests, tableCaptions } from "./tableCaptions";
 import { shrinkAway, tableMotion } from "./tableMotion";
-import { tableBorderView } from "./tableBorderView";
+import { tableBorderStats, tableBorderView } from "./tableBorderView";
 import { canMerge, deleteSelectedRows, mergeSelected, selectCells, splitSelected } from "./tableMerge";
 import { dumpBorders, parseBorders, presetLines } from "./tableBorders";
 import { opBlock, toEditorBlocks } from "./sync";
-import { cleanupEditors, makeEditor, press, type AnyEditor } from "./testEditor";
+import { cleanupEditors, makeEditor, press, type, type AnyEditor } from "./testEditor";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }) }));
 
@@ -1159,6 +1159,26 @@ describe("table borders drawn from the table's lines", () => {
     const b = bordersProp(editor)!;
     expect(b.v).toEqual(["000", "101", "000"]);
     expect(b.h).toEqual(["22", "11", "01", "22"]);
+  });
+
+  it("re-draws only the tables a change touched", () => {
+    const editor = makeEditor([tableBorderView, tableKeys], [
+      { id: "p", type: "paragraph", content: "start" },
+      ...plainTable(2, 2, "", "a"),
+      ...plainTable(2, 2, "", "b"),
+      ...plainTable(2, 2, "", "c"),
+    ]);
+    tableBorderStats.decorated = 0;
+    editor.setTextCursorPosition("p", "end");
+    type(editor, "xyz");
+    expect(tableBorderStats.decorated).toBe(0);
+    caretInCell(editor, 1, 1);
+    type(editor, "q");
+    expect(tableBorderStats.decorated).toBe(1);
+    // A change in one table leaves the others drawn.
+    const all = [...editor._tiptapEditor.view.dom.querySelectorAll('[data-content-type="table"]')];
+    expect(all.map((t) => t.getAttribute("data-table-preset"))).toEqual(["paper", "paper", "paper"]);
+    expect(all.every((t) => t.querySelector("th")?.getAttribute("data-bt") === "2")).toBe(true);
   });
 
   it("one undo takes back both the row and its lines", () => {

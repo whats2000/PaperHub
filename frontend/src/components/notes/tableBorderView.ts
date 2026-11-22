@@ -16,7 +16,7 @@
  */
 import { createExtension } from "@blocknote/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
+import { Plugin, PluginKey, type EditorState, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
 import type { TableContent } from "@/types/notes";
@@ -36,7 +36,7 @@ import {
   shapeOf,
   tableShape,
 } from "./tableBorders";
-import { anchorAt, isAnchor, tableGrid } from "./tableGrid";
+import { anchorAt, isAnchor, tableGrid, type GridCell } from "./tableGrid";
 
 const KEY = new PluginKey("tableBorderView");
 
@@ -64,40 +64,68 @@ function contentOf(table: PMNode): TableContent {
   return { type: "tableContent", columnWidths: [], headerRows, rows };
 }
 
+/** Counts the tables drawn (tests check a change re-draws only its own). */
+export const tableBorderStats = { decorated: 0 };
+
+/** One table's decorations: its preset, and each cell's edge weights. */
+function decorateTable(node: PMNode, pos: number): Decoration[] {
+  tableBorderStats.decorated++;
+  const content = contentOf(node);
+  const borders = bordersOf({ borders: node.attrs.borders as unknown }, content);
+  const decos = [Decoration.node(pos, pos + node.nodeSize, { "data-table-preset": borders.preset })];
+  const { grid } = tableGrid(content);
+  const w = (x: Weight) => String(x);
+  let rowPos = pos + 1;
+  node.forEach((row, _o, r) => {
+    // This row's own cells by their index in the row.
+    const own = new Map<number, GridCell>();
+    for (const g of grid[r] ?? []) if (isAnchor(g) && g.row === r) own.set(g.index, g);
+    let cellPos = rowPos + 1;
+    let index = 0;
+    row.forEach((cell) => {
+      const at = own.get(index);
+      if (at) {
+        const e = cellEdges(borders, at);
+        decos.push(
+          Decoration.node(cellPos, cellPos + cell.nodeSize, {
+            "data-bt": w(e.top),
+            "data-br": w(e.right),
+            "data-bb": w(e.bottom),
+            "data-bl": w(e.left),
+          }),
+        );
+      }
+      cellPos += cell.nodeSize;
+      index++;
+    });
+    rowPos += row.nodeSize;
+  });
+  return decos;
+}
+
 function decorate(doc: PMNode): DecorationSet {
   const decos: Decoration[] = [];
   doc.descendants((node, pos) => {
     if (node.type.name !== "table") return node.type.name !== "tableRow";
-    const content = contentOf(node);
-    const borders = bordersOf({ borders: node.attrs.borders as unknown }, content);
-    decos.push(Decoration.node(pos, pos + node.nodeSize, { "data-table-preset": borders.preset }));
-    const { grid } = tableGrid(content);
-    let rowPos = pos + 1;
-    node.forEach((row, _o, r) => {
-      let cellPos = rowPos + 1;
-      let index = 0;
-      row.forEach((cell) => {
-        const at = grid[r]?.find((g) => isAnchor(g) && g.row === r && g.index === index);
-        if (at && isAnchor(at)) {
-          const e = cellEdges(borders, at);
-          const w = (x: Weight) => String(x);
-          decos.push(
-            Decoration.node(cellPos, cellPos + cell.nodeSize, {
-              "data-bt": w(e.top),
-              "data-br": w(e.right),
-              "data-bb": w(e.bottom),
-              "data-bl": w(e.left),
-            }),
-          );
-        }
-        cellPos += cell.nodeSize;
-        index++;
-      });
-      rowPos += row.nodeSize;
-    });
+    decos.push(...decorateTable(node, pos));
     return false;
   });
   return DecorationSet.create(doc, decos);
+}
+
+/** The decorations after a change: the old ones mapped, and only the
+ * tables the change touched drawn again. */
+function redecorate(prev: DecorationSet, tr: Transaction, oldDoc: PMNode, doc: PMNode): DecorationSet {
+  const range = changedRange(oldDoc, doc);
+  let set = prev.map(tr.mapping, doc);
+  if (!range) return set;
+  for (const { pos, node } of tablesIn(doc, range.from, range.to)) {
+    const end = pos + node.nodeSize;
+    // Only this table's own (find also returns ones touching its edges).
+    set = set.remove(set.find(pos, end).filter((d) => d.from >= pos && d.to <= end));
+    set = set.add(doc, decorateTable(node, pos));
+  }
+  return set;
 }
 
 // ------------------------------------------------------------ structure
@@ -317,7 +345,7 @@ export const tableBorderView = createExtension({
       key: KEY,
       state: {
         init: (_c, state) => decorate(state.doc),
-        apply: (tr, prev, _old, state) => (tr.docChanged ? decorate(state.doc) : prev),
+        apply: (tr, prev, old, state) => (tr.docChanged ? redecorate(prev, tr, old.doc, state.doc) : prev),
       },
       appendTransaction(trs, oldState, state) {
         if (!trs.some((t) => t.docChanged)) return null;
