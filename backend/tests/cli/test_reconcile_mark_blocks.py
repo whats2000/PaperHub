@@ -110,3 +110,15 @@ async def test_a_rejected_redraw_is_counted_and_named(tmp_path: Path,
     assert counts["redrawn"] == 0
     assert counts["rejected"] == [{"note_id": n, "block_id": "q1",
                                    "reason": "changed_since_base"}]
+
+
+async def test_the_history_keeps_the_colour_shown_before(tmp_path: Path) -> None:
+    db = tmp_path / "p.db"
+    await _seed(db)
+    await reconcile(db, dry_run=False)
+    async with aiosqlite.connect(db) as conn, conn.execute(
+            "SELECT before_json, after_json FROM note_block_history "
+            "WHERE block_id = 'q1' ORDER BY id DESC LIMIT 1") as cur:
+        before, after = (json.loads(x) for x in await cur.fetchone())
+    assert (before["props"]["color"], before["props"]["style"]) == ("green", "highlight")
+    assert (after["props"]["color"], after["props"]["style"]) == ("blue", "wavy")

@@ -197,7 +197,7 @@ class _Ctx:
     def __init__(
         self, conn: aiosqlite.Connection, note_id: int, *, rev: int,
         actor: Actor, run_id: int | None, change_set_id: str,
-        merge: bool = False,
+        merge: bool = False, redraw: bool = False,
     ) -> None:
         self.conn = conn
         self.note_id = note_id
@@ -214,6 +214,9 @@ class _Ctx:
         self.renamed: dict[str, str] = {}
         # An update merges over the stored block (agent edits, accepts).
         self.merge = merge or actor == "agent"
+        # A redraw of mark blocks from their rows (a recolour's copies in
+        # another note, reconcile): its history keeps the old colour.
+        self.redraw = redraw
         self.inline: list[dict[str, Any]] = []
         self.marks: list[dict[str, Any]] = []
         self.redrawn: list[dict[str, Any]] = []
@@ -305,13 +308,16 @@ class _Ctx:
 
     async def write(self, block_id: str, op: str, before: dict[str, Any],
                     after: dict[str, Any], *,
-                    asked: frozenset[str] = frozenset()) -> dict[str, Any]:
-        """Write ``after`` and its history row. A mark block's states are
-        recorded as drawn from its mark: ``before`` as the row was before
-        this write, the after-state as written (``write_state`` draws it
-        from the row). So an undo or redo never replays a block's stale
-        colour into the mark."""
-        before = await self._as_drawn(before)
+                    asked: frozenset[str] = frozenset(),
+                    draw_before: bool = True) -> dict[str, Any]:
+        """Write ``after`` and its history row. The after-state is recorded
+        as written (``write_state`` draws a mark block from its row). On the
+        paths an undo or redo can replay (``draw_before``), a mark block's
+        before-state is recorded as drawn from the row as it was, so a
+        replay never puts a block's stale colour into the mark. A redraw
+        (``_Ctx.redraw``) records the colour the block showed."""
+        if draw_before:
+            before = await self._as_drawn(before)
         written = await self.write_state(block_id, after, asked=asked)
         await self.history(block_id, op, before, written)
         return written
@@ -452,7 +458,8 @@ class _Ctx:
             assert note is not None
             res = await _apply_in_tx(
                 self.conn, note_id, base_revision=note.revision, ops=ops,
-                actor="system", run_id=self.run_id, summary="Redraw mark")
+                actor="system", run_id=self.run_id, summary="Redraw mark",
+                redraw=True)
             landed = [o.block_id for o in ops if o.block_id in res.applied]
             redrawn += [b for b in landed if b is not None]
             if landed and res.change_set_id is not None:
@@ -850,7 +857,8 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
             after["author"] = "user"
         asked = (_asked(ctx, row, op.block)
                  if blk.type in MARK_BLOCK_TYPES else frozenset())
-        await ctx.write(row.id, "update", before, after, asked=asked)
+        await ctx.write(row.id, "update", before, after, asked=asked,
+                        draw_before=not ctx.redraw)
     elif op.op == "delete":
         for d in [row, *live_desc]:
             d_before = d.state()
@@ -912,6 +920,7 @@ async def _apply_in_tx(
     conn: aiosqlite.Connection, note_id: int, *, base_revision: int,
     ops: list[Op], actor: Actor, run_id: int | None, summary: str,
     scaffold: frozenset[str] = frozenset(), merge: bool = False,
+    redraw: bool = False,
 ) -> ApplyResult:
     note = await get_note(conn, note_id)
     if note is not None and base_revision > note.revision:
@@ -922,6 +931,7 @@ async def _apply_in_tx(
     ctx = await _begin(conn, note_id, actor=actor, run_id=run_id,
                        summary=summary)
     ctx.merge = ctx.merge or merge
+    ctx.redraw = redraw
     recorded: list[dict[str, Any]] = []
     for index, op in enumerate(ops):
         before_applied = len(ctx.applied)
@@ -980,6 +990,7 @@ async def apply_ops(
     conn: aiosqlite.Connection, note_id: int, *, base_revision: int,
     ops: list[Op], actor: Actor, run_id: int | None = None, summary: str = "",
     idempotency_key: str | None = None, scaffold: frozenset[str] = frozenset(),
+    redraw: bool = False,
 ) -> ApplyResult:
     """Apply ``ops`` as one revision; see the module docstring for the rules.
 
@@ -987,7 +998,8 @@ async def apply_ops(
     stored for this note returns that burst's result and applies nothing (a
     retry after a lost response must not insert twice or revert later text).
     ``scaffold`` names section blocks inserted only to hold the other ops:
-    one left empty (all its ops rejected) is not kept.
+    one left empty (all its ops rejected) is not kept. ``redraw``: the ops
+    redraw mark blocks from their rows (history keeps the old colour).
     """
     async with write_transaction(conn):
         if idempotency_key is not None:
@@ -1001,7 +1013,7 @@ async def apply_ops(
                 return ApplyResult.model_validate_json(row[0])
         res = await _apply_in_tx(
             conn, note_id, base_revision=base_revision, ops=ops, actor=actor,
-            run_id=run_id, summary=summary, scaffold=scaffold)
+            run_id=run_id, summary=summary, scaffold=scaffold, redraw=redraw)
         if idempotency_key is not None and res.change_set_id is not None:
             await conn.execute(
                 "UPDATE note_change_sets SET idempotency_key = ?, "

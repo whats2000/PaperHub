@@ -75,7 +75,8 @@ async def reconcile(db_path: Path, *, dry_run: bool) -> dict[str, Any]:
                 continue
             res = await apply_ops(conn, note_id, base_revision=note.revision,
                                   ops=ops, actor="system",
-                                  summary="Redraw marks from their rows")
+                                  summary="Redraw marks from their rows",
+                                  redraw=True)
             counts["redrawn"] += sum(
                 1 for o in ops if o.block_id in res.applied)
             counts["rejected"] += [

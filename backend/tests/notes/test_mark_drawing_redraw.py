@@ -35,3 +35,21 @@ async def test_a_copy_the_nested_change_did_not_apply_is_not_listed(
     monkeypatch.setattr(ops_mod, "_apply_in_tx", fake)
     res = await _update(conn, n, "q1", {"color": "blue"})
     assert res.marks[0]["blocks"] == [] and res.redrawn == []
+
+
+async def test_the_other_notes_history_records_the_old_colour(
+        conn: aiosqlite.Connection):
+    import json
+    await _mark(conn)
+    n = await _note(conn, blocks=[("q1", _props())])
+    other = await _note(conn, target_id="2", blocks=[("q9", _props())])
+    res = await _update(conn, n, "q1", {"color": "blue"})
+    [r] = res.redrawn
+    async with conn.execute(
+        "SELECT before_json, after_json FROM note_block_history "
+        "WHERE note_id = ? AND block_id = 'q9' AND revision = ?",
+        (other, r["revision"]),
+    ) as cur:
+        before, after = (json.loads(x) for x in await cur.fetchone())
+    assert before["props"]["color"] == "green"
+    assert after["props"]["color"] == "blue"
