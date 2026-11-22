@@ -607,7 +607,15 @@ def _gfm_block(raw: Any) -> Any:
     if not isinstance(raw, dict) or not isinstance(raw.get("block"), dict):
         return raw
     block = raw["block"]
-    if block.get("type") != "table" or not isinstance(block.get("content"), str):
+    if block.get("type") != "table":
+        return raw
+    props = block.get("props")
+    if isinstance(props, dict) and "borders" in props:
+        # A table's lines are the user's: the agent never sets them.
+        block = {**block, "props": {k: v for k, v in props.items()
+                                    if k != "borders"}}
+        raw = {**raw, "block": block}
+    if not isinstance(block.get("content"), str):
         return raw
     # The notes as read_note shows them, echoed back: they set the notes.
     gfm = block["content"]

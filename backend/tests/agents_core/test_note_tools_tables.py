@@ -445,3 +445,55 @@ async def test_two_notes_tags_are_rejected_with_a_clear_reason(
     assert "delimiter" not in rej["hint"] and "cell" not in rej["hint"]
     [block] = await list_blocks(migrated_db, nid)
     assert block.props == CAPTIONED
+
+
+# ------------------------------------------------- borders (Plan H5b.1)
+
+def _borders(rows: int, preset: str = "paper") -> str:
+    from paperhub.notes.table_borders import dump_borders, preset_lines
+    return dump_borders(preset_lines(rows, 2, 1, preset))  # type: ignore[arg-type]
+
+
+async def test_agent_cannot_set_borders(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid = await _chat_note(migrated_db)
+    out = await _call(_ctx(migrated_db, fake_tracer), "edit_note", note="chat",
+                      base_revision=0, ops=[
+                          {"op": "insert", "block": {
+                              "type": "table", "content": GFM,
+                              "props": {"borders": _borders(2, "notion")}}}])
+    assert not out.record.get("error"), out.content
+    [block] = await list_blocks(migrated_db, nid)
+    assert "borders" not in block.props
+
+
+async def test_agent_update_keeps_or_refits_the_stored_borders(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    from paperhub.notes.table_borders import parse_borders, preset_lines
+    nid = await _chat_note(migrated_db)
+    custom = _borders(3, "notion").replace('"11"', '"22"', 1)
+    res = await apply_ops(migrated_db, nid, base_revision=0, actor="agent", ops=[
+        Op(op="insert", block=BlockIn(type="table", content=RICH,
+                                      props={"borders": custom}))])
+    bid = res.applied[0]
+    ctx = _ctx(migrated_db, fake_tracer)
+    out = await _call(ctx, "edit_note", note="chat", base_revision=res.revision, ops=[
+        {"op": "update", "block_id": bid, "block": {
+            "type": "table",
+            "content": "| k | v |\n|---|---|\n| ORR | 70% |\n| x | z |",
+            "props": {"borders": _borders(3)}}}])
+    assert not out.record.get("error"), out.content
+    [block] = await list_blocks(migrated_db, nid)
+    assert block.props["borders"] == custom
+    read = await _call(ctx, "read_note", note="chat")
+    assert "borders" not in read.content and "preset" not in read.content
+    out = await _call(ctx, "edit_note", note="chat",
+                      base_revision=res.revision + 1, ops=[
+        {"op": "update", "block_id": bid, "block": {
+            "type": "table",
+            "content": "| k | v |\n|---|---|\n| ORR | 70% |\n| x | z |\n| n | m |"}}])
+    assert not out.record.get("error"), out.content
+    [block] = await list_blocks(migrated_db, nid)
+    assert parse_borders(block.props["borders"]) == preset_lines(4, 2, 1, "notion")

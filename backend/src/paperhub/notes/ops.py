@@ -59,6 +59,7 @@ from paperhub.notes.store import (
     get_note,
     new_block_id,
 )
+from paperhub.notes.table_borders import fit_borders
 
 Actor = Literal["user", "agent", "import", "system"]
 RejectReason = Literal["changed_since_base", "missing", "invalid", "stale",
@@ -83,6 +84,7 @@ class BlockIn(BaseModel):
                 raise ValueError("a table block's content must be an object")
             check_table(self.content)
             check_table_props(self.props)
+            self.props = fit_borders(self.props, self.content)
         elif isinstance(self.content, dict):
             raise ValueError("only a table block has object content")
         return self
@@ -977,6 +979,11 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
     if op.op == "update":
         assert op.block is not None
         blk = await _merged(ctx, row, op.block) if ctx.merge else op.block
+        if blk.type == "table" and isinstance(blk.content, dict):
+            # The lines fit the grid the update leaves (a reshape gets the
+            # preset's lines for its new shape).
+            blk = blk.model_copy(update={"props": fit_borders(
+                drop_nulls(blk.props), blk.content)})
         after = {**before, "type": blk.type, "props": drop_nulls(blk.props),
                  "content": blk.content}
         if blk.section_key is not None:

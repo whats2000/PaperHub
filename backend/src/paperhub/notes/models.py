@@ -205,8 +205,15 @@ TABLE_TEXT_MAX = 2000
 def check_table_props(props: dict[str, Any]) -> dict[str, Any]:
     """Raise ``ValueError`` unless ``props`` holds only a table's caption
     and notes, each a string of at most ``TABLE_TEXT_MAX`` characters
-    (``None``: an update removing it)."""
+    (``None``: an update removing it), and its lines (``borders``, see
+    ``table_borders``)."""
+    from paperhub.notes.table_borders import parse_borders
+
     for key, value in props.items():
+        if key == "borders":
+            if value is not None:
+                parse_borders(value)
+            continue
         if key not in TABLE_TEXT_PROPS:
             raise ValueError(f"a table's props are only caption and notes, not {key}")
         if value is None:  # an update's way to remove it
