@@ -20,8 +20,8 @@ vi.mock("@/components/slides/SlidesPanel", () => ({
   SlidesPanel: () => <div data-testid="slides">slides</div>,
 }));
 vi.mock("@/components/notes/NoteEditor", () => ({
-  NoteEditor: ({ noteId }: { noteId: number }) => (
-    <div data-testid="note-editor">
+  NoteEditor: ({ noteId, findRequest, findHost }: { noteId: number; findRequest?: number; findHost?: HTMLElement | null }) => (
+    <div data-testid="note-editor" data-find-request={findRequest ?? 0} data-find-host={findHost?.dataset.findHost ?? ""}>
       note {noteId}
       <div className="bn-block-outer" data-id={`b${noteId}`} />
     </div>
@@ -99,6 +99,28 @@ describe("ChatPage Notes pane", () => {
     await userEvent.click(within(bar).getByRole("button", { name: "More" }));
     // The chat's note is linked to this chat only.
     expect(await screen.findByRole("menu")).toHaveTextContent("Shared by 1 chat · revision 1");
+  });
+
+  it("the toolbar's Find and Ctrl+F anywhere in the pane open find in a strip under the toolbar", async () => {
+    render(<ChatPage />);
+    await userEvent.click(notesButton());
+    const pane = await screen.findByRole("region", { name: "Notes" });
+    const bar = await within(pane).findByRole("toolbar", { name: "Note tools" });
+    const editor = await screen.findByTestId("note-editor");
+    // The strip's host is directly under the toolbar, above the note.
+    const host = bar.nextElementSibling as HTMLElement;
+    expect(host.dataset.findHost).toBe("notes-pane");
+    expect(editor.dataset.findHost).toBe("notes-pane");
+    expect(host.nextElementSibling).toHaveAttribute("role", "tabpanel");
+    expect(editor.dataset.findRequest).toBe("0");
+    await userEvent.click(within(bar).getByRole("button", { name: "Find" }));
+    expect(editor.dataset.findRequest).toBe("1");
+    // Ctrl+F with focus on a toolbar button: the note's find, not the browser's.
+    const focus = within(bar).getByRole("button", { name: "Focus" });
+    focus.focus();
+    const notPrevented = fireEvent.keyDown(focus, { key: "f", code: "KeyF", ctrlKey: true });
+    expect(notPrevented).toBe(false);
+    expect(editor.dataset.findRequest).toBe("2");
   });
 
   it("Follow works while the reader shows the paper as a PDF (the PDF reports its section)", async () => {

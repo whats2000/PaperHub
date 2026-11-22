@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -141,7 +142,8 @@ describe("find in a note", () => {
     expect(document.activeElement).toBe(findBox());
     const bar = screen.getByTestId("note-find");
     expect(bar.dataset.state).toBe("open");
-    expect(bar.className).toContain("slide-in-from-top");
+    // It grows down from the toolbar (height), not a floating fade.
+    expect(bar.className).toContain("note-find-in");
     typeQuery("alpha");
     expect(count()).toBe("1 / 2");
     act(() => {
@@ -153,7 +155,7 @@ describe("find in a note", () => {
     });
     // It slides back up (the exit class), then is gone.
     expect(bar.dataset.state).toBe("closed");
-    expect(bar.className).toContain("slide-out-to-top");
+    expect(bar.className).toContain("note-find-out");
     act(() => {
       fireEvent.animationEnd(bar);
     });
@@ -550,4 +552,77 @@ describe("a find selection is used once (fix round 2)", () => {
       expect(again.selectionStart).toBe(again.selectionEnd);
     });
   }
+});
+
+describe("the find bar under the notes toolbar", () => {
+  /** The pane: a find host under the toolbar, then the editor. */
+  function Pane({ request }: { request: number }) {
+    const [host, setHost] = useState<HTMLElement | null>(null);
+    return (
+      <div>
+        <div role="toolbar" aria-label="Note tools" />
+        <div ref={setHost} data-testid="find-host" />
+        <NoteEditor noteId={7} variant="pane" findHost={host} findRequest={request} />
+      </div>
+    );
+  }
+
+  it("a find request (the toolbar's Find) opens a full-width strip in the host and focuses its field", async () => {
+    seed([para("p1", "alpha beta"), para("p2", "gamma alpha")]);
+    let view: ReturnType<typeof render> | undefined;
+    act(() => {
+      view = render(<Pane request={0} />);
+    });
+    await screen.findByText("gamma alpha");
+    // A request already seen when the editor mounts opens nothing.
+    expect(screen.queryByTestId("note-find")).toBeNull();
+    act(() => view!.rerender(<Pane request={1} />));
+    const bar = screen.getByTestId("note-find");
+    expect(screen.getByTestId("find-host")).toContainElement(bar);
+    expect(bar.dataset.state).toBe("open");
+    expect(bar.className).toContain("w-full");
+    expect(document.activeElement).toBe(findBox());
+    // Search icon, the field, then the count and × at the right.
+    const row = within(bar);
+    const order = [findBox(), row.getByTestId("note-find-count"), row.getByRole("button", { name: "Close find" })];
+    for (let i = 1; i < order.length; i++) {
+      expect(order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    typeQuery("alpha");
+    expect(count()).toBe("1 / 2");
+  });
+
+  it("× slides the strip back up, then it is gone; a second request reopens it", async () => {
+    seed([para("p1", "alpha")]);
+    let view: ReturnType<typeof render> | undefined;
+    act(() => {
+      view = render(<Pane request={0} />);
+    });
+    await screen.findByText("alpha");
+    act(() => view!.rerender(<Pane request={1} />));
+    const bar = screen.getByTestId("note-find");
+    act(() => {
+      fireEvent.click(within(bar).getByRole("button", { name: "Close find" }));
+    });
+    expect(bar.dataset.state).toBe("closed");
+    expect(bar.className).toContain("note-find-out");
+    act(() => {
+      fireEvent.animationEnd(bar);
+    });
+    expect(screen.queryByTestId("note-find")).toBeNull();
+    act(() => view!.rerender(<Pane request={2} />));
+    expect(screen.getByTestId("note-find").dataset.state).toBe("open");
+    expect(document.activeElement).toBe(findBox());
+  });
+
+  it("the note card's editor (no host) keeps its bar at the top of its own editor", async () => {
+    seed([para("p1", "alpha")]);
+    const pm = mount();
+    await screen.findByText("alpha");
+    act(() => {
+      ctrlF(pm);
+    });
+    const bar = screen.getByTestId("note-find");
+    expect(screen.getByTestId("note-editor")).toContainElement(bar);
+  });
 });

@@ -398,6 +398,16 @@
   background: color-mix(in oklab, var(--foreground) 30%, transparent);
   outline: 1px solid color-mix(in oklab, var(--foreground) 45%, transparent);
 }
+/* The find strip (NoteFindBar.tsx) grows down from the notes toolbar and
+   shrinks back up on close: only one end is given, the other is its height. */
+@keyframes note-find-grow { from { height: 0; } }
+@keyframes note-find-shrink { to { height: 0; } }
+.note-find-in { animation: note-find-grow 200ms ease-out; }
+.note-find-out { animation: note-find-shrink 200ms ease-out forwards; }
+@media (prefers-reduced-motion: reduce) {
+  .note-find-in,
+  .note-find-out { animation: none; }
+}
 /* The insertion caret beside a block that takes no text (atomCaret.ts):
    a text caret's line at the block's left or right edge, blinking like one. */
 .paperhub-notes [data-atom-caret] {

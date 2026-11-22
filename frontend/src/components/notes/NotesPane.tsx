@@ -11,6 +11,7 @@ import { useNotesPaneStore } from "@/store/notesPane";
 import { isUnsavedNote, noteHasContent, useNotesStore } from "@/store/notes";
 
 import { NoteEditor } from "./NoteEditor";
+import { isFindKey } from "./noteFind";
 import { notePanelId, noteTabId } from "./noteTabIds";
 import { NotesTabs, type NoteTab } from "./NotesTabs";
 import { NotesToolbar } from "./NotesToolbar";
@@ -195,6 +196,11 @@ export function NotesPane({ onClose }: Props) {
     root: panel,
   });
   const [guideOpen, setGuideOpen] = useState(false);
+  // Find: the toolbar's button or Ctrl+F anywhere in the pane opens the
+  // note's find strip, which the editor puts in the host under the toolbar.
+  const [findHost, setFindHost] = useState<HTMLElement | null>(null);
+  const [findRequest, setFindRequest] = useState(0);
+  const requestFind = () => setFindRequest((n) => n + 1);
   // ... and its changed block is brought into view once the note shows.
   useEffect(() => {
     if (!request || !panel) return;
@@ -224,6 +230,12 @@ export function NotesPane({ onClose }: Props) {
     <section
       aria-label={t("pane.label", "Notes")}
       className="notes-pane @container flex h-full min-w-0 flex-col bg-card"
+      onKeyDownCapture={(e) => {
+        if (noteId === null || !isFindKey(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        requestFind();
+      }}
     >
       <NotesTabs
         active={tab}
@@ -244,7 +256,10 @@ export function NotesPane({ onClose }: Props) {
         docxReason={docxReason}
         guideOpen={guideOpen}
         onGuideOpenChange={setGuideOpen}
+        onFind={noteId === null ? undefined : requestFind}
       />
+      {/* The find strip, full width directly under the toolbar. */}
+      <div ref={setFindHost} data-find-host="notes-pane" className="flex shrink-0 flex-col" />
       <div
         ref={setPanel}
         id={notePanelId(idBase)}
@@ -269,7 +284,13 @@ export function NotesPane({ onClose }: Props) {
               tab === "chat" ? "slide-in-from-right-3" : "slide-in-from-left-3",
             )}
           >
-            <NoteEditor noteId={noteId} variant="pane" onOpenGuide={() => setGuideOpen(true)} />
+            <NoteEditor
+              noteId={noteId}
+              variant="pane"
+              onOpenGuide={() => setGuideOpen(true)}
+              findHost={findHost}
+              findRequest={findRequest}
+            />
           </div>
         ) : current?.failed ? (
           <p role="alert" className="px-4 py-3 text-sm text-muted-foreground">

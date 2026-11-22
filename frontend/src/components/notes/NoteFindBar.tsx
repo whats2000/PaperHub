@@ -1,4 +1,9 @@
-/** The find bar at the top of a notes editor (Ctrl+F / Cmd+F inside it).
+/** The find bar of a notes editor (Ctrl+F / Cmd+F, or the toolbar's Find).
+ *
+ * In the notes pane it is a full-width strip directly under the toolbar
+ * (portalled into the pane's find host); in the note card it is the same
+ * strip, compact, at the top of the card's editor. It grows down (height)
+ * and shrinks back up on close.
  *
  * Typing finds as you go; Enter / F3 goes to the next match, Shift+Enter /
  * Shift+F3 to the previous, both wrapping. The current match is selected in
@@ -8,8 +13,9 @@
  */
 import { NodeSelection, Selection, TextSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
-import { ChevronDown, ChevronUp, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { prefersReducedMotion } from "@/lib/motion";
@@ -39,6 +45,10 @@ export interface NoteFindBarProps {
   open: boolean;
   onClose: () => void;
   onGone: () => void;
+  /** The pane's strip under its toolbar; none: at the top of the editor. */
+  host?: HTMLElement | null;
+  /** The note card's smaller strip. */
+  compact?: boolean;
 }
 
 function flatBlocks(doc: unknown[]): PartBlock[] {
@@ -52,7 +62,17 @@ function flatBlocks(doc: unknown[]): PartBlock[] {
   return out;
 }
 
-export function NoteFindBar({ editor, noteId, cardPart, focusSeq, open, onClose, onGone }: NoteFindBarProps) {
+export function NoteFindBar({
+  editor,
+  noteId,
+  cardPart,
+  focusSeq,
+  open,
+  onClose,
+  onGone,
+  host = null,
+  compact = false,
+}: NoteFindBarProps) {
   const { t } = useTranslation();
   const input = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -203,26 +223,33 @@ export function NoteFindBar({ editor, noteId, cardPart, focusSeq, open, onClose,
   };
 
   const total = matches.length;
-  return (
-    <div className="pointer-events-none sticky top-0 z-20 h-0">
-      <div
-        role="search"
-        data-testid="note-find"
-        data-state={open ? "open" : "closed"}
-        ref={panel}
-        className={cn(
-          "pointer-events-auto absolute right-3 top-1 flex items-center gap-1 rounded-md border bg-popover p-1 text-popover-foreground shadow-md motion-reduce:animate-none",
-          open
-            ? "animate-in fade-in-0 slide-in-from-top-2 duration-150 ease-out"
-            : "animate-out fade-out-0 slide-out-to-top-2 duration-150 ease-in fill-mode-forwards",
-        )}
-      >
+  const iconButton = "inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none";
+  const bar = (
+    <div
+      role="search"
+      data-testid="note-find"
+      data-state={open ? "open" : "closed"}
+      data-variant={compact ? "card" : "pane"}
+      ref={panel}
+      className={cn(
+        // A full-width strip; the height is what animates (note-find-in/out).
+        "w-full shrink-0 overflow-hidden border-b border-border motion-reduce:animate-none",
+        host ? "bg-card" : "sticky top-0 z-20 bg-[var(--sticky-bg,var(--card))]",
+        compact ? "h-8" : "h-9",
+        open ? "note-find-in" : "note-find-out",
+      )}
+    >
+      <div className={cn("flex h-full items-center", compact ? "gap-1 px-2" : "gap-1.5 px-2.5")}>
+        <Search className={cn("shrink-0 text-muted-foreground", compact ? "size-3" : "size-3.5")} aria-hidden />
         <input
           ref={input}
           value={query}
           aria-label={t("notes:find.label", "Find in the note")}
           placeholder={t("notes:find.placeholder", "Find in the note")}
-          className="h-7 w-44 rounded-sm bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground"
+          className={cn(
+            "h-full min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground",
+            compact ? "text-[12.5px]" : "text-sm",
+          )}
           onChange={(e) => {
             setQuery(e.target.value);
             run(e.target.value);
@@ -239,36 +266,43 @@ export function NoteFindBar({ editor, noteId, cardPart, focusSeq, open, onClose,
             }
           }}
         />
-        <span data-testid="note-find-count" className="min-w-12 text-center text-xs tabular-nums text-muted-foreground">
+        <span
+          data-testid="note-find-count"
+          className="shrink-0 px-1 text-xs whitespace-nowrap tabular-nums text-muted-foreground"
+        >
           {t("notes:find.count", "{{current}} / {{total}}", { current: total ? current + 1 : 0, total })}
         </span>
         <button
           type="button"
           aria-label={t("notes:find.prev", "Previous match")}
+          title={t("notes:find.prev", "Previous match")}
           disabled={!total}
           onClick={() => step(-1)}
-          className="rounded-sm p-1 hover:bg-accent disabled:opacity-40"
+          className={cn(iconButton, compact ? "size-5" : "size-6")}
         >
-          <ChevronUp className="size-4" aria-hidden />
+          <ChevronUp className="size-3.5" aria-hidden />
         </button>
         <button
           type="button"
           aria-label={t("notes:find.next", "Next match")}
+          title={t("notes:find.next", "Next match")}
           disabled={!total}
           onClick={() => step(1)}
-          className="rounded-sm p-1 hover:bg-accent disabled:opacity-40"
+          className={cn(iconButton, compact ? "size-5" : "size-6")}
         >
-          <ChevronDown className="size-4" aria-hidden />
+          <ChevronDown className="size-3.5" aria-hidden />
         </button>
         <button
           type="button"
           aria-label={t("notes:find.close", "Close find")}
+          title={t("notes:find.close", "Close find")}
           onClick={close}
-          className="rounded-sm p-1 hover:bg-accent"
+          className={cn(iconButton, compact ? "size-5" : "size-6")}
         >
-          <X className="size-4" aria-hidden />
+          <X className="size-3.5" aria-hidden />
         </button>
       </div>
     </div>
   );
+  return host ? createPortal(bar, host) : bar;
 }

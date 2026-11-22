@@ -67,7 +67,7 @@ import { LostCommentBadges } from "./LostCommentBadges";
 import { commentKeys, useNoteComments, type ReanchorHint } from "./noteComments";
 import { noteSuggestionMarks, useNoteSuggestions, useSuggestionHosts } from "./noteSuggestions";
 import { codeFence, dividerRule, inlineMarks } from "./inlineMarks";
-import { noteFind } from "./noteFind";
+import { isFindKey, noteFind } from "./noteFind";
 import { NoteFindBar } from "./NoteFindBar";
 import { partOf } from "./parts";
 import { noteParts, refreshPartDecorations, type PartsView } from "./partsDecorations";
@@ -112,6 +112,12 @@ export interface NoteEditorProps {
    * of the note is hidden), the mark clicked (its reference is tinted) and
    * where another reference's Show ↗ goes. */
   card?: { partId: string; markId: string; onJump: (markId: string) => void };
+  /** Where the find strip goes (the pane's, under its toolbar); none: at
+   * the top of this editor. */
+  findHost?: HTMLElement | null;
+  /** Bumped to open find (the toolbar's Find, Ctrl+F in the pane); the
+   * value seen at mount opens nothing. */
+  findRequest?: number;
 }
 
 const DICTIONARIES = { en, ja, "zh-TW": zhTW, "zh-CN": zh } as const;
@@ -214,7 +220,15 @@ function NoteEditorFrame(props: NoteEditorProps) {
   );
 }
 
-function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: NoteEditorProps) {
+function LoadedNoteEditor({
+  noteId,
+  variant,
+  onBlockFocus,
+  onOpenGuide,
+  card,
+  findHost = null,
+  findRequest = 0,
+}: NoteEditorProps) {
   const { t, i18n } = useTranslation();
   const { resolvedTheme } = useTheme();
   const note = useNotesStore((s) => s.notes[noteId]!.note);
@@ -697,14 +711,22 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
   const [findOpen, setFindOpen] = useState(false);
   const [findSeq, setFindSeq] = useState(0);
   const onFindKey = useCallback((e: KeyboardEvent) => {
-    const mac = /Mac|iPhone|iPad/.test(navigator.platform);
-    if (e.key.toLowerCase() !== "f" || e.altKey || e.shiftKey || !(mac ? e.metaKey : e.ctrlKey)) return;
+    if (!isFindKey(e)) return;
     e.preventDefault();
     e.stopPropagation();
     setFindMounted(true);
     setFindOpen(true);
     setFindSeq((n) => n + 1);
   }, []);
+  // The pane's request (its toolbar's Find): adjusted while rendering, as
+  // deriving state from a prop should be.
+  const [seenFindRequest, setSeenFindRequest] = useState(findRequest);
+  if (findRequest !== seenFindRequest) {
+    setSeenFindRequest(findRequest);
+    setFindMounted(true);
+    setFindOpen(true);
+    setFindSeq((n) => n + 1);
+  }
   const onFindGone = useCallback(() => setFindMounted(false), []);
 
   const defaultTitle = useNotesStore((s) => s.notes[noteId]?.defaultTitle);
@@ -758,6 +780,8 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
             open={findOpen}
             onClose={() => setFindOpen(false)}
             onGone={onFindGone}
+            host={findHost}
+            compact={variant === "card"}
           />
         )}
         <div

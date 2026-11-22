@@ -19,6 +19,12 @@ import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { blockIdInDoc } from "./blockId";
 import { citeDefaultText } from "./blocks/markCiteText";
 
+/** Ctrl+F (Cmd+F on a Mac): the note's find instead of the browser's. */
+export function isFindKey(e: { key: string; altKey: boolean; shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }): boolean {
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+  return e.key.toLowerCase() === "f" && !e.altKey && !e.shiftKey && (mac ? e.metaKey : e.ctrlKey);
+}
+
 export interface FindMatch {
   from: number;
   to: number;
