@@ -49,7 +49,9 @@ def test_alignment_row_from_header_cells() -> None:
                 "content": [_txt("h")]}
     md = _md(_table([[cell("left"), cell("center"), cell("right"), cell(None)],
                      ["a", "b", "c", "d"]]))
-    assert "| :-- | :-: | --: | --- |" in md
+    # Left is the default: one spelling, the same as gfm_table writes.
+    assert "| --- | :-: | --: | --- |" in md
+    assert ":--" not in md
 
 
 def test_pipe_and_newline_in_a_cell() -> None:

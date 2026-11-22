@@ -768,7 +768,7 @@ _LIST = set(_LIST_MARKER)
 _REF_TYPES = frozenset({"paperQuote", "paperFigure", "paperEquation", "paperRegion"})
 
 
-_ALIGN_ROW = {"left": ":--", "center": ":-:", "right": "--:", "": "---"}
+_ALIGN_ROW = {"left": "---", "center": ":-:", "right": "--:", "": "---"}
 
 
 def _written_rows(b: Block) -> list[list[list[dict[str, Any]]]]:
