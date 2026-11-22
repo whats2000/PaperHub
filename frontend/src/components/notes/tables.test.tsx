@@ -390,7 +390,7 @@ describe("tables in the note editor", () => {
     await waitFor(() => expect(pm.querySelectorAll("tr")[0]!.children[1]!.tagName).toBe("TD"));
   });
 
-  it("the grips drag and the + buttons stay; the cell handle opens PaperHub's cell menu", async () => {
+  it("the grips drag and the + buttons stay", async () => {
     seed([seededTable]);
     const pm = mountEditor();
     hoverCell(pm, 1, 1);
@@ -1484,46 +1484,5 @@ describe("merging and splitting cells", () => {
     expect(canMerge(editor._tiptapEditor.view.state)).toBe(false);
     selectCells(editor, [1, 0], [2, 1]);
     expect(canMerge(editor._tiptapEditor.view.state)).toBe(true);
-  });
-
-  it("Borders… in the cell menu opens the picker on the cell's lines", async () => {
-    seed([seededTable]);
-    const pm = mountEditor();
-    hoverCell(pm, 1, 1);
-    act(() => {
-      fireEvent.click(screen.getByRole("button", { name: "Cell options", ...HIDDEN }));
-    });
-    const menu = await screen.findByRole("menu", HIDDEN);
-    act(() => {
-      fireEvent.click(within(menu).getByText("Borders…"));
-    });
-    const dialog = await screen.findByRole("dialog", { name: /Borders · 1×1 cells/, ...HIDDEN });
-    expect(within(dialog).getAllByRole("button", HIDDEN).length).toBeGreaterThanOrEqual(12);
-  });
-
-  it("the cell menu: Merge off on one plain cell, Split only on a merged one, no colour", async () => {
-    seed([seededTable]);
-    const pm = mountEditor();
-    hoverCell(pm, 1, 1);
-    const handle = await screen.findByRole("button", { name: "Cell options" });
-    act(() => {
-      fireEvent.click(handle);
-    });
-    const menu = await screen.findByRole("menu", HIDDEN);
-    const names = [...menu.querySelectorAll("[role^=menuitem]")].map((e) => e.textContent?.trim());
-    expect(names.slice(0, 2)).toEqual(["Merge cells", "Split cell"]);
-    expect(names[2]).toMatch(/^Borders…/);
-    expect(names).toContain("Delete rows");
-    expect(within(menu).queryByText(/colou?r/i)).toBeNull();
-    const item = (name: string) =>
-      [...menu.querySelectorAll<HTMLElement>("[role^=menuitem]")].find((e) => e.textContent?.trim() === name)!;
-    const disabled = (el: HTMLElement) => el.getAttribute("aria-disabled") === "true" || el.hasAttribute("data-disabled");
-    expect(disabled(item("Merge cells"))).toBe(true);
-    expect(disabled(item("Split cell"))).toBe(true);
-    expect(disabled(item("Delete rows"))).toBe(false);
-    act(() => {
-      fireEvent.keyDown(menu, { key: "Escape" });
-    });
-    await waitFor(() => expect(screen.queryByRole("menu", HIDDEN)).toBeNull());
   });
 });

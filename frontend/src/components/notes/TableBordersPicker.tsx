@@ -6,7 +6,8 @@
  * clears them when they already all are; a set the selection has no lines
  * of is disabled. Lines inside a merged cell are never drawn. Each click is
  * one undo step. Arrow keys move across the toolbar (wrapping), Home /
- * End jump, Enter applies; Escape closes back to the ⌄.
+ * End jump, Enter applies; Escape closes back to the ⋮ on the selection,
+ * which it opens beside (`placement`), as the cell menu does.
  */
 import { closeHistory } from "@tiptap/pm/history";
 import type { EditorView } from "@tiptap/pm/view";
@@ -17,6 +18,7 @@ import { Popover, PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type { TableContent } from "@/types/notes";
 
+import type { HandlePlacement } from "./cellHandleGeometry";
 import {
   BORDER_SETS,
   SET_PARTS,
@@ -121,6 +123,7 @@ export function TableBordersPicker({
   blockId,
   selection,
   anchor,
+  placement,
   open,
   onClose,
 }: {
@@ -128,6 +131,8 @@ export function TableBordersPicker({
   blockId: string;
   selection: Selection;
   anchor: HTMLElement;
+  /** Where it opens (beside the handle); under `anchor` without one. */
+  placement?: HandlePlacement;
   open: boolean;
   onClose: () => void;
 }) {
@@ -193,14 +198,17 @@ export function TableBordersPicker({
       }}
     >
       <PopoverContent
-        anchor={anchor}
-        side="bottom"
-        align="end"
+        anchor={placement?.anchor ?? anchor}
+        side={placement?.side ?? "bottom"}
+        align={placement?.align ?? "end"}
+        sideOffset={placement?.sideOffset ?? 4}
+        alignOffset={placement?.alignOffset ?? 0}
         role="dialog"
+        data-note-cell-popup=""
         aria-label={t("notes:borders.title", "Borders · {{rows}}×{{cols}} cells", { rows: nr, cols: nc })}
         initialFocus={firstUsable}
         finalFocus={() => (anchor.isConnected ? anchor : true)}
-        className="w-[252px] p-2 motion-reduce:animate-none"
+        className="w-[252px] origin-(--transform-origin) p-2 motion-reduce:animate-none"
       >
         {b && content ? (
           <>

@@ -718,6 +718,85 @@
 .paperhub-notes .bn-block-outer[data-object-selected] [data-content-type="table"] :is(th, td).selectedCell {
     background-image: none;
 }
+/* The selected cells' outline and their ⋮ handle (TableCellHandle.tsx), as
+   Notion's table: a 2px selection-blue outline around the range and a 12 ×
+   22 pill centred on its right border, half outside (hit area 7px / 5px
+   more), ringed in the surface colour. Both fade in and out in 120ms (the
+   pill also scales from its centre); a hidden pill takes no clicks or
+   focus. The layer sits in the editor's box (.bn-container), so both
+   scroll with the note. */
+.paperhub-notes .bn-container {
+    position: relative;
+}
+.note-cell-layer {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    z-index: 3;
+}
+.note-cell-outline {
+    position: absolute;
+    box-sizing: border-box;
+    border: 2px solid var(--note-select);
+    border-radius: 2px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 120ms ease-out;
+}
+.note-cell-outline[data-on] {
+    opacity: 1;
+}
+.note-cell-handle {
+    position: absolute;
+    width: 12px;
+    height: 22px;
+    margin: -11px 0 0 -6px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: var(--note-select);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 0 0 1.5px var(--note-table-surface, var(--background)), 0 1px 3px rgb(0 0 0 / 0.22);
+    opacity: 0;
+    transform: scale(0.5);
+    visibility: hidden;
+    transition: opacity 120ms ease-out, transform 120ms ease-out, visibility 0s linear 120ms, background-color 120ms ease-out;
+}
+.note-cell-handle[data-on] {
+    opacity: 1;
+    transform: none;
+    visibility: visible;
+    transition: opacity 120ms ease-out, transform 120ms ease-out, visibility 0s, background-color 120ms ease-out;
+}
+.note-cell-handle::before {
+    content: "";
+    position: absolute;
+    inset: -5px -7px;
+}
+.note-cell-handle svg {
+    width: 4px;
+    height: 14px;
+    display: block;
+}
+.note-cell-handle:hover,
+.note-cell-handle[aria-expanded="true"] {
+    background: color-mix(in oklch, var(--note-select) 82%, var(--foreground));
+}
+.note-cell-handle:focus-visible {
+    outline: 2px solid var(--note-select);
+    outline-offset: 2px;
+}
+/* A drag in the editor (text or cells) passes over the pill: a drag ending
+   on it never turns into a cell selection. */
+.note-cell-layer[data-dragging] .note-cell-handle {
+    pointer-events: none;
+}
 /* The table's ⋯ sits with the grips, a touch apart from the column grip. */
 .note-table-more {
     padding-inline: 2px;
@@ -731,6 +810,9 @@
     .paperhub-notes .tableWrapper { transition: none; }
     .bn-table-handle-menu { animation: none !important; }
     .paperhub-notes [data-content-type="table"] :is(th, td) { transition: none; }
+    .note-cell-outline,
+    .note-cell-handle,
+    .note-cell-handle[data-on] { transition: none; }
 }
 
 /* The floating table of contents' list (TocRail.tsx): scrolls without a

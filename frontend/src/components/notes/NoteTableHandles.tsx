@@ -5,8 +5,8 @@
  * column's alignment (GFM `:--` `:-:` `--:`). The table's ⋯ (top right) holds
  * the header row / header column switches and Add / Remove caption and
  * notes (TableCaption.tsx). The "+" extend buttons are
- * BlockNote's. The ⌄ on a cell opens the cell menu: merge / split, the
- * Borders… picker, rows, alignment, delete. No cell colours.
+ * BlockNote's. BlockNote's ⌄ on a cell is replaced by the ⋮ on the selected
+ * cells (TableCellHandle.tsx), which opens the cell menu. No cell colours.
  */
 import { getNodeById } from "@blocknote/core";
 import { TableHandlesExtension } from "@blocknote/core/extensions";
@@ -21,7 +21,6 @@ import {
   useExtensionState,
   usePortalElement,
   type GenericPopoverReference,
-  type TableCellButtonProps,
   type TableHandleProps,
 } from "@blocknote/react";
 import {
@@ -32,15 +31,11 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  ChevronDown,
-  Combine,
   Ellipsis,
-  Grid2x2,
-  SquareSplitHorizontal,
   GripVertical,
   Trash2,
 } from "lucide-react";
-import { useMemo, useRef, useState, type FC } from "react";
+import { useCallback, useMemo, useRef, useState, type FC } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useNotesStore } from "@/store/notes";
@@ -48,21 +43,12 @@ import type { TableContent } from "@/types/notes";
 
 import type { TablePart } from "./noteFind";
 import { TableBordersPicker } from "./TableBordersPicker";
+import { TableCellHandle, type HandleBordersRequest } from "./TableCellHandle";
 import { partRequests } from "./tableCaptions";
 import { columnAlignment, deleteRowOrColumn, setColumnAlignment, type Alignment } from "./tableKeys";
 import { shrinkAway, visibleRect } from "./tableMotion";
-import { bordersOf, dumpBorders, presetLines, tableShape, type Preset, type Selection } from "./tableBorders";
-import { headerDepth, tableGrid } from "./tableGrid";
-import {
-  alignSelectedColumns,
-  canMerge,
-  canSplit,
-  deleteSelectedRows,
-  insertRow,
-  mergeSelected,
-  splitSelected,
-  tableSelection,
-} from "./tableMerge";
+import { bordersOf, dumpBorders, presetLines, tableShape, type Preset } from "./tableBorders";
+import { headerDepth } from "./tableGrid";
 
 const ICON = "size-4";
 
@@ -159,172 +145,6 @@ function NoteTableHandle(props: TableHandleProps) {
       <span className="sr-only">{label}</span>
     </TableHandle>
   );
-}
-
-/** Where the Borders… picker opens: the ⌄ it came from, the table and the
- * selected grid cells (Task 10's `TableBordersPicker`). */
-export type BordersRequest = { anchor: HTMLElement; blockId: string; selection: Selection };
-
-/** The cell menu (the ⌄ on the hovered cell): merge / split, borders,
- * rows above and below, the selected columns' alignment, delete rows.
- * Merge works on a cell selection; Split on one merged cell (the selected
- * one, else the hovered one). No colours. */
-function NoteTableCellMenu({ onBorders, trigger }: { onBorders: (req: BordersRequest) => void; trigger: () => HTMLElement | null }) {
-  const { t } = useTranslation();
-  const C = useComponentsContext()!;
-  const editor = useBlockNoteEditor();
-  const tableHandles = useExtension(TableHandlesExtension);
-  const { block, row, col } = useExtensionState(TableHandlesExtension, {
-    selector: (s) => ({ block: s?.block, row: s?.rowIndex, col: s?.colIndex }),
-  });
-  const can = useEditorState({
-    editor,
-    selector: ({ editor: e }) => {
-      const state = e.prosemirrorState;
-      return { merge: canMerge(state), split: canSplit(state), inTable: tableSelection(state) !== null };
-    },
-  });
-  if (!block || row === undefined || col === undefined) return null;
-  const hovered = (block.content as unknown as TableContent).rows[row]?.cells[col];
-  const hoveredProps =
-    hovered && typeof hovered === "object" && !Array.isArray(hovered) && "props" in hovered
-      ? ((hovered.props ?? {}))
-      : {};
-  const hoveredMerged = Number(hoveredProps.colspan ?? 1) > 1 || Number(hoveredProps.rowspan ?? 1) > 1;
-  const canSplitHere = can.split || (!can.inTable && hoveredMerged);
-  // The commands act on the selection; with none in this table, on the
-  // hovered cell.
-  const focusHovered = () => {
-    if (!can.inTable) {
-      const view = editor.prosemirrorView;
-      view.dispatch(view.state.tr.setSelection(tableHandles.setCellSelection(view.state, { row, col }).selection));
-    }
-  };
-  const selection = (): Selection => {
-    const sel = tableSelection(editor.prosemirrorState);
-    if (sel?.blockId === block.id) return sel.rect;
-    const { grid } = tableGrid(block.content as unknown as TableContent);
-    const a = grid[row]?.find((g) => !Array.isArray(g) && g.index === col && g.row === row);
-    return a && !Array.isArray(a)
-      ? { r0: a.row, r1: a.row + a.rowspan - 1, c0: a.col, c1: a.col + a.colspan - 1 }
-      : { r0: row, r1: row, c0: col, c1: col };
-  };
-  const align = (a: Alignment) => () => {
-    focusHovered();
-    alignSelectedColumns(editor, a);
-  };
-  return (
-    <C.Generic.Menu.Dropdown className="bn-table-handle-menu">
-      <C.Generic.Menu.Item icon={<Combine className={ICON} />} disabled={!can.merge} onClick={() => mergeSelected(editor)}>
-        {t("notes:table.merge", "Merge cells")}
-      </C.Generic.Menu.Item>
-      <C.Generic.Menu.Item
-        icon={<SquareSplitHorizontal className={ICON} />}
-        disabled={!canSplitHere}
-        onClick={() => {
-          focusHovered();
-          splitSelected(editor);
-        }}
-      >
-        {t("notes:table.split", "Split cell")}
-      </C.Generic.Menu.Item>
-      <C.Generic.Menu.Item
-        icon={<Grid2x2 className={ICON} />}
-        onClick={() => {
-          const anchor = trigger();
-          if (anchor) onBorders({ anchor, blockId: block.id, selection: selection() });
-        }}
-      >
-        <span className="flex min-w-0 flex-col">
-          <span>{t("notes:table.borders", "Borders…")}</span>
-          <small className="text-[11px] text-muted-foreground">
-            {t("notes:table.bordersHint", "Pick a weight, then click an icon")}
-          </small>
-        </span>
-      </C.Generic.Menu.Item>
-      <C.Generic.Menu.Divider />
-      <C.Generic.Menu.Item
-        icon={<ArrowUp className={ICON} />}
-        onClick={() => {
-          focusHovered();
-          insertRow(editor, "above");
-        }}
-      >
-        {t("notes:table.insertAbove", "Insert above")}
-      </C.Generic.Menu.Item>
-      <C.Generic.Menu.Item
-        icon={<ArrowDown className={ICON} />}
-        onClick={() => {
-          focusHovered();
-          insertRow(editor, "below");
-        }}
-      >
-        {t("notes:table.insertBelow", "Insert below")}
-      </C.Generic.Menu.Item>
-      <C.Generic.Menu.Divider />
-      <C.Generic.Menu.Item icon={<AlignLeft className={ICON} />} onClick={align("left")}>
-        {t("notes:table.alignLeft", "Align left")}
-      </C.Generic.Menu.Item>
-      <C.Generic.Menu.Item icon={<AlignCenter className={ICON} />} onClick={align("center")}>
-        {t("notes:table.alignCenter", "Align centre")}
-      </C.Generic.Menu.Item>
-      <C.Generic.Menu.Item icon={<AlignRight className={ICON} />} onClick={align("right")}>
-        {t("notes:table.alignRight", "Align right")}
-      </C.Generic.Menu.Item>
-      <C.Generic.Menu.Divider />
-      <C.Generic.Menu.Item
-        icon={<Trash2 className={ICON} />}
-        onClick={() => {
-          focusHovered();
-          deleteSelectedRows(editor);
-        }}
-      >
-        {t("notes:table.deleteRows", "Delete rows")}
-      </C.Generic.Menu.Item>
-    </C.Generic.Menu.Dropdown>
-  );
-}
-
-/** The ⌄ on the hovered cell, opening the cell menu (BlockNote's cell
- * handle, with PaperHub's menu). */
-function makeCellHandle(onBorders: (req: BordersRequest) => void) {
-  return function NoteTableCellHandle(props: TableCellButtonProps) {
-    const { t } = useTranslation();
-    const C = useComponentsContext()!;
-    const editor = useBlockNoteEditor();
-    const portalElement = usePortalElement();
-    const tableHandles = useExtension(TableHandlesExtension);
-    const ref = useRef<HTMLSpanElement>(null);
-    return (
-      <C.Generic.Menu.Root
-        position="right"
-        portalElement={portalElement}
-        onOpenChange={(open: boolean) => {
-          if (open) {
-            tableHandles.freezeHandles();
-            props.hideOtherElements(true);
-          } else {
-            tableHandles.unfreezeHandles();
-            props.hideOtherElements(false);
-            editor.focus();
-          }
-        }}
-      >
-        <C.Generic.Menu.Trigger>
-          <C.Generic.Menu.Button className="bn-table-cell-handle note-table-cell-handle">
-            <span ref={ref} className="flex items-center" aria-hidden>
-              <ChevronDown className="size-3" />
-            </span>
-            <span className="sr-only">{t("notes:table.cellOptions", "Cell options")}</span>
-          </C.Generic.Menu.Button>
-        </C.Generic.Menu.Trigger>
-        <NoteTableCellMenu
-          onBorders={onBorders}
-          trigger={() => ref.current?.closest<HTMLElement>(".bn-table-cell-handle") ?? null}
-        />
-      </C.Generic.Menu.Root>
-    );
-  };
 }
 
 /** Floating 6 px above the table's top right corner. */
@@ -503,27 +323,30 @@ function TableMoreMenu() {
   );
 }
 
+/** BlockNote's ⌄ on the hovered cell is not drawn: the cell menu opens from
+ * the ⋮ on the selection (TableCellHandle.tsx). */
+function NoCellButton() {
+  return null;
+}
+
 /** Rendered inside `BlockNoteView` (with `tableHandles={false}`). */
 export function NoteTableHandles() {
   const editor = useBlockNoteEditor();
   // The last request stays while the picker closes, so it can animate out.
-  const [borders, setBorders] = useState<BordersRequest | null>(null);
+  const [borders, setBorders] = useState<HandleBordersRequest | null>(null);
   const [bordersOpen, setBordersOpen] = useState(false);
-  const CellHandle = useMemo(
-    () =>
-      makeCellHandle((req) => {
-        // After the cell menu has closed (its exit), the picker opens on ⌄.
-        window.setTimeout(() => {
-          setBorders(req);
-          setBordersOpen(true);
-        }, 150);
-      }),
-    [],
-  );
+  const openBorders = useCallback((req: HandleBordersRequest) => {
+    // After the cell menu has closed (its exit), the picker opens beside ⋮.
+    window.setTimeout(() => {
+      setBorders(req);
+      setBordersOpen(true);
+    }, 150);
+  }, []);
   return (
     <>
-      <TableHandlesController tableHandle={NoteTableHandle} tableCellHandle={CellHandle} />
+      <TableHandlesController tableHandle={NoteTableHandle} tableCellHandle={NoCellButton} />
       <TableMoreMenu />
+      <TableCellHandle onBorders={openBorders} pinned={bordersOpen} />
       {borders && (
         <TableBordersPicker
           key={`${borders.blockId}:${borders.selection.r0},${borders.selection.c0},${borders.selection.r1},${borders.selection.c1}`}
@@ -531,6 +354,7 @@ export function NoteTableHandles() {
           blockId={borders.blockId}
           selection={borders.selection}
           anchor={borders.anchor}
+          placement={borders.placement}
           open={bordersOpen}
           onClose={() => setBordersOpen(false)}
         />

@@ -103,12 +103,18 @@
     "presetAllBordersHint": "Every line thin, the header tinted · also the next new table's default",
     "guidesHide": "Hide edit guides",
     "guidesShow": "Show edit guides",
-    "cellOptions": "Cell options",
     "merge": "Merge cells",
     "split": "Split cell",
     "borders": "Borders…",
     "bordersHint": "Pick a weight, then click an icon",
-    "deleteRows": "Delete rows"
+    "deleteRows": "Delete rows",
+    "cellMenu": "Cell menu ({{keys}})",
+    "cellMenuTitle": "Cell menu · {{keys}}",
+    "cellMenuName": "Cell menu",
+    "clear": "Clear contents",
+    "cleared_one": "Cleared {{count}} cell",
+    "cleared_other": "Cleared {{count}} cells",
+    "undo": "Undo"
   },
   "mention": {
     "sections": "Sections of this paper",
