@@ -146,3 +146,25 @@ def test_main_exits_1_when_a_redraw_was_refused(tmp_path: Path, monkeypatch,
     monkeypatch.setattr(cli, "apply_ops", refuse)
     assert cli.main([]) == 1
     assert "rejected: note" in capsys.readouterr().out
+
+
+async def test_undo_of_the_reconcile_set_is_refused(tmp_path: Path) -> None:
+    from paperhub.notes.ops import undo_change_set
+    db = tmp_path / "p.db"
+    await _seed(db)
+    await reconcile(db, dry_run=False)
+    async with aiosqlite.connect(db) as conn:
+        async with conn.execute(
+                "SELECT id FROM note_change_sets WHERE actor = 'system' "
+                "ORDER BY created_at DESC LIMIT 1") as cur:
+            [cs] = await cur.fetchone()
+        out = await undo_change_set(conn, cs)
+        assert [r["reason"] for r in out.rejected] == ["follows_mark"]
+        async with conn.execute(
+                "SELECT color, style FROM note_marks WHERE id = 'mk_1'") as cur:
+            assert await cur.fetchone() == ("blue", "wavy")
+        async with conn.execute(
+                "SELECT status FROM note_change_sets WHERE id = ?", (cs,)) as cur:
+            assert (await cur.fetchone())[0] == "applied"
+    props = await _props_of(db)
+    assert (props["q1"]["color"], props["q1"]["style"]) == ("blue", "wavy")

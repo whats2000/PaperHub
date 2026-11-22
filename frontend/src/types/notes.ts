@@ -143,8 +143,10 @@ export interface RejectedOp {
   block_id: string;
   /** `stale`: an accepted suggestion whose block changed since it was made
    * (it stays open, shown against the current text). `depends_on_failed`:
-   * an op naming a block an earlier op of the call failed to make. */
-  reason: "changed_since_base" | "missing" | "invalid" | "stale" | "depends_on_failed";
+   * an op naming a block an earlier op of the call failed to make.
+   * `follows_mark`: an undo of a change that only redrew a mark's blocks
+   * (undo the recolour that caused it instead). */
+  reason: "changed_since_base" | "missing" | "invalid" | "stale" | "depends_on_failed" | "follows_mark";
   current: NoteBlock | null;
   /** Why an `invalid` op was refused (e.g. an unknown mark colour). */
   hint?: string;

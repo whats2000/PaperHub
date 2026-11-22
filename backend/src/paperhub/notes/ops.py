@@ -57,7 +57,10 @@ from paperhub.notes.store import (
 
 Actor = Literal["user", "agent", "import", "system"]
 RejectReason = Literal["changed_since_base", "missing", "invalid", "stale",
-                       "depends_on_failed"]
+                       "depends_on_failed", "follows_mark"]
+# Why the undo of a redraw's change set is refused.
+FOLLOWS_MARK_HINT = ("this change follows its mark; undo the recolour that "
+                     "caused it")
 
 
 class BlockIn(BaseModel):
@@ -906,6 +909,9 @@ def _outcome(ctx: _Ctx) -> str:
         "rejected": [{"block_id": r["block_id"], "reason": r["reason"]}
                      for r in ctx.rejected],
         **({"inline": ctx.inline} if ctx.inline else {}),
+        # A redraw of mark blocks from their rows: undone only with the
+        # recolour that caused it (its before-states are the stale colours).
+        **({"redraw": True} if ctx.redraw else {}),
     })
 
 
@@ -1108,6 +1114,16 @@ async def undo_change_set(conn: aiosqlite.Connection,
         cs = await _load_change_set(conn, change_set_id)
         if cs["status"] != "applied":
             raise ValueError(f"change set {change_set_id} is already undone")
+        if cs["outcome"].get("redraw"):
+            # Its undo would write the stale colours back into the mark:
+            # refused, nothing written.
+            note = await get_note(conn, cs["note_id"])
+            return ApplyResult(
+                note_id=cs["note_id"],
+                revision=note.revision if note is not None else cs["result_revision"],
+                change_set_id=None, applied=[], suggested=[],
+                rejected=[{"block_id": "", "reason": "follows_mark",
+                           "current": None, "hint": FOLLOWS_MARK_HINT}])
         rev = cs["result_revision"]
         async with conn.execute(
             "SELECT block_id, op, before_json FROM note_block_history "
