@@ -250,7 +250,11 @@ export function NotesPane({ onClose }: Props) {
         id={notePanelId(idBase)}
         role="tabpanel"
         aria-labelledby={noteTabId(idBase, tab)}
-        className="relative min-h-0 flex-1 overflow-x-clip overflow-y-auto"
+        // Clipped, never scrolled: the note editor inside scrolls itself. A
+        // scrolling pane grew a second scrollbar whenever a floating layer
+        // (BlockNote's side menu, left at an old block during a fast
+        // scroll) reached past its bottom.
+        className="relative min-h-0 flex-1 overflow-clip"
       >
         {/* The table of contents floats at the pane's right edge: a
             zero-height sticky layer, so it stays put and takes no width. */}
