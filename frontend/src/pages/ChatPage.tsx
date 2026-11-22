@@ -83,7 +83,8 @@ export function ChatPage() {
   // react-hooks/set-state-in-effect rule). This covers the `openCitation`
   // path which sets open=true on the store directly, bypassing handleToggleCanvas.
   // Notes stays beside it; a newly opened reader or a citation brings the
-  // Reader tab forward when the two share the panel as tabs.
+  // Reader tab forward when the two share the panel as tabs (a paper picked
+  // in the notes pane's own tabs does not: the user stays in Notes).
   useEffect(() => {
     return useCanvasStore.subscribe((state, prev) => {
       if (state.open) {
@@ -92,7 +93,7 @@ export function ChatPage() {
         if (
           !prev.open ||
           state.requestNonce !== prev.requestNonce ||
-          state.paperRequestNonce !== prev.paperRequestNonce
+          (state.paperRequestNonce !== prev.paperRequestNonce && !state.paperRequestQuiet)
         ) {
           useNotesPaneStore.getState().setActiveTab("reader");
         }

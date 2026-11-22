@@ -69,6 +69,9 @@ interface CanvasState {
   /** Bumped on every openPaper so clicking the SAME paper twice re-triggers the
    *  swap effect in the component (which keys an effect on this). */
   paperRequestNonce: number;
+  /** The last paper request came from the notes pane's tabs (selectPaper):
+   *  the reader follows without coming forward over Notes. */
+  paperRequestQuiet: boolean;
   /** The paper currently SHOWN on the canvas (by paper_content_id), or null when
    *  the canvas is closed / empty. Published by CitationCanvas (it owns the
    *  displayed-paper state) so other UI — the References panel — can mark which
@@ -162,6 +165,7 @@ export const useCanvasStore = create<CanvasState>()(
       requestAnimateScroll: false,
       requestedPaperId: null,
       paperRequestNonce: 0,
+      paperRequestQuiet: false,
       activePaperId: null,
       readingSection: null,
       readerView: null,
@@ -212,11 +216,13 @@ export const useCanvasStore = create<CanvasState>()(
           open: true,
           requestedPaperId: paperContentId,
           paperRequestNonce: s.paperRequestNonce + 1,
+          paperRequestQuiet: false,
         })),
       selectPaper: (paperContentId) =>
         set((s) => ({
           requestedPaperId: paperContentId,
           paperRequestNonce: s.paperRequestNonce + 1,
+          paperRequestQuiet: true,
         })),
       outsideByChat: {},
       showOutside: (chat, paperContentId) =>

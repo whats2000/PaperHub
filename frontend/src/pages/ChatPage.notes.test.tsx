@@ -318,6 +318,17 @@ describe("ChatPage Notes pane", () => {
     expect(await screen.findByTestId("slides")).toBeInTheDocument();
   });
 
+  it("a paper picked in the notes pane's tabs keeps Notes in front; a paper opened elsewhere brings the Reader", async () => {
+    useCanvasStore.setState({ open: true, width: 600, activePaperId: 7 });
+    render(<ChatPage />);
+    await userEvent.click(notesButton());
+    expect(useNotesPaneStore.getState().activeTab).toBe("notes");
+    act(() => useCanvasStore.getState().selectPaper(8));
+    expect(useNotesPaneStore.getState().activeTab).toBe("notes");
+    act(() => useCanvasStore.getState().openPaper(8));
+    expect(useNotesPaneStore.getState().activeTab).toBe("reader");
+  });
+
   it("a citation brings the Reader tab forward", async () => {
     useCanvasStore.setState({ open: true, width: 600, activePaperId: 7 });
     render(<ChatPage />);
