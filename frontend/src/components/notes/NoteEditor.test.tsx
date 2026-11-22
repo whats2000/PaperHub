@@ -14,6 +14,7 @@ import { diffDocuments, opBlock, toEditorBlocks, treeIds, type EditorBlock } fro
 import { API_BASE_URL } from "@/lib/api";
 import i18n from "@/lib/i18n";
 import { useCanvasStore } from "@/store/canvas";
+import { inlineCiteAt, markHint, settleMarkPlace } from "@/store/marks";
 import { clearPendingNoteOps, useNotesStore } from "@/store/notes";
 import type { ApplyResult, NoteBlock, NoteOpsBody } from "@/types/notes";
 
@@ -1583,6 +1584,80 @@ describe("Add note from the reader", () => {
     const ids = [...document.querySelectorAll(".bn-block-outer")].map((e) => e.getAttribute("data-id"));
     expect(ids.indexOf("q1")).toBe(1);
     expect(ids).toHaveLength(4);
+  });
+});
+
+describe("an empty line made with Enter, then a mark [user, 2026-11-23]", () => {
+  const last = blk("p9", { content: [{ type: "text", text: "Last", styles: {} }], text: "Last" });
+  type Pm = HTMLElement & {
+    editor: {
+      commands: { setTextSelection: (pos: number) => boolean };
+      state: { doc: { descendants: (f: (n: { isText: boolean; text?: string }, pos: number) => void) => void } };
+    };
+  };
+  const ids = () => [...document.querySelectorAll(".bn-block-outer")].map((e) => e.getAttribute("data-id"));
+
+  /** The caret at the end of "Mine", then Enter: the id of the new line. */
+  async function enterAfterMine(): Promise<string> {
+    await screen.findByText("Last");
+    const pm = document.querySelector(".ProseMirror") as Pm;
+    let at = -1;
+    pm.editor.state.doc.descendants((n, pos) => {
+      if (n.isText && n.text === "Mine") at = pos + 4;
+    });
+    act(() => {
+      pm.focus();
+      pm.editor.commands.setTextSelection(at);
+    });
+    act(() => {
+      fireEvent.keyDown(pm, { key: "Enter" });
+    });
+    await waitFor(() => expect(ids()).toHaveLength(3));
+    const line = ids()[1]!;
+    expect(line).not.toBe("p1");
+    await waitFor(() => expect(useNotesStore.getState().lastCaret[7]).toBe(line));
+    return line;
+  }
+
+  it("the mark saves the caret's empty line first and goes there", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        const body = (await request.json()) as NoteOpsBody;
+        posted.push(body);
+        return HttpResponse.json({
+          note_id: 7, revision: 5, change_set_id: null,
+          applied: body.ops.map((o) => o.block_id ?? ""), suggested: [], rejected: [], reparented: [],
+        } satisfies ApplyResult);
+      }),
+    );
+    seed([mine, last]);
+    mount();
+    const line = await enterAfterMine();
+    // Never sent while empty: the note on the server does not know it yet.
+    expect(useNotesStore.getState().notes[7]!.blocks.map((b) => b.id)).toEqual(["p1", "p9"]);
+    await act(async () => {
+      await settleMarkPlace(3);
+    });
+    expect(posted.flatMap((b) => b.ops)).toEqual([
+      expect.objectContaining({ op: "insert", block_id: line, after: "p1" }),
+    ]);
+    expect(markHint(3)).toBe(line);
+    expect(inlineCiteAt(3)).toEqual({ block_id: line, offset: 0 });
+  });
+
+  it("a reload keeps an empty line not saved yet, the caret still on it", async () => {
+    seed([mine, last]);
+    mount();
+    const line = await enterAfterMine();
+    act(() => {
+      useNotesStore.setState((s) => ({
+        notes: { 7: { ...s.notes[7]!, blocks: [mine, last, quote] } },
+        reloads: { 7: { seq: 1, blockIds: null } },
+      }));
+    });
+    await waitFor(() => expect(document.querySelector('.bn-block-outer[data-id="q1"]')).not.toBeNull());
+    expect(ids()).toEqual(["p1", line, "p9", "q1"]);
+    expect(useNotesStore.getState().lastCaret[7]).toBe(line);
   });
 });
 

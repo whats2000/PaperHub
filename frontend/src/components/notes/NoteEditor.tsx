@@ -43,7 +43,7 @@ import { prefersReducedMotion } from "@/lib/motion";
 import { propText } from "@/lib/notes/ops";
 import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/store/canvas";
-import { savedNoteId, useNotesStore } from "@/store/notes";
+import { onKeepLine, savedNoteId, useNotesStore } from "@/store/notes";
 
 import { atomCaret, isOpeningMove } from "./atomCaret";
 import { insertInlineMath } from "./blocks/InlineMath";
@@ -84,6 +84,7 @@ import {
   type FoldHosts,
   type PartsView,
 } from "./partsDecorations";
+import { replaceKeepingLines } from "./looseLines";
 import { NoteTitle } from "./NoteTitle";
 import { MATH_ALIASES, mathInput, slashLineText, turnIntoEquation } from "./mathInput";
 import { noteSchema, paperhubKeys } from "./schema";
@@ -358,7 +359,7 @@ function LoadedNoteEditor({
         applyingRemote.current = true;
         try {
           if (!takeBlocks(editor, tree, e.blockIds)) {
-            editor.replaceBlocks(editor.document, (tree.length ? tree : [{ type: "paragraph" }]) as never);
+            replaceKeepingLines(editor, tree, treeIds(synced.current ?? []));
           }
         } finally {
           applyingRemote.current = false;
@@ -366,6 +367,20 @@ function LoadedNoteEditor({
         synced.current = pruneUnsavedEmpty(doc(), new Set([...treeIds(synced.current ?? []), ...treeIds(tree)]));
       }),
     [editor, noteId, origin, onChange, doc],
+  );
+
+  // A mark goes at the caret's line: an empty one (an Enter, unsent while
+  // empty) is sent now, so the server knows the place. [user, 2026-11-23]
+  useEffect(
+    () =>
+      onKeepLine((id, blockId) => {
+        if (id !== savedNoteId(noteId) || synced.current === null || !editor.getBlock(blockId)) return;
+        const next = pruneUnsavedEmpty(doc(), treeIds(synced.current).add(blockId));
+        const ops = diffDocuments(synced.current, next);
+        synced.current = next;
+        if (ops.length) applyLocal(noteId, ops, origin);
+      }),
+    [editor, noteId, origin, applyLocal, doc],
   );
 
   // Blocks the server saved under a new id (pasted from another note, they
@@ -417,7 +432,7 @@ function LoadedNoteEditor({
         reload.blockIds === null ||
         reload.blockIds.some((id) => flat.has(id) && !editor.getBlock(id));
       if (full) {
-        editor.replaceBlocks(editor.document, (tree.length ? tree : [{ type: "paragraph" }]) as never);
+        replaceKeepingLines(editor, tree, treeIds(synced.current ?? []));
       } else {
         for (const id of reload.blockIds ?? []) {
           const want = flat.get(id);
