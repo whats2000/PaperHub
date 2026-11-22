@@ -41,15 +41,30 @@ export function NotesPane({ onClose }: Props) {
   const backendSessionId = session?.backend_session_id ?? null;
   const readerPaperId = useCanvasStore((s) => s.activePaperId);
 
-  // The paper last shown in the reader stays the paper tab after the reader
-  // closes; a new chat starts without one.
-  const [paper, setPaper] = useState({ id: readerPaperId, session: activeSessionId });
+  // The paper the reader shows is the paper tab, and stays it after the
+  // reader closes; a paper opened from an agent's change card comes forward
+  // at once (the reader catches up after). `reader`: the reader's paper last
+  // seen, so a change in it (not a mere difference) wins.
+  const [paper, setPaper] = useState({ id: readerPaperId, session: activeSessionId, reader: readerPaperId });
   if (paper.session !== activeSessionId) {
-    setPaper({ id: readerPaperId, session: activeSessionId });
-  } else if (readerPaperId !== null && readerPaperId !== paper.id) {
-    setPaper({ id: readerPaperId, session: activeSessionId });
+    setPaper({ id: readerPaperId, session: activeSessionId, reader: readerPaperId });
+  } else if (readerPaperId !== paper.reader) {
+    setPaper({ id: readerPaperId ?? paper.id, session: activeSessionId, reader: readerPaperId });
   }
-  const paperId = paper.id;
+  // A chat whose reader has shown no paper yet opens on the paper whose
+  // note was last on screen in it, else its first paper (Obsidian / Notion
+  // reopen the last page): never an empty pane while the chat has papers.
+  const refs = useChatStore((s) =>
+    backendSessionId === null ? undefined : s.referencesBySession[backendSessionId],
+  );
+  const lastViewed = useNotesPaneStore((s) =>
+    activeSessionId === null ? undefined : s.lastPaperByChat[activeSessionId],
+  );
+  const fallbackPaperId =
+    lastViewed !== undefined && (refs === undefined || refs.some((r) => r.paper_content_id === lastViewed))
+      ? lastViewed
+      : (refs?.[0]?.paper_content_id ?? null);
+  const paperId = paper.id ?? fallbackPaperId;
 
   const [chosen, setChosen] = useState<NoteTab>("paper");
   // A chat starts on the paper's tab: a tab choice belongs to one chat.
@@ -67,7 +82,11 @@ export function NotesPane({ onClose }: Props) {
     if (request.kind === "session") {
       if (requestShowsHere(request, backendSessionId)) setChosen("chat");
     }
-    else if (request.kind === "paper") setChosen("paper");
+    else if (request.kind === "paper") {
+      setChosen("paper");
+      const id = request.id;
+      setPaper((p) => ({ ...p, id }));
+    }
   }
   // The chat's note earns its tab once it has content (a block with text,
   // or a title the user set). Its state is kept up to date here even while
@@ -97,6 +116,11 @@ export function NotesPane({ onClose }: Props) {
   }
   const chatShown = session !== null && (chatHasContent || (pin !== null && pin === activeSessionId && chatSelected));
   const tab: NoteTab = !chatShown ? (paperId === null ? "chat" : "paper") : paperId === null ? "chat" : chosen;
+  // The paper whose note is on screen is the one this chat reopens on.
+  const rememberPaper = useNotesPaneStore((s) => s.rememberPaper);
+  useEffect(() => {
+    if (tab === "paper" && paperId !== null && activeSessionId !== null) rememberPaper(activeSessionId, paperId);
+  }, [tab, paperId, activeSessionId, rememberPaper]);
   // The chat tab names the chat by its local id: it stays the same note
   // when the chat reaches the server (its first message, or the note's
   // first write).

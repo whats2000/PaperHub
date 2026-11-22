@@ -41,6 +41,11 @@ interface NotesPaneState {
   /** Opens the pane on the Notes tab at a note (and one of its blocks). */
   openAt: (target: Omit<NotesRequest, "seq">) => void;
   consumeRequest: (seq: number) => void;
+  /** Per chat (its local id), the paper whose note was last on screen: the
+   * pane reopens on it while the reader shows no paper. Kept for this page
+   * load only. */
+  lastPaperByChat: Record<number, number>;
+  rememberPaper: (chatId: number, paperId: number) => void;
 }
 
 /** localStorage that never throws (private windows, blocked site data). */
@@ -89,6 +94,13 @@ export const useNotesPaneStore = create<NotesPaneState>()(
         set({ open: true, activeTab: "notes", request: { ...target, seq: ++requestSeq } });
       },
       consumeRequest: (seq) => set((s) => (s.request?.seq === seq ? { request: null } : {})),
+      lastPaperByChat: {},
+      rememberPaper: (chatId, paperId) =>
+        set((s) =>
+          s.lastPaperByChat[chatId] === paperId
+            ? {}
+            : { lastPaperByChat: { ...s.lastPaperByChat, [chatId]: paperId } },
+        ),
     }),
     {
       name: "paperhub-notes-pane-v1",
