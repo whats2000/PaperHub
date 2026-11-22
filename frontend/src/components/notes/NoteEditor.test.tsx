@@ -1376,6 +1376,9 @@ describe("dividers, Focus and folding", () => {
     expect(fold).toHaveClass("note-gutter-btn");
     expect(fold).toHaveAttribute("aria-expanded", "true");
     expect(fold.title).toBe("Fold · Ctrl+Shift+[");
+    // Not a Tab stop: Tab in the note nests (BlockNote, as Notion); the keys
+    // fold. Focused some other way (a screen reader), it is a plain button.
+    expect(fold.tabIndex).toBe(-1);
     fireEvent.click(fold);
     expect(useNotesStore.getState().folded[7]).toEqual(["ha"]);
     await waitFor(() => expect(outer("q2")).toHaveAttribute("data-folded", "true"));
@@ -1388,6 +1391,7 @@ describe("dividers, Focus and folding", () => {
     // The chip after the heading's text says what is folded; it unfolds.
     const chip = await within(outer("ha") as HTMLElement).findByRole("button", { name: "… 3 blocks · 1 mark" });
     expect(chip.closest(".bn-inline-content")).not.toBeNull();
+    expect(chip.tabIndex).toBe(-1);
     const saved = JSON.parse(localStorage.getItem("paperhub-notes-v1") ?? "{}") as { state: { folded: unknown } };
     expect(saved.state.folded).toEqual({ 7: ["ha"] });
     fireEvent.click(chip);

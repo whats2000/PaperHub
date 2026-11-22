@@ -7,6 +7,10 @@
  * The toggle shows while the block is the side menu's (the pointer is on
  * it), while it has keyboard focus, and always while folded; on a bullet
  * item it stands where the bullet is (gutter.css hides the bullet then).
+ *
+ * Neither is a Tab stop: in the note Tab nests the block (BlockNote, as in
+ * Notion), and the keyboard folds with Ctrl+Shift+[ / ] (foldKeys.ts). Both
+ * stay buttons, so a screen reader can still press them.
  */
 import { SideMenuExtension } from "@blocknote/core/extensions";
 import { useEditorChange, useExtensionState } from "@blocknote/react";
@@ -37,6 +41,7 @@ export function FoldToggle({ folded, hovered, onToggle }: { folded: boolean; hov
     <button
       type="button"
       className="note-fold-toggle note-gutter-btn"
+      tabIndex={-1}
       aria-expanded={!folded}
       aria-label={label}
       title={title}
@@ -61,7 +66,7 @@ export function FoldChip({ summary, state, onUnfold }: { summary: { blocks: numb
       type="button"
       className="note-fold-chip"
       data-state={state}
-      tabIndex={state === "open" ? 0 : -1}
+      tabIndex={-1}
       title={t("notes:fold.unfold", "Unfold")}
       onMouseDown={(e) => e.preventDefault()}
       onClick={(e) => {
