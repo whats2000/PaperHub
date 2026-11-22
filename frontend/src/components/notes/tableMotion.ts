@@ -22,11 +22,16 @@ function setFlag(el: Element, name: string, on: boolean) {
 }
 
 /** `data-clip-left` / `data-clip-right` on a table's scroll box while the
- * table runs past that side (the CSS draws the fade). */
+ * table runs past that side (the CSS draws the fade). The box's padding
+ * (room for BlockNote's handles) scrolled out of view hides nothing: a
+ * table scrolled into view, its left edge at the box's, does not fade. */
 function markClipped(wrapper: HTMLElement) {
   const { scrollLeft, clientWidth, scrollWidth } = wrapper;
-  setFlag(wrapper, "data-clip-left", scrollLeft > 1);
-  setFlag(wrapper, "data-clip-right", scrollLeft + clientWidth < scrollWidth - 1);
+  const cs = getComputedStyle(wrapper);
+  const padL = parseFloat(cs.paddingLeft) || 0;
+  const padR = parseFloat(cs.paddingRight) || 0;
+  setFlag(wrapper, "data-clip-left", scrollLeft > padL + 1);
+  setFlag(wrapper, "data-clip-right", scrollLeft + clientWidth < scrollWidth - padR - 1);
 }
 
 /** The tables a change touched in `doc` (only the changed range is

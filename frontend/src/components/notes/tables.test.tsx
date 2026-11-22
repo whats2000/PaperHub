@@ -458,6 +458,28 @@ describe("table motion", () => {
     expect(wrapper.hasAttribute("data-clip-right")).toBe(false);
   });
 
+  it("fades only when the table itself is clipped, not the scroll box's handle padding", () => {
+    const editor = makeEditor([tableMotion], grid());
+    const wrapper = editor._tiptapEditor.view.dom.querySelector<HTMLElement>(".tableWrapper")!;
+    // BlockNote pads the box for its handles (9px left, 22px right).
+    wrapper.style.paddingLeft = "9px";
+    wrapper.style.paddingRight = "22px";
+    let left = 9;
+    Object.defineProperty(wrapper, "scrollWidth", { configurable: true, get: () => 500 });
+    Object.defineProperty(wrapper, "clientWidth", { configurable: true, get: () => 200 });
+    Object.defineProperty(wrapper, "scrollLeft", { configurable: true, get: () => left });
+    // Scrolled into view (the table's left edge at the box's): nothing of
+    // the first column is hidden, so it must not fade.
+    wrapper.dispatchEvent(new Event("scroll"));
+    expect(wrapper.hasAttribute("data-clip-left")).toBe(false);
+    expect(wrapper.hasAttribute("data-clip-right")).toBe(true);
+    // Scrolled to the table's right edge (only the padding is past it).
+    left = 280;
+    wrapper.dispatchEvent(new Event("scroll"));
+    expect(wrapper.hasAttribute("data-clip-left")).toBe(true);
+    expect(wrapper.hasAttribute("data-clip-right")).toBe(false);
+  });
+
   it("a new row grows from zero height; a new column from zero width", () => {
     reducedMotion(false);
     const calls = recordAnimations();

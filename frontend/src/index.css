@@ -578,6 +578,12 @@
     );
     transition: --note-table-fade-l 200ms ease-out, --note-table-fade-r 200ms ease-out;
 }
+/* A table's caption and notes line up with the table, not with its scroll
+   box (BlockNote pads the box by half its handle size on the left; the
+   caption's button pads 2px itself). */
+.paperhub-notes .note-table-part-host {
+    padding-inline-start: calc(18px / 2 - 2px);
+}
 .paperhub-notes .tableWrapper[data-clip-left] {
     --note-table-fade-l: 28px;
 }
