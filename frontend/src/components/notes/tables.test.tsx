@@ -925,7 +925,8 @@ describe("table caption and notes", () => {
     const op = posted.flatMap((b) => b.ops).find((o) => o.block_id === "t");
     expect(op?.block?.props).toEqual({ caption: "Rates", notes: "N" });
     expect(propsOf(pm, "t").caption).toBe("Rates");
-    // Removing the notes sends no empty prop.
+    // Removing the notes sends no empty prop: it names the notes as null
+    // (the server patches props, so a key left out would be kept).
     posted.length = 0;
     const again = await openTableMenu(pm);
     act(() => {
@@ -934,7 +935,11 @@ describe("table caption and notes", () => {
     await act(async () => {
       await useNotesStore.getState().flush(7);
     });
-    expect(posted.flatMap((b) => b.ops).find((o) => o.block_id === "t")?.block?.props).toEqual({ caption: "Rates" });
+    expect(posted.flatMap((b) => b.ops).find((o) => o.block_id === "t")?.block?.props).toEqual({
+      caption: "Rates",
+      notes: null,
+    });
+    expect(useNotesStore.getState().notes[7]!.blocks.find((b) => b.id === "t")!.props).toEqual({ caption: "Rates" });
   });
 
   it("an empty caption or notes part takes no room and draws nothing", async () => {

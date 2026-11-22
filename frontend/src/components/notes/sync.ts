@@ -81,6 +81,18 @@ export function opBlock(b: EditorBlock): NoteBlockIn {
   return out;
 }
 
+/** An update's block: its full props, and a prop the block had and no
+ * longer has (a caption cleared, a colour taken off) named as null, since
+ * the server patches the stored props (a key left out is kept). A type
+ * change takes the new type's props whole. */
+function updateBlock(old: EditorBlock, b: EditorBlock): NoteBlockIn {
+  const out = opBlock(b);
+  if (old.type !== b.type) return out;
+  const props: Record<string, unknown> = { ...out.props };
+  for (const k of Object.keys(decodeProps(old.type, old.props))) if (!(k in props)) props[k] = null;
+  return { ...out, props };
+}
+
 /** Flat backend blocks -> the editor tree (sibling order kept). */
 export function toEditorBlocks(blocks: NoteBlock[]): EditorBlock[] {
   const ids = new Set(blocks.map((b) => b.id));
@@ -234,7 +246,7 @@ export function diffDocuments(prev: EditorBlock[], next: EditorBlock[]): NoteOp[
           !deepEqual(old.props, b.props) ||
           !deepEqual(old.content, b.content)
         ) {
-          ops.push({ op: "update", block_id: b.id, block: opBlock(b) });
+          ops.push({ op: "update", block_id: b.id, block: updateBlock(old, b) });
         }
       }
       walk(b.children, b.id);

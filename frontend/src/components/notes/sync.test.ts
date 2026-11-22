@@ -71,6 +71,23 @@ describe("diffDocuments", () => {
     ]);
   });
 
+  it("an update names a prop the block no longer has as null (the server patches props)", () => {
+    const table = (props: Record<string, unknown>): EditorBlock => ({
+      id: "t",
+      type: "table",
+      props,
+      content: { type: "tableContent", rows: [{ cells: [[{ type: "text", text: "x", styles: {} }]] }] },
+      children: [],
+    });
+    // The caption was cleared ("" is stored as none); the notes stay.
+    const ops = diffDocuments([table({ caption: "Rates", notes: "n" })], [table({ caption: "", notes: "n" })]);
+    expect(ops).toHaveLength(1);
+    expect(ops[0]).toMatchObject({ op: "update", block: { props: { caption: null, notes: "n" } } });
+    // A type change sends the new type's props only.
+    const turned = diffDocuments([{ ...p("h", "H"), type: "heading", props: { level: 2 } }], [p("h", "H")]);
+    expect(turned[0]).toMatchObject({ op: "update", block: { type: "paragraph", props: {} } });
+  });
+
   it("deletes a removed block once, not its removed children", () => {
     const ops = diffDocuments([p("a", "A", [p("c", "C")]), p("b", "B")], [p("b", "B")]);
     expect(ops).toEqual([{ op: "delete", block_id: "a" }]);

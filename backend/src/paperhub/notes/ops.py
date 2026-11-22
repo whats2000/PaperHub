@@ -12,7 +12,12 @@ Rules:
 * a subtree delete is rejected if any live descendant changed since base;
 * a user edit to an AI block makes it the user's;
 * deletes are soft and take the block's subtree with them;
-* every applied change writes a ``note_block_history`` row.
+* every applied change writes a ``note_block_history`` row;
+* a user's ``update`` over the API patches the stored props
+  (``patch_props``): a key it leaves out keeps its value, ``null`` removes
+  it, and a mark block's ``markId`` can be neither removed nor changed (a
+  type change takes the new props whole). The editor sends full props, so
+  for it a patch is a replace; a partial client loses nothing it omitted.
 """
 from __future__ import annotations
 
@@ -217,6 +222,8 @@ class _Ctx:
         self.renamed: dict[str, str] = {}
         # An update merges over the stored block (agent edits, accepts).
         self.merge = merge or actor == "agent"
+        # A user update patches the stored props (``apply_ops`` docstring).
+        self.patch = False
         # A redraw of mark blocks from their rows (a recolour's copies in
         # another note, reconcile): its history keeps the old colour.
         self.redraw = redraw
@@ -706,8 +713,8 @@ async def _insert_row(ctx: _Ctx, block_id: str, blk: BlockIn,
         "created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (block_id, ctx.note_id, parent, key, blk.type,
-         json.dumps({"props": blk.props, "content": blk.content}),
-         block_text(blk.type, blk.props, blk.content), author,
+         json.dumps({"props": drop_nulls(blk.props), "content": blk.content}),
+         block_text(blk.type, drop_nulls(blk.props), blk.content), author,
          blk.section_key, ctx.rev,
          ctx.actor, ctx.now, ctx.now),
     )
@@ -760,6 +767,28 @@ async def _suggest(ctx: _Ctx, row: _Row, op: Op) -> None:
          block_hash(row.props, row.text)),
     )
     ctx.suggested.append({"block_id": row.id, "suggestion_id": sid})
+
+
+MARK_ID_HINT = "a mark block keeps its markId: it names the mark it shows"
+
+
+def _patched(ctx: _Ctx, row: _Row, blk: BlockIn) -> BlockIn | None:
+    """A user update's block with its props laid over the stored ones (a
+    key left out kept, ``None`` removed); a type change takes its props
+    whole. None (rejected) when it would remove or change a mark block's
+    ``markId``."""
+    if blk.type != row.type:
+        return blk.model_copy(update={"props": drop_nulls(blk.props)})
+    props = drop_nulls({**row.props, **blk.props})
+    if row.type in MARK_BLOCK_TYPES and props.get("markId") != row.props.get("markId"):
+        ctx.reject(row.id, "invalid", row, hint=MARK_ID_HINT)
+        return None
+    return blk.model_copy(update={"props": props})
+
+
+def drop_nulls(props: dict[str, Any]) -> dict[str, Any]:
+    """Props without the keys set to ``None`` (``None`` removes a prop)."""
+    return {k: v for k, v in props.items() if v is not None}
 
 
 def block_hash(props: dict[str, Any], text: str) -> str:
@@ -906,6 +935,12 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
     if op.op == "update" and op.block is None:
         ctx.reject(row.id, "invalid")
         return
+    if op.op == "update" and ctx.patch and not ctx.merge:
+        assert op.block is not None
+        patched = _patched(ctx, row, op.block)
+        if patched is None:
+            return
+        op = op.model_copy(update={"block": patched})
     live_desc: list[_Row] = []
     if op.op == "delete":
         live_desc = [d for d in await ctx.descendants(row.id)
@@ -942,7 +977,7 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
     if op.op == "update":
         assert op.block is not None
         blk = await _merged(ctx, row, op.block) if ctx.merge else op.block
-        after = {**before, "type": blk.type, "props": blk.props,
+        after = {**before, "type": blk.type, "props": drop_nulls(blk.props),
                  "content": blk.content}
         if blk.section_key is not None:
             after["section_key"] = blk.section_key
@@ -1016,7 +1051,7 @@ async def _apply_in_tx(
     conn: aiosqlite.Connection, note_id: int, *, base_revision: int,
     ops: list[Op], actor: Actor, run_id: int | None, summary: str,
     scaffold: frozenset[str] = frozenset(), merge: bool = False,
-    redraw: bool = False,
+    redraw: bool = False, patch_props: bool = False,
 ) -> ApplyResult:
     note = await get_note(conn, note_id)
     if note is not None and base_revision > note.revision:
@@ -1028,6 +1063,7 @@ async def _apply_in_tx(
                        summary=summary)
     ctx.merge = ctx.merge or merge
     ctx.redraw = redraw
+    ctx.patch = patch_props
     recorded: list[dict[str, Any]] = []
     for index, op in enumerate(ops):
         before_applied = len(ctx.applied)
@@ -1086,7 +1122,7 @@ async def apply_ops(
     conn: aiosqlite.Connection, note_id: int, *, base_revision: int,
     ops: list[Op], actor: Actor, run_id: int | None = None, summary: str = "",
     idempotency_key: str | None = None, scaffold: frozenset[str] = frozenset(),
-    redraw: bool = False,
+    redraw: bool = False, patch_props: bool = False,
 ) -> ApplyResult:
     """Apply ``ops`` as one revision; see the module docstring for the rules.
 
@@ -1096,6 +1132,8 @@ async def apply_ops(
     ``scaffold`` names section blocks inserted only to hold the other ops:
     one left empty (all its ops rejected) is not kept. ``redraw``: the ops
     redraw mark blocks from their rows (history keeps the old colour).
+    ``patch_props``: a user ``update`` patches the stored props (see the
+    module docstring), as ``POST /notes/{id}/ops`` asks.
     """
     async with write_transaction(conn):
         if idempotency_key is not None:
@@ -1109,7 +1147,8 @@ async def apply_ops(
                 return ApplyResult.model_validate_json(row[0])
         res = await _apply_in_tx(
             conn, note_id, base_revision=base_revision, ops=ops, actor=actor,
-            run_id=run_id, summary=summary, scaffold=scaffold, redraw=redraw)
+            run_id=run_id, summary=summary, scaffold=scaffold, redraw=redraw,
+            patch_props=patch_props)
         if idempotency_key is not None and res.change_set_id is not None:
             await conn.execute(
                 "UPDATE note_change_sets SET idempotency_key = ?, "

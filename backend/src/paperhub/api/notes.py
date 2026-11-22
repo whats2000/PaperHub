@@ -463,7 +463,8 @@ async def apply_note_ops(note_id: int, body: OpsBody) -> ApplyResult:
         try:
             return await note_ops.apply_ops(
                 conn, note_id, base_revision=body.base_revision, ops=body.ops,
-                actor="user", idempotency_key=body.idempotency_key)
+                actor="user", idempotency_key=body.idempotency_key,
+                patch_props=True)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
 

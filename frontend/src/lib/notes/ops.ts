@@ -27,6 +27,11 @@ function runsText(content: unknown): string {
     .join("");
 }
 
+/** Props without the keys set to null (null removes a prop). */
+function withoutNulls(props: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(props).filter(([, v]) => v !== null));
+}
+
 /** A table cell's text (its runs). */
 export function cellText(cell: unknown): string {
   if (cell && typeof cell === "object" && !Array.isArray(cell)) {
@@ -145,20 +150,23 @@ export function applyOpsLocally(noteId: number, blocks: NoteBlock[], ops: NoteOp
         changed_rev: 0,
       }, op);
     } else if (op.op === "update" && op.block) {
-      const { type, props, content = null, section_key } = op.block;
-      out = out.map((b) =>
-        b.id === id
-          ? {
-              ...b,
-              type,
-              props,
-              content,
-              text: blockText(type, props, content),
-              author: "user" as const,
-              section_key: section_key ?? b.section_key,
-            }
-          : b,
-      );
+      const { type, content = null, section_key } = op.block;
+      const given = op.block.props;
+      out = out.map((b) => {
+        if (b.id !== id) return b;
+        // As the server does: same type, the props patch the stored ones
+        // (a key left out kept, null removed); a type change takes them whole.
+        const props = withoutNulls(b.type === type ? { ...b.props, ...given } : given);
+        return {
+          ...b,
+          type,
+          props,
+          content,
+          text: blockText(type, props, content),
+          author: "user" as const,
+          section_key: section_key ?? b.section_key,
+        };
+      });
     } else if (op.op === "move") {
       const cur = out.find((b) => b.id === id);
       if (cur) out = place(out.filter((b) => b.id !== id), cur, op);

@@ -55,11 +55,12 @@ export function tablePartChanges(s: NoteSuggestion, current: Record<string, unkn
 }
 
 /** The caption / notes `props` changes against `current` (a part `props`
- * leaves out is kept, so it is no change). */
+ * leaves out is kept, so it is no change; null removes it). */
 export function diffTableParts(current: Record<string, unknown>, props: Record<string, unknown>): TablePartChange[] {
   const out: TablePartChange[] = [];
   for (const part of ["caption", "notes"] as const) {
-    const to = props[part];
+    const given = props[part];
+    const to = given === null ? "" : given;
     if (typeof to !== "string") continue;
     const cur = current[part];
     const from = typeof cur === "string" ? cur : "";

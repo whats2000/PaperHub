@@ -33,6 +33,18 @@ describe("applyOpsLocally", () => {
     expect(out[1]).toMatchObject({ type: "heading", props: { level: 2 }, text: "B2" });
   });
 
+  it("an update patches props as the server does: an omitted key stays, null removes it", () => {
+    const t = nb("t", null, "t", { type: "table", props: { caption: "Rates", notes: "n = 20" } });
+    const out = applyOpsLocally(1, [t], [
+      { op: "update", block_id: "t", block: { type: "table", props: { notes: null }, content: { type: "tableContent", rows: [] } as never } },
+    ]);
+    expect(out[0]?.props).toEqual({ caption: "Rates" });
+    // A type change takes the new props whole.
+    const h = nb("h", null, "h", { type: "heading", props: { level: 2 } });
+    const turned = applyOpsLocally(1, [h], [{ op: "update", block_id: "h", block: { type: "paragraph", props: {}, content: "h" } }]);
+    expect(turned[0]?.props).toEqual({});
+  });
+
   it("replaces a block an insert names again instead of adding a second copy", () => {
     const blocks = [nb("a", null), nb("n", null, "old"), nb("b", null)];
     const out = applyOpsLocally(1, blocks, [
