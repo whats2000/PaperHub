@@ -311,7 +311,11 @@ export function setNoteSessionCreator(fn: (localSessionId: number) => Promise<nu
 export function noteHasContent(state: NoteState | undefined): boolean {
   if (!state) return false;
   if (state.note.title.trim()) return true;
-  return state.blocks.some((b) => blockText(b.type, b.props, b.content).trim() !== "");
+  return state.blocks.some((b) => {
+    const text = blockText(b.type, b.props, b.content);
+    // A table's text is its cells joined by " | ": an empty table is only those.
+    return (b.type === "table" ? text.replace(/\|/g, "") : text).trim() !== "";
+  });
 }
 
 /** A placeholder for a note the server does not have yet. */

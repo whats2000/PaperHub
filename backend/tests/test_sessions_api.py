@@ -1063,6 +1063,41 @@ async def test_list_sessions_lists_a_chat_whose_note_has_content(
     assert got[ids[4]]["title"] == "From message"
 
 
+async def _note_with_table(db: Path, session_id: int,
+                           rows: list[list[str]]) -> None:
+    from paperhub.notes.ops import BlockIn, Op, apply_ops
+    from paperhub.notes.store import get_or_create_note
+    async with aiosqlite.connect(db) as conn:
+        note = await get_or_create_note(
+            conn, target_kind="session", target_id=str(session_id), title="",
+            session_id=session_id)
+        await apply_ops(conn, note.id, base_revision=0, actor="user", ops=[
+            Op(op="insert", block=BlockIn(type="table", content={
+                "type": "tableContent", "columnWidths": [None] * len(rows[0]),
+                "headerRows": 1, "rows": [
+                    {"cells": [[{"type": "text", "text": c}] if c else []
+                               for c in r]} for r in rows]}))])
+
+
+async def test_an_empty_table_is_not_content_and_never_a_title(
+    sessions_client: AsyncClient, tmp_path: Path,
+) -> None:
+    """A note holding only an empty table is empty (its chat stays hidden);
+    a table's first line names the chat by its cells, never "| |"."""
+    db = tmp_path / "paperhub.db"
+    empty, partial = [(await sessions_client.post("/sessions")).json()["session_id"]
+                      for _ in range(2)]
+    await _note_with_table(db, empty, [["", "", ""], ["", "", ""]])
+    await _note_with_table(db, partial, [["", "", ""], ["", "ORR", "62%"]])
+    got = {s["id"]: s for s in (await sessions_client.get("/sessions")).json()}
+    assert empty not in got
+    assert got[partial]["title"] == "ORR | 62%"
+    async with aiosqlite.connect(db) as conn:
+        from paperhub.notes.store import list_live_notes
+        listed = [n.target_id for n, _ in await list_live_notes(conn, "")]
+    assert str(empty) not in listed and str(partial) in listed
+
+
 async def test_delete_of_a_chat_with_only_a_note_is_undoable(
     sessions_client: AsyncClient, tmp_path: Path,
 ) -> None:

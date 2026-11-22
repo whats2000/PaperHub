@@ -145,12 +145,35 @@ _TARGET_TITLE_SQL = (
     "WHERE CAST(t.id AS TEXT) = n.target_id) END, '')"
 )
 
+# A block's text with something in it: a table's without the `` | ``
+# between its cells and the line breaks between its rows (an empty table's
+# text is only those).
+_BLOCK_HAS_TEXT_SQL = (
+    "TRIM(CASE WHEN b.type = 'table' THEN REPLACE(REPLACE(REPLACE(REPLACE("
+    "b.text, '|', ''), char(10), ''), char(13), ''), char(9), '') "
+    "ELSE b.text END) <> ''"
+)
+
 NOTE_HAS_CONTENT_SQL = (
     "((TRIM(n.title) <> '' AND TRIM(n.title) <> " + _TARGET_TITLE_SQL + ") "
     "OR EXISTS (SELECT 1 FROM note_blocks b "
-    "WHERE b.note_id = n.id AND b.deleted_at IS NULL AND (TRIM(b.text) <> '' "
+    f"WHERE b.note_id = n.id AND b.deleted_at IS NULL AND ({_BLOCK_HAS_TEXT_SQL} "
     f"OR b.type IN ({', '.join(repr(t) for t in _CONTENT_TYPES)}))))"
 )
+
+
+def text_lines(b: Block) -> list[str]:
+    """A block's lines of text, each on one line, the empty ones left out;
+    a table's line is its non-empty cells (`` | ``-joined), so an empty
+    row or table has none."""
+    out: list[str] = []
+    for line in b.text.splitlines():
+        if b.type == "table":
+            line = " | ".join(p.strip() for p in line.split("|") if p.strip())
+        line = " ".join(line.split())
+        if line:
+            out.append(line)
+    return out
 
 # A chat note whose chat the sidebar does not list (gone, deleted, internal).
 _HIDDEN_CHAT_SQL = (
@@ -252,9 +275,8 @@ async def note_first_line(conn: aiosqlite.Connection, note_id: int) -> str:
     if own and own != " ".join((await default_title(conn, note)).split()):
         return own
     for b in await list_blocks(conn, note_id):
-        for line in b.text.splitlines():
-            if line.strip():
-                return " ".join(line.split())[:200]
+        for line in text_lines(b):
+            return line[:200]
     return ""
 
 

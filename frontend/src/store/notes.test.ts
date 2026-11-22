@@ -9,6 +9,7 @@ import {
   CARET_GIVE_UP_MS,
   clearPendingNoteOps,
   isUnsavedNote,
+  noteHasContent,
   pendingNoteOps,
   resetLinkTargets,
   savedNoteId,
@@ -919,6 +920,34 @@ describe("caretAfter", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("noteHasContent", () => {
+  const withTable = (rows: string[][], props: Record<string, unknown> = {}) => ({
+    note: { id: 7, target_kind: "session" as const, target_id: "1", title: "", revision: 1, updated_at: "" },
+    blocks: [
+      {
+        ...block("t", ""),
+        type: "table",
+        props,
+        content: {
+          type: "tableContent",
+          columnWidths: rows[0]!.map(() => null),
+          headerRows: 1,
+          rows: rows.map((r) => ({ cells: r.map((c) => (c ? [{ type: "text", text: c, styles: {} }] : [])) })),
+        },
+      },
+    ],
+    suggestions: [],
+    comments: [],
+    revision: 1,
+  });
+
+  it("an empty table is not content; a cell, caption or notes with text is", () => {
+    expect(noteHasContent(withTable([["", "", ""], ["", "", ""]]) as never)).toBe(false);
+    expect(noteHasContent(withTable([["", ""], ["", "x"]]) as never)).toBe(true);
+    expect(noteHasContent(withTable([["", ""]], { caption: "Rates" }) as never)).toBe(true);
   });
 });
 
