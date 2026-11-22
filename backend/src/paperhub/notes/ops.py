@@ -1472,6 +1472,14 @@ def _state_text(state: dict[str, Any] | None) -> str:
                       state.get("content"))
 
 
+def _table_side(state: dict[str, Any]) -> dict[str, Any]:
+    """A table block's state as the change card diffs it: its caption and
+    notes ("" for none, so a removal reads as one) and its cells."""
+    props = state.get("props") or {}
+    return {"props": {k: str(props.get(k) or "") for k in ("caption", "notes")},
+            "content": state.get("content")}
+
+
 async def change_set_detail(conn: aiosqlite.Connection,
                             change_set_id: str) -> dict[str, Any]:
     """A change set as the chat card shows it.
@@ -1514,22 +1522,40 @@ async def change_set_detail(conn: aiosqlite.Connection,
                                 "text": _state_text(shown)}
         if op == "update":
             item["before"] = _state_text(before)
+            if (before or {}).get("type") == "table" == shown.get("type"):
+                item["table"] = {"before": _table_side(before or {}),
+                                 "after": _table_side(shown)}
         changes.append(item)
     marks = ",".join("?" for _ in chain)
     async with conn.execute(
-        "SELECT s.block_id, s.kind, s.proposed_json, s.status, b.text "  # noqa: S608
+        "SELECT s.block_id, s.kind, s.proposed_json, s.status, b.text, "  # noqa: S608
+        "b.type, b.payload_json "
         "FROM note_suggestions s LEFT JOIN note_blocks b ON b.id = s.block_id "
         f"WHERE s.change_set_id IN ({marks}) ORDER BY s.created_at, s.rowid",
         chain,
     ) as cur:
         sug_rows = await cur.fetchall()
     latest: dict[str, dict[str, Any]] = {}
-    for block_id, kind, proposed, status, now_text in sug_rows:
-        latest[block_id] = {
+    for block_id, kind, proposed, status, now_text, now_type, payload in sug_rows:
+        sug: dict[str, Any] = {
             "kind": "suggested", "block_id": block_id, "op": kind,
             "before": now_text or "",
             "text": _state_text(json.loads(proposed)) if proposed else "",
             "status": status}
+        prop = json.loads(proposed) if proposed else None
+        if (kind == "update" and now_type == "table" and payload
+                and prop is not None and prop.get("type") == "table"):
+            # Shown cell by cell: the table now and as Accept writes it
+            # (a part the proposal leaves out is kept, so it stays out).
+            now = json.loads(payload)
+            shown_prop = await proposal_as_accepted(
+                conn, now_type, now.get("content"), prop) or prop
+            sug["table"] = {
+                "before": {"props": now.get("props") or {},
+                           "content": now.get("content")},
+                "after": {"props": shown_prop.get("props") or {},
+                          "content": shown_prop.get("content")}}
+        latest[block_id] = sug
     changes.extend(latest.values())
     return {"id": change_set_id, "note_id": cs["note_id"],
             "status": cs["status"],

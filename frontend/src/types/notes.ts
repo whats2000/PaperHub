@@ -207,6 +207,15 @@ export interface ChangeSetChange {
   op?: "update" | "delete";
   /** A suggestion's status. */
   status?: "open" | "accepted" | "rejected" | "withdrawn";
+  /** A table's change: the table before and after (a suggestion: now and
+   * as Accept would write it), shown cell by cell. */
+  table?: { before: ChangeSetTable; after: ChangeSetTable };
+}
+
+/** A table as a change set shows it: its caption / notes and its cells. */
+export interface ChangeSetTable {
+  props: Record<string, unknown>;
+  content: unknown;
 }
 
 export interface ChangeSetStatus {

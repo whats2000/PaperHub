@@ -249,6 +249,46 @@ describe("NotesChangeCard", () => {
     fireEvent.click(details);
     expect(region).toHaveAttribute("data-state", "closed");
   });
+
+  it("shows a table change cell by cell, as the suggestion bar does, never the table as one line", async () => {
+    const cell = (text: string) => ({ type: "tableCell", props: {}, content: [{ type: "text", text, styles: {} }] });
+    const table = (rows: string[][]) => ({
+      type: "tableContent",
+      headerRows: 1,
+      rows: rows.map((r) => ({ cells: r.map(cell) })),
+    });
+    const before = table([["方法", "延遲"], ["RoboTTT", "固定"], ["LoRA", "待查"]]);
+    const after = table([["方法", "延遲"], ["RoboTTT", "固定"], ["LoRA", "無"], ["Full", "無"]]);
+    server.use(
+      http.get(`${API_BASE_URL}/notes/change-sets/cs_1`, () =>
+        HttpResponse.json(
+          detail({
+            changes: [
+              {
+                kind: "suggested",
+                block_id: "t1",
+                op: "update",
+                before: "方法 | 延遲\nRoboTTT | 固定\nLoRA | 待查",
+                text: "方法 | 延遲\nRoboTTT | 固定\nLoRA | 無\nFull | 無",
+                status: "open",
+                table: {
+                  before: { props: { caption: "Old" }, content: before },
+                  after: { props: { caption: "New" }, content: after },
+                },
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    render(<NotesChangeCard data={data} />);
+    fireEvent.click(screen.getByRole("button", { name: /Details/ }));
+    const cells = await screen.findAllByTestId("suggestion-cell");
+    expect(cells.map((c) => c.textContent)).toEqual(["LoRA · 延遲: 待查 無", "New row: Full | 無"]);
+    expect(screen.getByTestId("suggestion-part-caption")).toHaveTextContent("Table caption: Old New");
+    // The unchanged row is not listed, and no line holds the whole table.
+    expect(screen.getByTestId("notes-card-details").textContent).not.toContain("RoboTTT");
+  });
 });
 
 describe("MessageBubble", () => {

@@ -365,6 +365,7 @@
     "nothing": "没有可显示的内容。",
     "removedLine": "已移除：",
     "suggestedLine": "对你这行的建议：",
+    "suggestedTable": "对你这张表的建议：",
     "updatedLine": "已更新：",
     "status": {
       "accepted": "已接受",

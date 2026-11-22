@@ -104,6 +104,63 @@ export function SuggestionMark({
         "animate-in fade-in-0 motion-reduce:animate-none motion-reduce:transition-none",
       )}
     >
+      <TableChangeList
+        partChanges={partChanges}
+        cellChanges={cellChanges}
+        suggestionId={suggestionId}
+      />
+      {detached !== null && (
+        <ins className="note-sug-ins basis-full" data-suggestion-id={suggestionId}>
+          {detached}
+        </ins>
+      )}
+      <Sparkles className="size-3 shrink-0" aria-hidden />
+      <span>
+        {deletes
+          ? t("notes:suggestion.deleteLine", "Suggested removing this line")
+          : t("notes:suggestion.by", "Suggested by the assistant")}
+      </span>
+      <span className="inline-flex gap-1">
+        <button
+          type="button"
+          disabled={busy !== null}
+          onClick={() => void decide(true)}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 text-[11.5px] text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+        >
+          {busy === "accept" && <Loader2 className="size-3 animate-spin" aria-hidden />}
+          {t("notes:suggestion.accept", "Accept")}
+        </button>
+        <button
+          type="button"
+          disabled={busy !== null}
+          onClick={() => void decide(false)}
+          className="inline-flex items-center gap-1 rounded-md px-2 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+        >
+          {busy === "reject" && <Loader2 className="size-3 animate-spin" aria-hidden />}
+          {t("notes:suggestion.reject", "Reject")}
+        </button>
+      </span>
+    </span>
+  );
+}
+
+/** A table change, part by part and cell by cell: its caption / notes (old
+ * struck, new inserted), each changed cell named by its row and column,
+ * and each row added or removed. Shared by the suggestion bar and the
+ * chat's change card. `suggestionId` ties the marks to a suggestion's
+ * bar (they fade with it). */
+export function TableChangeList({
+  partChanges,
+  cellChanges,
+  suggestionId,
+}: {
+  partChanges: readonly TablePartChange[];
+  cellChanges: readonly TableCellChange[];
+  suggestionId?: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
       {partChanges.map((c) => (
         <span
           key={c.part}
@@ -131,7 +188,8 @@ export function SuggestionMark({
       ))}
       {cellChanges.map((c, i) => {
         // The first cell names its row, so a change to it names the row by number.
-        const row = c.colN !== 1 && c.row ? c.row : t("notes:suggestion.rowN", "Row {{n}}", { n: c.rowN });
+        const row =
+          c.colN !== 1 && c.row ? c.row : t("notes:suggestion.rowN", "Row {{n}}", { n: c.rowN });
         const column = c.column || t("notes:suggestion.columnN", "Column {{n}}", { n: c.colN });
         const label =
           c.kind === "addRow"
@@ -140,7 +198,11 @@ export function SuggestionMark({
               ? t("notes:suggestion.removeRow", "Row removed")
               : t("notes:suggestion.cell", "{{row}} · {{column}}", { row, column });
         return (
-          <span key={i} data-testid="suggestion-cell" className="basis-full whitespace-pre-wrap text-foreground">
+          <span
+            key={i}
+            data-testid="suggestion-cell"
+            className="basis-full whitespace-pre-wrap text-foreground"
+          >
             <span className="font-medium">
               {label}
               {": "}
@@ -159,33 +221,6 @@ export function SuggestionMark({
           </span>
         );
       })}
-      {detached !== null && (
-        <ins className="note-sug-ins basis-full" data-suggestion-id={suggestionId}>
-          {detached}
-        </ins>
-      )}
-      <Sparkles className="size-3 shrink-0" aria-hidden />
-      <span>{deletes ? t("notes:suggestion.deleteLine", "Suggested removing this line") : t("notes:suggestion.by", "Suggested by the assistant")}</span>
-      <span className="inline-flex gap-1">
-        <button
-          type="button"
-          disabled={busy !== null}
-          onClick={() => void decide(true)}
-          className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 text-[11.5px] text-foreground transition-colors hover:bg-accent disabled:opacity-50"
-        >
-          {busy === "accept" && <Loader2 className="size-3 animate-spin" aria-hidden />}
-          {t("notes:suggestion.accept", "Accept")}
-        </button>
-        <button
-          type="button"
-          disabled={busy !== null}
-          onClick={() => void decide(false)}
-          className="inline-flex items-center gap-1 rounded-md px-2 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-        >
-          {busy === "reject" && <Loader2 className="size-3 animate-spin" aria-hidden />}
-          {t("notes:suggestion.reject", "Reject")}
-        </button>
-      </span>
-    </span>
+    </>
   );
 }

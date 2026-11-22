@@ -51,7 +51,12 @@ export function proposedText(s: NoteSuggestion): string {
 export function tablePartChanges(s: NoteSuggestion, current: Record<string, unknown>): TablePartChange[] {
   const p = s.proposed;
   if (s.kind !== "update" || !p || p.type !== "table") return [];
-  const props = (p.props as Record<string, unknown> | undefined) ?? {};
+  return diffTableParts(current, (p.props as Record<string, unknown> | undefined) ?? {});
+}
+
+/** The caption / notes `props` changes against `current` (a part `props`
+ * leaves out is kept, so it is no change). */
+export function diffTableParts(current: Record<string, unknown>, props: Record<string, unknown>): TablePartChange[] {
   const out: TablePartChange[] = [];
   for (const part of ["caption", "notes"] as const) {
     const to = props[part];
@@ -76,8 +81,14 @@ function tableRows(content: unknown): string[][] {
 export function tableCellChanges(s: NoteSuggestion, current: unknown): TableCellChange[] {
   const p = s.proposed;
   if (s.kind !== "update" || !p || p.type !== "table") return [];
+  return diffTableCells(current, p.content);
+}
+
+/** The cells `next` changes against the table `current` (see
+ * `tableCellChanges`). */
+export function diffTableCells(current: unknown, next: unknown): TableCellChange[] {
   const a = tableRows(current);
-  const b = tableRows(p.content);
+  const b = tableRows(next);
   const key = (r: string[]) => r.join("\u0000");
   // LCS over rows.
   const lcs: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));

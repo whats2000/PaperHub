@@ -14,6 +14,8 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { sectionLabel } from "@/components/notes/blocks/markProps";
+import { diffTableCells, diffTableParts } from "@/components/notes/noteSuggestions";
+import { TableChangeList } from "@/components/notes/SuggestionMark";
 import { Collapsible } from "@/components/ui/collapsible";
 import { getChangeSet, reapplyChangeSet, undoChangeSet } from "@/lib/api";
 import { prefersReducedMotion } from "@/lib/motion";
@@ -296,7 +298,6 @@ function ChangeLine({ change: c }: { change: ChangeSetChange }) {
       </span>
     );
   }
-  const d = diffText(c.before ?? "", c.op === "delete" ? "" : c.text);
   const lead = c.kind === "suggested" ? t("notes:card.suggestedLine", "Suggested on your line:") : t("notes:card.updatedLine", "Updated:");
   const settled =
     c.kind === "suggested" && c.status && c.status !== "open"
@@ -306,6 +307,23 @@ function ChangeLine({ change: c }: { change: ChangeSetChange }) {
           withdrawn: t("notes:card.status.withdrawn", "withdrawn"),
         }[c.status]
       : null;
+  if (c.table && c.op !== "delete") {
+    // A table: the changed cells and rows, as the suggestion bar lists them.
+    const { before, after } = c.table;
+    return (
+      <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+        <span>
+          {c.kind === "suggested" ? t("notes:card.suggestedTable", "Suggested on your table:") : lead}
+          {settled && <span className="ml-1 text-xs text-muted-foreground">({settled})</span>}
+        </span>
+        <TableChangeList
+          partChanges={diffTableParts(before.props, after.props)}
+          cellChanges={diffTableCells(before.content, after.content)}
+        />
+      </span>
+    );
+  }
+  const d = diffText(c.before ?? "", c.op === "delete" ? "" : c.text);
   return (
     <span>
       {lead}{" "}

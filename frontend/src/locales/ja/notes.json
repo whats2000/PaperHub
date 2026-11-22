@@ -365,6 +365,7 @@
     "nothing": "表示する内容はありません。",
     "removedLine": "削除：",
     "suggestedLine": "あなたの行への提案：",
+    "suggestedTable": "あなたの表への提案：",
     "updatedLine": "更新：",
     "status": {
       "accepted": "承認済み",

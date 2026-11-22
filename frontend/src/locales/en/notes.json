@@ -365,6 +365,7 @@
     "nothing": "Nothing left to show.",
     "removedLine": "Removed:",
     "suggestedLine": "Suggested on your line:",
+    "suggestedTable": "Suggested on your table:",
     "updatedLine": "Updated:",
     "status": {
       "accepted": "accepted",

@@ -212,6 +212,13 @@ async def _agent_update(tmp_path: Path, nid: int, rev: int,
     return res.change_set_id
 
 
+async def _agent_insert(tmp_path: Path, nid: int, block: dict[str, Any]) -> int:
+    from paperhub.notes.ops import BlockIn, Op, apply_ops
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        res = await apply_ops(conn, nid, base_revision=0, actor="agent", ops=[
+            Op(op="insert", block_id=TID, block=BlockIn(**block))])
+    return res.revision
+
 
 async def test_a_suggestion_on_a_math_table_shows_what_accept_writes(
     client: AsyncClient, tmp_path: Path,
@@ -239,3 +246,51 @@ async def test_a_suggestion_on_a_math_table_shows_what_accept_writes(
     [block] = (await client.get(f"/notes/{nid}")).json()["blocks"]
     assert table_rows(block["content"])[1][1] == rows[1][1]
 
+
+EDITED_MATH = {
+    "type": "tableContent", "headerRows": 1,
+    "rows": [{"cells": ["方法", "更新"]},
+             {"cells": ["RoboTTT", "fast weights $W_t$"]},
+             {"cells": ["LoRA", "無"]}]}
+
+
+async def test_the_change_card_gets_a_suggested_table_before_and_after(
+    client: AsyncClient, tmp_path: Path,
+) -> None:
+    """The chat's change card shows a table edit cell by cell: it gets the
+    table now and as Accept would write it, not only their flat text."""
+    nid = await _note(client)
+    r = await _insert(client, nid, {"type": "table", "content": MATH_TABLE,
+                                    "props": {"caption": "Old"}})
+    cs = await _agent_update(tmp_path, nid, r.json()["revision"],
+                             EDITED_MATH, {"caption": "New"})
+    detail = (await client.get(f"/notes/change-sets/{cs}")).json()
+    [change] = detail["changes"]
+    assert change["kind"] == "suggested"
+    table = change["table"]
+    assert table["before"]["props"] == {"caption": "Old"}
+    assert table["after"]["props"] == {"caption": "New"}
+    assert table_rows(table["before"]["content"]) == table_rows(MATH_TABLE)
+    after = table_rows(table["after"]["content"])
+    assert after[1][1] == MATH_TABLE["rows"][1]["cells"][1]
+    assert [x["text"] for x in after[2][1]] == ["無"]
+
+
+async def test_the_change_card_gets_an_updated_table_before_and_after(
+    client: AsyncClient, tmp_path: Path,
+) -> None:
+    """An applied edit of the agent's own table: both sides carry the
+    caption and the notes ("" for none), so a removal reads as one."""
+    nid = await _note(client)
+    rev = await _agent_insert(tmp_path, nid, {
+        "type": "table", "content": MATH_TABLE, "props": {"caption": "Old"}})
+    cs = await _agent_update(tmp_path, nid, rev, EDITED_MATH)
+    detail = (await client.get(f"/notes/change-sets/{cs}")).json()
+    [change] = detail["changes"]
+    assert change["kind"] == "updated"
+    table = change["table"]
+    assert table["before"]["props"] == {"caption": "Old", "notes": ""}
+    assert table["after"]["props"] == {"caption": "Old", "notes": ""}
+    after = table_rows(table["after"]["content"])
+    assert after[1][1] == MATH_TABLE["rows"][1]["cells"][1]
+    assert [x["text"] for x in after[2][1]] == ["無"]
