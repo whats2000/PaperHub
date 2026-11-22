@@ -75,3 +75,28 @@ describe("enterTracker", () => {
     expect(seen.size()).toBe(0);
   });
 });
+
+describe("a suggestion on a merged table", () => {
+  const cell = (text: string, props: Record<string, unknown> = {}) => ({
+    type: "tableCell",
+    props,
+    content: text ? [{ type: "text", text, styles: {} }] : [],
+  });
+  const merged = (gdn: string) => ({
+    type: "tableContent",
+    columnWidths: [null, null, null],
+    headerRows: 2,
+    rows: [
+      { cells: [cell("Method", { rowspan: 2 }), cell("成功恢復", { colspan: 2 })] },
+      { cells: [cell("Roof"), cell("Tire")] },
+      { cells: [cell(gdn), cell("18"), cell("17")] },
+    ],
+  });
+
+  it("lists exactly the one cell it changes, under its grid column", () => {
+    const s = { ...sug([]), proposed: { type: "table", content: merged("GDN (ours)") } };
+    expect(tableCellChanges(s as never, merged("GDN"))).toEqual([
+      { kind: "cell", row: "GDN", rowN: 3, column: "Method", colN: 1, from: "GDN", to: "GDN (ours)" },
+    ]);
+  });
+});

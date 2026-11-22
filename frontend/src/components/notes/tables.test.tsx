@@ -16,6 +16,7 @@ import { cleanPastedTable, insertNoteTable, notePasteHandler, pickAlignments, ta
 import { createCaptionHosts, partRequests, tableCaptions } from "./tableCaptions";
 import { shrinkAway, tableMotion } from "./tableMotion";
 import { tableBorderView } from "./tableBorderView";
+import { canMerge, deleteSelectedRows, mergeSelected, selectCells, splitSelected } from "./tableMerge";
 import { dumpBorders, parseBorders, presetLines } from "./tableBorders";
 import { opBlock, toEditorBlocks } from "./sync";
 import { cleanupEditors, makeEditor, press, type AnyEditor } from "./testEditor";
@@ -140,7 +141,7 @@ describe("Tab in a table", () => {
 });
 
 describe("pasting a table", () => {
-  it("strips cell colours and merged cells from pasted HTML and keeps a header row", () => {
+  it("keeps a pasted table's merged cells, strips its colours and keeps a header row", () => {
     const editor = makeEditor([], [{ id: "p", type: "paragraph" }], { pasteHandler: notePasteHandler });
     paste(editor, {
       "text/html":
@@ -150,17 +151,16 @@ describe("pasting a table", () => {
     const t = tableOf(editor)!;
     expect(t).toBeDefined();
     expect(t.headerRows).toBe(1);
+    expect(t.rows.map((r) => r.cells.length)).toEqual([1, 2]);
+    expect(t.rows[0]!.cells[0]!.props.colspan).toBe(2);
     for (const row of t.rows) {
-      expect(row.cells).toHaveLength(2);
       for (const cell of row.cells) {
         expect(cell.props.backgroundColor ?? "default").toBe("default");
         expect(cell.props.textColor ?? "default").toBe("default");
-        expect(cell.props.colspan ?? 1).toBe(1);
-        expect(cell.props.rowspan ?? 1).toBe(1);
         for (const run of cell.content) expect(run.styles?.textColor).toBeUndefined();
       }
     }
-    expect(texts(t)).toEqual([["wide", ""], ["x", "y"]]);
+    expect(texts(t)).toEqual([["wide"], ["x", "y"]]);
   });
 
   it("turns pasted GFM text into a table with the delimiter row's alignment", () => {
@@ -172,25 +172,24 @@ describe("pasting a table", () => {
     expect(t.rows.map((r) => r.cells[1]!.props.textAlignment)).toEqual(["right", "right"]);
   });
 
-  it("cleanPastedTable spreads a merged cell over empty cells and adds a header row", () => {
+  it("cleanPastedTable keeps merged cells, fills a short row and counts the header's depth", () => {
     const content: TableContent = {
       type: "tableContent",
       columnWidths: [null],
       rows: [
-        { cells: [{ type: "tableCell", props: { colspan: 2, backgroundColor: "red", textAlignment: "center" }, content: "wide" }] },
-        { cells: [{ type: "tableCell", props: { rowspan: 2 }, content: "tall" }, "b"] },
+        { cells: [{ type: "tableCell", props: { rowspan: 2, backgroundColor: "red", textAlignment: "center" }, content: "tall" }, "b"] },
         { cells: ["c"] },
+        { cells: ["d"] },
       ],
     };
     const out = cleanPastedTable(content);
-    expect(out.headerRows).toBe(1);
+    expect(out.headerRows).toBe(2);
     expect(out.columnWidths).toEqual([null, null]);
-    expect(out.rows.map((r) => r.cells.length)).toEqual([2, 2, 2]);
+    expect(out.rows.map((r) => r.cells.length)).toEqual([2, 1, 2]);
     const first = out.rows[0]!.cells[0] as { props: Record<string, unknown> };
-    expect(first.props).toEqual({ textAlignment: "center" });
+    expect(first.props).toEqual({ rowspan: 2, textAlignment: "center" });
     const third = out.rows[2]!.cells as { content: unknown }[];
-    expect(third[0]!.content).toEqual([]);
-    expect(third[1]!.content).toEqual("c");
+    expect(third[1]!.content).toEqual([]);
   });
 });
 
@@ -385,18 +384,18 @@ describe("tables in the note editor", () => {
     await waitFor(() => expect(pm.querySelectorAll("tr")[0]!.children[1]!.tagName).toBe("TD"));
   });
 
-  it("has no cell menu (no colours, no split / merge); the grips drag and the + buttons stay", async () => {
+  it("the grips drag and the + buttons stay; the cell handle opens PaperHub's cell menu", async () => {
     seed([seededTable]);
     const pm = mountEditor();
     hoverCell(pm, 1, 1);
     const grip = await screen.findByRole("button", { name: "Column options" });
-    expect(document.querySelector(".bn-table-cell-handle")).toBeNull();
     expect(grip).toHaveAttribute("draggable", "true");
     const rowGrip = [...document.querySelectorAll("button")].find((b) => b.textContent === "Row options");
     expect(rowGrip).toHaveAttribute("draggable", "true");
     // The last cell: "+" on the right edge and the bottom edge.
     expect(document.querySelector(".bn-extend-button-add-remove-rows")).not.toBeNull();
     expect(document.querySelector(".bn-extend-button-add-remove-columns")).not.toBeNull();
+
   });
 });
 
@@ -531,23 +530,19 @@ describe("only what a GFM table holds, on every path", () => {
     expect(editor.getBlock("t")!.props).not.toHaveProperty("textColor");
   });
 
-  it("a table dropped or inserted as HTML loses its colours and merged cells", () => {
+  it("a table dropped or inserted as HTML loses its colours, not its merged cells", () => {
     const editor = makeEditor([tableClean], [{ id: "p", type: "paragraph" }]);
     // ProseMirror's own paste / drop, past BlockNote's paste handler.
     editor._tiptapEditor.view.pasteHTML(
       "<table><tr><td colspan='2' style='background-color: rgb(255, 0, 0)'>wide</td></tr><tr><td>x</td><td>y</td></tr></table>",
     );
     const t = tableOf(editor)!;
-    expect(t.rows.map((r) => r.cells.length)).toEqual([2, 2]);
-    for (const row of t.rows) {
-      for (const cell of row.cells) {
-        expect(cell.props.backgroundColor ?? "default").toBe("default");
-        expect(cell.props.colspan ?? 1).toBe(1);
-      }
-    }
+    expect(t.rows.map((r) => r.cells.length)).toEqual([1, 2]);
+    expect(t.rows[0]!.cells[0]!.props.colspan).toBe(2);
+    for (const row of t.rows) for (const cell of row.cells) expect(cell.props.backgroundColor ?? "default").toBe("default");
   });
 
-  it("a table block inserted with a merged, coloured cell is normalised", () => {
+  it("a table block inserted with a merged, coloured cell keeps the merge, loses the colour", () => {
     const editor = makeEditor([tableClean], [{ id: "p", type: "paragraph" }]);
     editor.insertBlocks(
       [
@@ -567,7 +562,8 @@ describe("only what a GFM table holds, on every path", () => {
       "after",
     );
     const t = tableOf(editor)!;
-    expect(t.rows.map((r) => r.cells.length)).toEqual([2, 2]);
+    expect(t.rows.map((r) => r.cells.length)).toEqual([1, 2]);
+    expect(t.rows[0]!.cells[0]!.props.colspan).toBe(2);
     expect(t.rows[0]!.cells.every((c) => (c.props.textColor ?? "default") === "default")).toBe(true);
   });
 
@@ -587,14 +583,15 @@ describe("only what a GFM table holds, on every path", () => {
 });
 
 describe("the note editor normalises tables", () => {
-  it("a merged, coloured table dropped into a note comes out with neither", async () => {
+  it("a merged, coloured table dropped into a note keeps the merge, not the colour", async () => {
     seed([blk("p0", { content: [] })]);
     const pm = mountEditor();
     act(() => {
       pm.editor.view.pasteHTML("<table><tr><td colspan='2' style='color: red'>wide</td></tr><tr><td>x</td><td>y</td></tr></table>");
     });
-    await waitFor(() => expect([...pm.querySelectorAll("tr")].map((r) => r.children.length)).toEqual([2, 2]));
-    expect(pm.querySelector("[colspan='2'], [data-text-color], [data-background-color]")).toBeNull();
+    await waitFor(() => expect([...pm.querySelectorAll("tr")].map((r) => r.children.length)).toEqual([1, 2]));
+    expect(pm.querySelector("[colspan='2']")).not.toBeNull();
+    expect(pm.querySelector("[data-text-color], [data-background-color]")).toBeNull();
   });
 });
 
@@ -1244,5 +1241,103 @@ describe("per-table presets (H5b.1)", () => {
     });
     await waitFor(() => expect(root).toHaveAttribute("data-guides", "off"));
     expect(useNotesStore.getState().tableGuides).toBe(false);
+  });
+});
+
+// ------------------------------------------------------- merge and split (H5b.1)
+
+describe("merging and splitting cells", () => {
+  const table = (headerRows: number, borders = ""): unknown[] => [
+    {
+      id: "t",
+      type: "table",
+      props: borders ? { borders } : {},
+      content: {
+        type: "tableContent",
+        columnWidths: [null, null, null],
+        headerRows,
+        rows: [{ cells: ["h1", "h2", "h3"] }, { cells: ["a", "b", "c"] }, { cells: ["d", "e", "f"] }],
+      },
+    },
+  ];
+  const spans = (t: Table) => t.rows.map((r) => r.cells.map((c) => [c.props.rowspan ?? 1, c.props.colspan ?? 1]));
+
+  it("merges a 1×2 selection into one cell holding both texts; the lines stay", () => {
+    const lines = dumpBorders({ ...presetLines(3, 3, 1, "paper"), h: ["222", "111", "020", "222"] });
+    const editor = makeEditor([tableBorderView], table(1, lines));
+    selectCells(editor, [1, 0], [1, 1]);
+    expect(mergeSelected(editor)).toBe(true);
+    const t = tableOf(editor)!;
+    expect(t.rows[1]!.cells).toHaveLength(2);
+    expect(t.rows[1]!.cells[0]!.props.colspan).toBe(2);
+    expect(texts(t)[1]![0]).toMatch(/a\s*b/);
+    expect((editor.document[0]!.props as Record<string, unknown>).borders).toBe(lines);
+  });
+
+  it("splits a merged cell back into two, the second empty", () => {
+    const editor = makeEditor([tableBorderView], table(1));
+    selectCells(editor, [1, 0], [1, 1]);
+    mergeSelected(editor);
+    selectCells(editor, [1, 0], [1, 0]);
+    expect(splitSelected(editor)).toBe(true);
+    const t = tableOf(editor)!;
+    expect(t.rows[1]!.cells).toHaveLength(3);
+    expect(texts(t)[1]![1]).toBe("");
+  });
+
+  it("a header cell merged down deepens the header; splitting it makes it one row again", () => {
+    const editor = makeEditor([tableBorderView], table(1));
+    selectCells(editor, [0, 0], [1, 0]);
+    mergeSelected(editor);
+    expect(tableOf(editor)!.headerRows).toBe(2);
+    selectCells(editor, [0, 0], [0, 0]);
+    splitSelected(editor);
+    expect(tableOf(editor)!.headerRows).toBe(1);
+  });
+
+  it("deleting a row a merged cell crosses shrinks the span and throws nothing", () => {
+    const editor = makeEditor([tableBorderView], table(1));
+    selectCells(editor, [1, 0], [2, 0]);
+    mergeSelected(editor);
+    expect(spans(tableOf(editor)!)[1]![0]).toEqual([2, 1]);
+    selectCells(editor, [2, 1], [2, 1]);
+    expect(() => deleteSelectedRows(editor)).not.toThrow();
+    const t = tableOf(editor)!;
+    expect(t.rows).toHaveLength(2);
+    expect(spans(t)[1]![0]).toEqual([1, 1]);
+  });
+
+  it("will not merge a whole row's width over several rows (a row needs a cell of its own)", () => {
+    const editor = makeEditor([tableBorderView], table(0));
+    selectCells(editor, [1, 0], [2, 2]);
+    expect(canMerge(editor._tiptapEditor.view.state)).toBe(false);
+    selectCells(editor, [1, 0], [2, 1]);
+    expect(canMerge(editor._tiptapEditor.view.state)).toBe(true);
+  });
+
+  it("the cell menu: Merge off on one plain cell, Split only on a merged one, no colour", async () => {
+    seed([seededTable]);
+    const pm = mountEditor();
+    hoverCell(pm, 1, 1);
+    const handle = await screen.findByRole("button", { name: "Cell options" });
+    act(() => {
+      fireEvent.click(handle);
+    });
+    const menu = await screen.findByRole("menu", HIDDEN);
+    const names = [...menu.querySelectorAll("[role^=menuitem]")].map((e) => e.textContent?.trim());
+    expect(names.slice(0, 2)).toEqual(["Merge cells", "Split cell"]);
+    expect(names[2]).toMatch(/^Borders…/);
+    expect(names).toContain("Delete rows");
+    expect(within(menu).queryByText(/colou?r/i)).toBeNull();
+    const item = (name: string) =>
+      [...menu.querySelectorAll<HTMLElement>("[role^=menuitem]")].find((e) => e.textContent?.trim() === name)!;
+    const disabled = (el: HTMLElement) => el.getAttribute("aria-disabled") === "true" || el.hasAttribute("data-disabled");
+    expect(disabled(item("Merge cells"))).toBe(true);
+    expect(disabled(item("Split cell"))).toBe(true);
+    expect(disabled(item("Delete rows"))).toBe(false);
+    act(() => {
+      fireEvent.keyDown(menu, { key: "Escape" });
+    });
+    await waitFor(() => expect(screen.queryByRole("menu", HIDDEN)).toBeNull());
   });
 });

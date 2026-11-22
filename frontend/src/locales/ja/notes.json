@@ -102,7 +102,13 @@
     "presetNotion": "Notion",
     "presetNotionHint": "すべて細線、見出し行に色 · 次に作る表の既定にもなります",
     "guidesHide": "編集用の補助線を隠す",
-    "guidesShow": "編集用の補助線を表示"
+    "guidesShow": "編集用の補助線を表示",
+    "cellOptions": "セルのオプション",
+    "merge": "セルを結合",
+    "split": "セルを分割",
+    "borders": "罫線…",
+    "bordersHint": "線の太さを選び、アイコンをクリック",
+    "deleteRows": "行を削除"
   },
   "mention": {
     "sections": "この論文のセクション",

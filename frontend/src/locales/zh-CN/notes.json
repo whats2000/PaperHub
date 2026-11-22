@@ -102,7 +102,13 @@
     "presetNotion": "Notion",
     "presetNotionHint": "每条线都是细线，标题行有底色 · 也会成为下一个新表格的默认",
     "guidesHide": "隐藏编辑辅助线",
-    "guidesShow": "显示编辑辅助线"
+    "guidesShow": "显示编辑辅助线",
+    "cellOptions": "单元格选项",
+    "merge": "合并单元格",
+    "split": "拆分单元格",
+    "borders": "边框…",
+    "bordersHint": "选线的粗细，再点图标应用",
+    "deleteRows": "删除行"
   },
   "mention": {
     "sections": "这篇论文的章节",

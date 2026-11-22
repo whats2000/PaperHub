@@ -18,10 +18,11 @@ import { toast } from "sonner";
 import { blockText, cellText } from "@/lib/notes/ops";
 import { diffText } from "@/lib/notes/textDiff";
 import { useNotesStore } from "@/store/notes";
-import type { ApplyResult, NoteSuggestion } from "@/types/notes";
+import type { ApplyResult, NoteSuggestion, TableContent } from "@/types/notes";
 
 import { commentAnchor, type ReanchorHint } from "./noteComments";
 import { SuggestionMark, type TableCellChange, type TablePartChange } from "./SuggestionMark";
+import { isAnchor, tableGrid } from "./tableGrid";
 
 // The suggestion code works on any schema; it reads block ids and text only.
 type Ed = BlockNoteEditor<any, any, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -72,7 +73,16 @@ export function diffTableParts(current: Record<string, unknown>, props: Record<s
 function tableRows(content: unknown): string[][] {
   const rows = (content as { rows?: unknown } | null)?.rows;
   if (!Array.isArray(rows)) return [];
-  return rows.map((r: { cells?: unknown[] }) => (r.cells ?? []).map(cellText));
+  // On the grid: a merged cell's text where it starts, "" where it covers,
+  // so each column lines up with its header.
+  const { grid } = tableGrid(content as TableContent);
+  return grid.map((line, r) =>
+    line.map((at, c) =>
+      isAnchor(at) && at.row === r && at.col === c
+        ? cellText((rows as { cells?: unknown[] }[])[r]?.cells?.[at.index])
+        : "",
+    ),
+  );
 }
 
 /** The cells a table suggestion changes, against the table as it is now.

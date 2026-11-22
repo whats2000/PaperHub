@@ -282,8 +282,10 @@ function LoadedNoteEditor({
         return tree.length ? (tree as never) : undefined;
       })(),
       dictionary: dictionaryFor(i18n.language),
-      // A pasted table keeps only what a GFM table holds (tableKeys.ts).
+      // A pasted table keeps only what the notes store (tableKeys.ts).
       pasteHandler: notePasteHandler as never,
+      // Merged cells (the cell menu's Merge / Split); never a cell colour.
+      tables: { splitCells: true, cellBackgroundColor: false, cellTextColor: false, headers: false },
       extensions: [
         paperhubKeys,
         tableKeys,

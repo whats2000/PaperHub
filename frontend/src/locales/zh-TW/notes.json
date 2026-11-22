@@ -102,7 +102,13 @@
     "presetNotion": "Notion",
     "presetNotionHint": "每條線都是細線，標題列有底色 · 也會成為下一個新表格的預設",
     "guidesHide": "隱藏編輯輔助線",
-    "guidesShow": "顯示編輯輔助線"
+    "guidesShow": "顯示編輯輔助線",
+    "cellOptions": "儲存格選項",
+    "merge": "合併儲存格",
+    "split": "拆分儲存格",
+    "borders": "框線…",
+    "bordersHint": "選線的粗細，再點圖示套用",
+    "deleteRows": "刪除列"
   },
   "mention": {
     "sections": "這篇論文的章節",

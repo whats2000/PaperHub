@@ -3,8 +3,8 @@
  * - `/table` inserts a 3 × 3 table whose first row is a header
  *   (`insertNoteTable`); BlockNote's inserts 3 × 2 with none.
  * - Tab in the last cell adds a row (`tableKeys`); BlockNote's Tab stops there.
- * - A table keeps only what a GFM table can hold, whatever brought it in
- *   (`tableClean`): no cell colours, no merged cells, whole-pixel widths; a
+ * - A table keeps only what the notes store, whatever brought it in
+ *   (`tableClean`): merged cells yes, cell colours no, whole-pixel widths; a
  *   pasted one also gets a header row and its column alignment
  *   (`notePasteHandler`).
  */
@@ -19,12 +19,14 @@ import {
 } from "@blocknote/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
+import { CellSelection, TableMap, deleteColumn, deleteRow } from "@tiptap/pm/tables";
 import type { EditorView } from "@tiptap/pm/view";
 
 import { useNotesStore } from "@/store/notes";
 import type { TableCell, TableContent } from "@/types/notes";
 
 import { dumpBorders, presetLines, tableShape } from "./tableBorders";
+import { headerDepth, isAnchor, tableGrid } from "./tableGrid";
 
 export type Alignment = "left" | "center" | "right";
 
@@ -97,41 +99,42 @@ function stripRuns<T>(content: T): T {
   }) as T;
 }
 
-/** The cells of a table as a grid with no merged cells: a merged cell keeps
- * its place and the places it covered get empty cells. Only `textAlignment`
- * is kept of a cell's props; runs lose their colours. */
-function unmerge(content: TableContent): { rows: FullCell[][]; width: number } {
-  const grid: (FullCell | undefined)[][] = content.rows.map(() => []);
-  content.rows.forEach((row, r) => {
-    let c = 0;
-    for (const raw of row.cells) {
-      while (grid[r]![c]) c++;
+/** A table's cells as the notes keep them: merged cells kept (`colspan` /
+ * `rowspan` and `textAlignment` are the only props), runs without colours,
+ * and a row that does not reach the table's width filled with empty cells. */
+function cleanCells(content: TableContent): { rows: FullCell[][]; width: number } {
+  const { grid, cols } = tableGrid(content);
+  const width = Math.max(1, cols);
+  const rows = content.rows.map((row, r) => {
+    const cells: FullCell[] = row.cells.map((raw) => {
       const cell = asCell(raw);
-      const colspan = Math.max(1, Number(cell.props.colspan ?? 1) || 1);
-      const rowspan = Math.max(1, Number(cell.props.rowspan ?? 1) || 1);
-      const align = cell.props.textAlignment;
-      grid[r]![c] = {
-        type: "tableCell",
-        props: typeof align === "string" && align !== "left" ? { textAlignment: align } : {},
-        content: stripRuns(cell.content),
-      };
-      for (let dr = 0; dr < rowspan && r + dr < grid.length; dr++) {
-        for (let dc = 0; dc < colspan; dc++) {
-          if (dr || dc) grid[r + dr]![c + dc] = emptyCell();
-        }
+      const props: Record<string, unknown> = {};
+      for (const key of ["rowspan", "colspan"] as const) {
+        const v = Number(cell.props[key] ?? 1);
+        if (Number.isInteger(v) && v > 1) props[key] = v;
       }
-      c += colspan;
+      const align = cell.props.textAlignment;
+      if (typeof align === "string" && align !== "left") props.textAlignment = align;
+      return { type: "tableCell", props, content: stripRuns(cell.content) };
+    });
+    // Grid places this row covers (its own cells and spans from above).
+    const line = grid[r] ?? [];
+    let covered = 0;
+    for (let c = 0; c < width; c++) {
+      const at = line[c];
+      if (at && (isAnchor(at) || at[0] !== r || at[1] !== c)) covered = c + 1;
     }
+    for (let c = covered; c < width; c++) cells.push(emptyCell());
+    return cells;
   });
-  const width = Math.max(1, ...grid.map((r) => r.length));
-  return { rows: grid.map((r) => Array.from({ length: width }, (_, i) => r[i] ?? emptyCell())), width };
+  return { rows, width };
 }
 
-/** A table as a GFM table holds it: merged cells spread over empty ones
- * (spans 1), colours stripped, column widths whole pixels, header row /
- * column 0 or 1. */
+/** A table as the notes keep it: merged cells kept, colours stripped,
+ * column widths whole pixels, header rows as deep as row 0's spans, a
+ * header column 0 or 1. */
 function normaliseTable(content: TableContent): TableContent {
-  const { rows, width } = unmerge(content);
+  const { rows, width } = cleanCells(content);
   const out: TableContent = {
     type: "tableContent",
     columnWidths: Array.from({ length: width }, (_, i) => {
@@ -140,15 +143,16 @@ function normaliseTable(content: TableContent): TableContent {
     }),
     rows: rows.map((cells) => ({ cells })),
   };
-  if (content.headerRows) out.headerRows = 1;
+  if (content.headerRows) out.headerRows = headerDepth({ ...out, headerRows: 1 });
   if (content.headerCols) out.headerCols = 1;
   return out;
 }
 
-/** A pasted table as a GFM table can hold it (`normaliseTable`), with a
- * header row when it had none. */
+/** A pasted table as the notes keep it (`normaliseTable`), with a header
+ * row when it had none. */
 export function cleanPastedTable(content: TableContent): TableContent {
-  return { ...normaliseTable(content), headerRows: 1 };
+  const out = normaliseTable(content);
+  return { ...out, headerRows: headerDepth({ ...out, headerRows: 1 }) };
 }
 
 /** Each table block of a document (nested ones too). */
@@ -162,8 +166,8 @@ function tables(blocks: unknown[], into: { id: string; content: TableContent }[]
 
 const COLOUR_MARKS = new Set(["textColor", "backgroundColor"]);
 
-/** True when a table node holds what a GFM table cannot: a merged or
- * coloured cell, a coloured run, a fractional column width. */
+/** True when a table node holds what the notes do not keep: a coloured
+ * cell or run, a fractional column width. */
 function needsNormalising(table: PMNode): boolean {
   let bad = false;
   table.descendants((node) => {
@@ -173,8 +177,6 @@ function needsNormalising(table: PMNode): boolean {
       const colour = (v: unknown) => v !== undefined && v !== null && v !== "default";
       const widths = Array.isArray(a.colwidth) ? (a.colwidth as unknown[]) : [];
       bad =
-        Number(a.colspan ?? 1) > 1 ||
-        Number(a.rowspan ?? 1) > 1 ||
         colour(a.backgroundColor) ||
         colour(a.textColor) ||
         widths.some((w) => typeof w === "number" && !Number.isInteger(w));
@@ -218,9 +220,10 @@ export function tablesIn(doc: PMNode, from: number, to: number): { pos: number; 
   return out;
 }
 
-/** Every change that leaves a table holding what a GFM table cannot (a drop,
- * a paste, an inserted block, a column drag) is followed by its normalised
- * form, so no path can save a merged or coloured cell or a fractional width. */
+/** Every change that leaves a table holding what the notes do not keep (a
+ * drop, a paste, an inserted block, a column drag) is followed by its
+ * normalised form, so no path can save a coloured cell or a fractional
+ * width. */
 export const tableClean = createExtension(({ editor }) => ({
   key: "tableClean",
   prosemirrorPlugins: [
@@ -382,8 +385,18 @@ export function addRowAfterLastCell(editor: unknown): boolean {
   const block = e.getTextCursorPosition().block;
   if (block.type !== "table") return false;
   const content = block.content as TableContent;
-  const last = content.rows[content.rows.length - 1]!;
-  const row = { cells: last.cells.map((c) => emptyCell(asCell(c).props.textAlignment)) };
+  // One empty cell per grid column (a merged cell in the last row covers
+  // several), each with the alignment of the cell above it.
+  const { grid, cols } = tableGrid(content);
+  const lastLine = grid[grid.length - 1] ?? [];
+  const row = {
+    cells: Array.from({ length: cols }, (_, c) => {
+      const at = lastLine[c];
+      const a = at && isAnchor(at) ? at : at ? grid[at[0]]?.[at[1]] : undefined;
+      const cell = a && isAnchor(a) ? content.rows[a.row]?.cells[a.index] : undefined;
+      return emptyCell(cell === undefined ? undefined : asCell(cell).props.textAlignment);
+    }),
+  };
   e.updateBlock(block.id, { type: "table", content: { ...content, rows: [...content.rows, row] } } as never);
   const info = getNodeById(block.id, view.state.doc);
   if (!info) return true;
@@ -441,9 +454,18 @@ export function deleteRowOrColumn(editor: unknown, blockId: string, orientation:
   } & TableEditor;
   const content = e.getBlock(blockId)?.content as TableContent | undefined;
   if (!content) return;
-  const cols = content.rows[0]?.cells.length ?? 0;
+  const { cols } = tableGrid(content);
   if ((orientation === "row" ? content.rows.length : cols) <= 1) {
     e.removeBlocks([blockId]);
+    return;
+  }
+  const merged = content.rows.some((r) => r.cells.some((c) => {
+    const p = asCell(c).props;
+    return Number(p.colspan ?? 1) > 1 || Number(p.rowspan ?? 1) > 1;
+  }));
+  if (merged) {
+    // prosemirror-tables shrinks the spans that cross the row or column.
+    deleteAcrossSpans(e._tiptapEditor.view, blockId, orientation, index);
     return;
   }
   const next: TableContent =
@@ -457,3 +479,18 @@ export function deleteRowOrColumn(editor: unknown, blockId: string, orientation:
   e.updateBlock(blockId, { type: "table", content: next } as never);
 }
 
+/** Deletes grid row or column `index` of a table with merged cells. */
+function deleteAcrossSpans(view: EditorView, blockId: string, orientation: "row" | "column", index: number) {
+  const info = getNodeById(blockId, view.state.doc);
+  const table = info?.node.firstChild;
+  if (!info || !table || table.type.name !== "table") return;
+  const tablePos = info.posBeforeNode + 1;
+  const map = TableMap.get(table);
+  const at = (r: number, c: number) => view.state.doc.resolve(tablePos + 1 + map.map[r * map.width + c]!);
+  const sel =
+    orientation === "row"
+      ? new CellSelection(at(index, 0), at(index, map.width - 1))
+      : new CellSelection(at(0, index), at(map.height - 1, index));
+  view.dispatch(view.state.tr.setSelection(sel));
+  (orientation === "row" ? deleteRow : deleteColumn)(view.state, (tr) => view.dispatch(tr));
+}
