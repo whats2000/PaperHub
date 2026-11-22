@@ -147,6 +147,30 @@ describe("TocRail", () => {
     expect(screen.getByRole("button", { name: "Details" })).toHaveAttribute("aria-current", "location");
   });
 
+  it("follows a scroll of the note's own scroller inside the pane, which itself never scrolls", async () => {
+    // The pane clips (it never scrolls): the note editor inside it is the
+    // scroller, and its scroll events do not bubble to the pane.
+    const scroller = document.createElement("div");
+    while (root.firstChild) scroller.appendChild(root.firstChild);
+    root.appendChild(scroller);
+    render(<TocRail noteId={7} root={root} />);
+    placeAt(root, "s1", 40);
+    placeAt(root, "h2", 185);
+    placeAt(root, "h3", 400);
+    fireEvent.scroll(scroller);
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Setup", hidden: true })).toHaveAttribute("aria-current", "location"),
+    );
+    placeAt(root, "h2", 300);
+    fireEvent.scroll(scroller);
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "1 Introduction", hidden: true })).toHaveAttribute(
+        "aria-current",
+        "location",
+      ),
+    );
+  });
+
   it("marks the last entry at or above the pane's top + 90 px as current while scrolling", async () => {
     render(<TocRail noteId={7} root={root} />);
     placeAt(root, "s1", 40);

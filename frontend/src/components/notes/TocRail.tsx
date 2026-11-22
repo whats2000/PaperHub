@@ -113,7 +113,9 @@ function useScrollSpy(root: HTMLElement | null, outline: OutlineEntry[], active:
       later();
     };
     compute();
-    root.addEventListener("scroll", onScroll, { passive: true });
+    // Captured: the pane itself never scrolls (it clips), the note editor
+    // inside it does, and a scroll event does not bubble.
+    root.addEventListener("scroll", onScroll, { passive: true, capture: true });
     // The note content resizing (a narrower pane wraps it) moves the
     // headings; the rail's own zero-height layer is left out. The content
     // element is replaced on a note switch, so new children are watched too.
@@ -133,7 +135,7 @@ function useScrollSpy(root: HTMLElement | null, outline: OutlineEntry[], active:
       mo.observe(root, { childList: true });
     }
     return () => {
-      root.removeEventListener("scroll", onScroll);
+      root.removeEventListener("scroll", onScroll, { capture: true });
       ro?.disconnect();
       mo?.disconnect();
       if (frame) cancelAnimationFrame(frame);
