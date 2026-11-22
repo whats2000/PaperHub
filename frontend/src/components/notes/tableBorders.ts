@@ -192,14 +192,20 @@ export function refit(old: Borders, oldShape: Shape, newShape: Shape, ops: Struc
   const fresh = () => presetLines(newShape.rows, newShape.cols, newShape.headerRows, old.preset);
   if (sameBorders(old, presetLines(oldShape.rows, oldShape.cols, oldShape.headerRows, old.preset))) return fresh();
   let b = old;
+  // The header's depth as the ops move rows in or out of it.
+  let header = oldShape.headerRows;
   for (const op of ops) {
     const { rows, cols } = shapeOf(b);
     switch (op.kind) {
       case "insertRow":
-        b = insertRow(b, Math.min(op.at, rows), oldShape.headerRows);
+        b = insertRow(b, Math.min(op.at, rows), header);
+        if (op.at < header) header++;
         break;
       case "deleteRow":
-        if (rows > 1) b = deleteRow(b, Math.min(op.at, rows - 1));
+        if (rows > 1) {
+          b = deleteRow(b, Math.min(op.at, rows - 1));
+          if (op.at < header) header--;
+        }
         break;
       case "moveRow":
         b = moveRow(b, op.from, op.to);

@@ -228,3 +228,19 @@ describe("a selection past the table's edge", () => {
     expect(out.v.every((l) => l.length === 3)).toBe(true);
   });
 });
+
+describe("refit through several inserts", () => {
+  it("counts a row inserted inside the header into the depth for the next insert", () => {
+    const old: Borders = { preset: "paper", h: ["2", "0", "1", "2"], v: ["01", "00", "00"] };
+    const was = { rows: 3, cols: 1, headerRows: 2 };
+    const now = { rows: 5, cols: 1, headerRows: 3 };
+    const want = insertRow(insertRow(old, 0, 2), 3, 3);
+    expect(want).not.toEqual(insertRow(insertRow(old, 0, 2), 3, 2));
+    expect(
+      refit(old, was, now, [
+        { kind: "insertRow", at: 0 },
+        { kind: "insertRow", at: 3 },
+      ]),
+    ).toEqual(want);
+  });
+});
