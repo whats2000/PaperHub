@@ -306,6 +306,8 @@ describe("NotesPane: paper tabs shared with the reader", () => {
     render(<NotesPane onClose={() => undefined} />);
     expect(await screen.findByText("note 109")).toBeInTheDocument();
     await userEvent.click(within(strip()).getByRole("button", { name: "Close World Models" }));
+    // The closed paper's note stays while its tab shrinks away, then the neighbour's shows.
+    expect(screen.getByText("note 109")).toBeInTheDocument();
     expect(await screen.findByText("note 107")).toBeInTheDocument();
     expect(useCanvasStore.getState().closedTab).toMatchObject({ chat: chatA, paperId: 9, neighbour: 7 });
     expect(useCanvasStore.getState().outsideByChat[chatA]).toEqual([]);
