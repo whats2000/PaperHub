@@ -1228,7 +1228,7 @@ describe("per-table presets (H5b.1)", () => {
     return el;
   };
 
-  it("the table ⋯ menu shows Paper first; Notion re-draws only that table and becomes the default", async () => {
+  it("the table ⋯ menu lists All borders, then Paper; All borders re-draws only that table and becomes the default", async () => {
     seed(twoTables());
     const pm = mountEditor();
     hoverCell(pm, 1, 1);
@@ -1238,13 +1238,14 @@ describe("per-table presets (H5b.1)", () => {
     });
     const menu = await screen.findByRole("menu", HIDDEN);
     const items = [...menu.querySelectorAll("[role^=menuitem]")].map((e) => e.textContent ?? "");
-    expect(items[0]).toMatch(/^Paper/);
-    expect(items[1]).toMatch(/^Notion/);
+    expect(items[0]).toMatch(/^All borders/);
+    expect(items[1]).toMatch(/^Paper/);
     expect(items.at(-1)).toMatch(/Hide edit guides/);
+    // Paper stays the first-time default.
     const paper = within(menu).getByRole("menuitemcheckbox", { name: /^Paper/, ...HIDDEN });
     expect(paper).toHaveAttribute("aria-checked", "true");
     act(() => {
-      fireEvent.click(within(menu).getByRole("menuitemcheckbox", { name: /^Notion/, ...HIDDEN }));
+      fireEvent.click(within(menu).getByRole("menuitemcheckbox", { name: /^All borders/, ...HIDDEN }));
     });
     await waitFor(() => expect(propsOf(pm, "t")).toHaveAttribute("data-table-preset", "notion"));
     expect(propsOf(pm, "u")).toHaveAttribute("data-table-preset", "paper");

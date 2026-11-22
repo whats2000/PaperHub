@@ -114,7 +114,7 @@ export const GUIDE_SECTIONS: { id: SectionId; title: string; rows: Row[] }[] = [
       { id: "fold", plainLeft: "⌄ by a heading or list item", right: "Fold what is under it (Ctrl+Shift+[ / ])" },
       { id: "trash", plainLeft: "Trash on a block", right: "Delete, with Undo" },
       { id: "tocRail", plainLeft: "Lines at the right edge", right: "Table of contents: hover to open, click to jump" },
-      { id: "tablePresets", plainLeft: "⋯ › Paper / Notion", right: "Re-draws this table; the next new table uses it" },
+      { id: "tablePresets", plainLeft: "⋯ › All borders / Paper", right: "Re-draws this table; the next new table uses it" },
       { id: "tableBorders", plainLeft: "Cell menu › Borders…", right: "Set any line between the selected cells, thin or thick" },
       { id: "tableMerge", plainLeft: "Cell menu › Merge / Split", right: "Join the selected cells into one, or split a merged one" },
     ],

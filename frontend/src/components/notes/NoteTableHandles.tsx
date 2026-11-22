@@ -340,9 +340,9 @@ function PresetLabel({ name, hint }: { name: string; hint: string }) {
   );
 }
 
-/** The table's ⋯ (top right): its preset (Paper / Notion, also the next
- * new table's default), header row / header column, caption and notes,
- * and the edit guides switch. */
+/** The table's ⋯ (top right): its preset (All borders / Paper, stored as
+ * "notion" / "paper"; also the next new table's default), header row /
+ * header column, caption and notes, and the edit guides switch. */
 function TableMoreMenu() {
   const { t } = useTranslation();
   const C = useComponentsContext()!;
@@ -459,21 +459,21 @@ function TableMoreMenu() {
           </C.Generic.Menu.Trigger>
           <C.Generic.Menu.Dropdown className="bn-table-handle-menu">
             <C.Generic.Menu.Label>{t("notes:table.style", "Table style")}</C.Generic.Menu.Label>
+            <C.Generic.Menu.Item checked={parts.preset === "notion"} onClick={() => choosePreset("notion")}>
+              <PresetLabel
+                name={t("notes:table.presetAllBorders", "All borders")}
+                hint={t(
+                  "notes:table.presetAllBordersHint",
+                  "Every line thin, the header tinted · also the next new table's default",
+                )}
+              />
+            </C.Generic.Menu.Item>
             <C.Generic.Menu.Item checked={parts.preset === "paper"} onClick={() => choosePreset("paper")}>
               <PresetLabel
                 name={t("notes:table.presetPaper", "Paper")}
                 hint={t(
                   "notes:table.presetPaperHint",
                   "Thick rules at the top and end, a thin rule under the header · also the next new table's default",
-                )}
-              />
-            </C.Generic.Menu.Item>
-            <C.Generic.Menu.Item checked={parts.preset === "notion"} onClick={() => choosePreset("notion")}>
-              <PresetLabel
-                name={t("notes:table.presetNotion", "Notion")}
-                hint={t(
-                  "notes:table.presetNotionHint",
-                  "Every line thin, the header tinted · also the next new table's default",
                 )}
               />
             </C.Generic.Menu.Item>
