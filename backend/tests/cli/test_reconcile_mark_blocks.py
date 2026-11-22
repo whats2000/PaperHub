@@ -122,3 +122,27 @@ async def test_the_history_keeps_the_colour_shown_before(tmp_path: Path) -> None
         before, after = (json.loads(x) for x in await cur.fetchone())
     assert (before["props"]["color"], before["props"]["style"]) == ("green", "highlight")
     assert (after["props"]["color"], after["props"]["style"]) == ("blue", "wavy")
+
+
+def test_main_exits_1_when_a_redraw_was_refused(tmp_path: Path, monkeypatch,
+                                                capsys) -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from paperhub.cli import reconcile_mark_blocks as cli
+    from paperhub.notes.ops import ApplyResult
+
+    db = tmp_path / "p.db"
+    asyncio.run(_seed(db))
+    monkeypatch.setattr(cli, "load_settings", lambda: SimpleNamespace(db_path=db))
+    assert cli.main(["--dry-run"]) == 0
+
+    async def refuse(conn, note_id, **kw):
+        return ApplyResult(
+            note_id=note_id, revision=kw["base_revision"], change_set_id=None,
+            applied=[], suggested=[],
+            rejected=[{"block_id": "q1", "reason": "changed_since_base",
+                       "current": None}])
+    monkeypatch.setattr(cli, "apply_ops", refuse)
+    assert cli.main([]) == 1
+    assert "rejected: note" in capsys.readouterr().out

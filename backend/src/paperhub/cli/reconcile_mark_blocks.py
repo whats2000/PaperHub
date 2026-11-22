@@ -98,7 +98,9 @@ def main(argv: list[str] | None = None) -> int:
           f"{verb}={out['redrawn']} no_mark_row={out['no_mark']} "
           f"rejected={len(out['rejected'])}"
           + (" (dry run)" if args.dry_run else ""))
-    return 0
+    # Every note was done; a refused redraw fails the step so the
+    # upgrade script reports it.
+    return 1 if out["rejected"] else 0
 
 
 if __name__ == "__main__":
