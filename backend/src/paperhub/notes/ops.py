@@ -798,6 +798,33 @@ async def _merged(ctx: _Ctx, row: _Row, blk: BlockIn) -> BlockIn:
     return blk.model_copy(update={"props": props})
 
 
+async def proposal_as_accepted(conn: aiosqlite.Connection, cur_type: str,
+                               cur_content: Any,
+                               proposed: dict[str, Any] | None
+                               ) -> dict[str, Any] | None:
+    """A suggestion's proposal as Accept would write it over the block now.
+
+    The agent reads a table's inline math as ``$…$`` and writes the table
+    back as text; Accept lays that text over the stored table cell by cell
+    (``merge_table``), so a cell it left alone keeps its runs, math among
+    them. Shown the same way, the suggestion reads that cell as unchanged
+    and draws no math as ``$…$`` text. Other proposals are shown as they
+    are."""
+    if proposed is None:
+        return None
+    content = proposed.get("content")
+    if (cur_type == "table" and proposed.get("type") == "table"
+            and isinstance(cur_content, dict) and isinstance(content, dict)
+            and is_plain_table(content)):
+        try:
+            quotes = await cite_quotes(conn, cite_ids(cur_content))
+            table, _ = merge_table(cur_content, content, quotes)
+        except ValueError:
+            return proposed
+        return {**proposed, "content": table}
+    return proposed
+
+
 async def _section_has_blocks(ctx: _Ctx, section: _Row) -> bool:
     """Whether live blocks sit under a ``section`` block: its children, or
     the siblings after it up to the next section."""

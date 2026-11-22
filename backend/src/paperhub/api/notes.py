@@ -117,12 +117,22 @@ async def _detail(conn: aiosqlite.Connection, note: Note) -> NoteDetail:
         "AND status = 'open' ORDER BY created_at, rowid", (note.id,),
     ) as cur:
         rows = await cur.fetchall()
-    suggestions = [
-        {"id": r[0], "block_id": r[1], "change_set_id": r[2], "kind": r[3],
-         "proposed": json.loads(r[4]) if r[4] else None, "status": r[5],
-         "created_at": r[6]} for r in rows]
+    blocks = await list_blocks(conn, note.id)
+    by_id = {b.id: b for b in blocks}
+    suggestions = []
+    for r in rows:
+        proposed = json.loads(r[4]) if r[4] else None
+        block = by_id.get(r[1])
+        if block is not None:
+            # Shown as Accept would write it (a table's math kept).
+            proposed = await note_ops.proposal_as_accepted(
+                conn, block.type, block.content, proposed)
+        suggestions.append(
+            {"id": r[0], "block_id": r[1], "change_set_id": r[2],
+             "kind": r[3], "proposed": proposed, "status": r[5],
+             "created_at": r[6]})
     return NoteDetail(
-        note=note, blocks=await list_blocks(conn, note.id),
+        note=note, blocks=blocks,
         shared_by=await shared_by(conn, note),
         default_title=await default_title(conn, note),
         suggestions=suggestions,

@@ -181,3 +181,61 @@ async def test_block_text_with_caption_and_notes() -> None:
     assert block_text("table", {"caption": "C", "notes": ""}, TABLE) == (
         "C\n指標 | 值\nORR | 62%")
     assert block_text("table", {"notes": "N"}, TABLE) == "指標 | 值\nORR | 62%\nN"
+
+
+# ------------------------------------------- a suggestion on a math table
+
+MATH_TABLE: dict[str, Any] = {
+    "type": "tableContent",
+    "columnWidths": [None, None],
+    "headerRows": 1,
+    "rows": [
+        {"cells": ["方法", "更新"]},
+        {"cells": ["RoboTTT", [
+            {"type": "text", "text": "fast weights ", "styles": {}},
+            {"type": "inlineMath", "props": {"latex": "W_t"}}]]},
+        {"cells": ["LoRA", "待查"]},
+    ],
+}
+
+
+async def _agent_update(tmp_path: Path, nid: int, rev: int,
+                        content: dict[str, Any],
+                        props: dict[str, Any] | None = None) -> str:
+    from paperhub.notes.ops import BlockIn, Op, apply_ops
+    async with aiosqlite.connect(tmp_path / "paperhub.db") as conn:
+        res = await apply_ops(conn, nid, base_revision=rev, actor="agent", ops=[
+            Op(op="update", block_id=TID,
+               block=BlockIn(type="table", content=content,
+                             props=props or {}))])
+    assert res.change_set_id is not None
+    return res.change_set_id
+
+
+
+async def test_a_suggestion_on_a_math_table_shows_what_accept_writes(
+    client: AsyncClient, tmp_path: Path,
+) -> None:
+    """The agent reads inline math as ``$…$`` and writes it back as text:
+    the suggestion is shown as Accept lays it over the table, so a cell it
+    did not change keeps its math (and reads as unchanged)."""
+    nid = await _note(client)
+    r = await _insert(client, nid, {"type": "table", "content": MATH_TABLE})
+    rev = r.json()["revision"]
+    await _agent_update(tmp_path, nid, rev, {
+        "type": "tableContent", "headerRows": 1,
+        "rows": [{"cells": ["方法", "更新"]},
+                 {"cells": ["RoboTTT", "fast weights $W_t$"]},
+                 {"cells": ["LoRA", "無"]}]})
+    detail = (await client.get(f"/notes/{nid}")).json()
+    [sug] = detail["suggestions"]
+    rows = table_rows(sug["proposed"]["content"])
+    assert rows[1][1] == MATH_TABLE["rows"][1]["cells"][1]
+    assert [r["text"] for r in rows[2][1]] == ["無"]
+    # Accept writes the same.
+    res = await client.post(f"/notes/suggestions/{sug['id']}",
+                            json={"accept": True})
+    assert res.status_code == 200, res.text
+    [block] = (await client.get(f"/notes/{nid}")).json()["blocks"]
+    assert table_rows(block["content"])[1][1] == rows[1][1]
+
