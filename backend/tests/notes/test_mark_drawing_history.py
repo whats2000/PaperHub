@@ -100,3 +100,18 @@ async def test_undoing_a_move_of_a_lagging_block_leaves_the_mark(
     assert await _row(conn) == ("green", "highlight")
     assert (await _props_of(conn, n, "q2"))["color"] == "green"
     assert (await _props_of(conn, n, "q1"))["color"] == "green"
+
+
+async def test_bringing_a_block_back_never_recolours_the_mark(
+        conn: aiosqlite.Connection):
+    await _mark(conn)
+    # q2 lags its row (pink, the row is green) when it is deleted.
+    n = await _note(conn, blocks=[("q1", _props()), ("q2", _props(color="pink"))])
+    note = await get_note(conn, n)
+    gone = await apply_ops(conn, n, base_revision=note.revision, actor="agent",
+                           ops=[Op(op="delete", block_id="q2")])
+    await _update(conn, n, "q1", {"color": "blue"})
+    await undo_change_set(conn, gone.change_set_id)
+    assert await _row(conn) == ("blue", "highlight")
+    assert (await _props_of(conn, n, "q2"))["color"] == "blue"
+    assert (await _props_of(conn, n, "q1"))["color"] == "blue"

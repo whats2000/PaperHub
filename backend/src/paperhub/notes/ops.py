@@ -387,8 +387,12 @@ class _Ctx:
         else:
             old = await self.get(block_id)
             was = old.props if old is not None else {}
-            want = {k: props[k] for k in MARK_EDITABLE_PROPS
-                    if k in props and props[k] != was.get(k)}
+            # Bringing a block back (undo of a delete, restore) never
+            # recolours the mark: the block is drawn from the row.
+            back = old is None or old.deleted_at is not None
+            want = {} if back else {
+                k: props[k] for k in MARK_EDITABLE_PROPS
+                if k in props and props[k] != was.get(k)}
             if "style" in want and (
                     (want["style"] is None) == (mark["kind"] == "text")):
                 want.pop("style")  # not a style this kind of mark can have
