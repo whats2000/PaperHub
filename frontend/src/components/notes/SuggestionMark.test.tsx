@@ -397,3 +397,51 @@ describe("a suggestion on a table's caption or notes (Task 13 fix round 1)", () 
     expect(gone.querySelector(".note-sug-ins")).toBeNull();
   });
 });
+
+describe("the bar of a table suggestion (fix round 2)", () => {
+  it("sits after the table and after its notes, never inside the table", async () => {
+    seed(
+      [
+        {
+          id: "t",
+          note_id: 7,
+          parent_id: null,
+          type: "table",
+          props: { notes: "N" },
+          content: {
+            type: "tableContent",
+            columnWidths: [null],
+            headerRows: 1,
+            rows: [{ cells: ["k"] }, { cells: ["v"] }],
+          } as never,
+          text: "k\nv\nN",
+          author: "user",
+          section_key: null,
+          changed_rev: 1,
+        },
+      ],
+      [
+        {
+          id: "sg_1",
+          block_id: "t",
+          change_set_id: "cs_1",
+          kind: "update",
+          proposed: {
+            type: "table",
+            props: {},
+            content: { type: "tableContent", columnWidths: [null], headerRows: 1, rows: [{ cells: ["k"] }, { cells: ["w"] }] },
+          },
+          status: "open",
+          created_at: "2026-11-16T00:00:00Z",
+        },
+      ],
+    );
+    mount();
+    const bar = await screen.findByTestId("suggestion-mark");
+    expect(bar.closest("table")).toBeNull();
+    const notes = document.querySelector("[data-id='t'] [data-table-caption='notes']")!;
+    expect(notes.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const table = document.querySelector("[data-id='t'] table")!;
+    expect(table.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});

@@ -141,9 +141,14 @@ export function suggestionDecorations(
         }
       }
     }
+    // The bar: at the end of a line's text; after a block with no text of
+    // its own (a table: past the table and its notes, never in its rows;
+    // for a leaf block the two places are the same).
+    const barAt = content.isTextblock ? end : pos + 1 + content.nodeSize;
     decos.push(
-      Decoration.widget(end, () => view.host(s.id), {
-        side: 1,
+      Decoration.widget(barAt, () => view.host(s.id), {
+        // After the table notes' host (side 1) at the same place.
+        side: content.isTextblock ? 1 : 2,
         key: `bar:${s.id}`,
         ignoreSelection: true,
         stopEvent: () => true,
