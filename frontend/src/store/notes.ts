@@ -1034,6 +1034,9 @@ export const useNotesStore = create<NotesStore>()(
         const applied = new Set(res.applied);
         for (const id of applied) rebuilds.delete(id);
         tellMarkBlocks(noteId, burst.ops, applied);
+        // A mark's last inline citation taken out (or put back): the server
+        // deleted (or brought back) the mark; the reader follows.
+        if (res.cited?.length) paperMarksChanged([...new Set(res.cited.map((c) => c.paper_id))]);
         if (res.marks?.length) {
           // A mark changed colour: its other blocks here were redrawn by the
           // server, so this note is reloaded once its edits are all saved

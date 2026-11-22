@@ -98,6 +98,30 @@ describe("a mark recolour that redrew other notes", () => {
     await waitFor(() => expect(loads).toEqual(expect.arrayContaining([7, 8])));
   });
 
+  it("a saved edit that took a mark's last inline citation out redraws that paper's marks", async () => {
+    // The server deleted the mark with its last chip (2026-11-22): the
+    // reader must stop drawing it.
+    const uncited: ApplyResult = {
+      note_id: 7,
+      revision: 5,
+      change_set_id: "cs_5",
+      applied: ["q7"],
+      suggested: [],
+      rejected: [],
+      reparented: [],
+      cited: [{ mark_id: "mk_2", paper_id: 4, deleted: true }],
+    };
+    server.use(http.post(`${API_BASE_URL}/notes/7/ops`, () => HttpResponse.json(uncited)));
+    const papers: number[][] = [];
+    const off = onPaperMarksChanged((ids) => papers.push([...ids]));
+    useNotesStore.getState().applyLocal(7, [
+      { op: "update", block_id: "q7", block: { type: "paragraph", props: {}, content: [] } as never },
+    ]);
+    await useNotesStore.getState().flush(7);
+    off();
+    expect(papers).toEqual([[4]]);
+  });
+
   it("leaves a note that is not open alone", async () => {
     useNotesStore.setState({ notes: { 7: seed(7, "green") } });
     followRedraws(accepted, 7);

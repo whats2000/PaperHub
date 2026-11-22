@@ -193,6 +193,9 @@ export interface ApplyResult {
   marks?: MarkRedraw[];
   /** Other notes those marks were redrawn in. */
   redrawn?: NoteRedrawn[];
+  /** Marks in their paper's note only as inline citations that this call
+   * deleted with their last chip, or brought back with it. */
+  cited?: { mark_id: string; paper_id: number; deleted: boolean }[];
 }
 
 /** One line of a change set's Details. */
