@@ -309,6 +309,7 @@
       "inlineMath": "行內公式（LaTeX），點一下即可編輯",
       "mathDone": "在公式中：完成（Shift+Enter 換行）",
       "find": "在筆記中尋找（Enter：下一個，Shift+Enter：上一個）",
+      "cellMenu": "開啟儲存格選單",
       "inlineCite": "以行內引用插在游標處；滑過引用可切換形式",
       "tableTab": "在表格中：下一格／上一格",
       "tableNewRow": "在表格中：在下方新增一列",

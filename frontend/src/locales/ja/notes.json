@@ -309,6 +309,7 @@
       "inlineMath": "インライン数式（LaTeX）。クリックで編集",
       "mathDone": "数式内：完了（Shift+Enter で改行）",
       "find": "ノート内を検索（Enter：次へ、Shift+Enter：前へ）",
+      "cellMenu": "セルメニューを開く",
       "inlineCite": "カーソル位置にインライン引用として入る。引用にホバーで形式を切替",
       "tableTab": "表の中：次／前のセル",
       "tableNewRow": "表の中：下に行を追加",

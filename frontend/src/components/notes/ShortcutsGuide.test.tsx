@@ -37,6 +37,9 @@ describe("ShortcutsGuide", () => {
     expect(screen.getByText("[[##")).toBeInTheDocument();
     expect(screen.getByText("Link a heading in any note")).toBeInTheDocument();
     expect(screen.getByText("Alt+↑")).toBeInTheDocument();
+    expect(screen.getByText("Ctrl+/")).toBeInTheDocument();
+    expect(screen.getByText("⌘+/")).toBeInTheDocument();
+    expect(screen.getByText("Open the cell menu")).toBeInTheDocument();
     expect(screen.getByText("Move the block (or the selected blocks) up or down")).toBeInTheDocument();
   });
 

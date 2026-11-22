@@ -309,6 +309,7 @@
       "inlineMath": "Inline equation (LaTeX); click it to edit",
       "mathDone": "In an equation: done (Shift+Enter: new line)",
       "find": "Find in the note (Enter: next, Shift+Enter: previous)",
+      "cellMenu": "Open the cell menu",
       "inlineCite": "It lands inline at the caret; hover a citation to switch form",
       "tableTab": "In a table: next / previous cell",
       "tableNewRow": "In a table: a new row below",
