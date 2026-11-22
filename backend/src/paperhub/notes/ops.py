@@ -439,12 +439,14 @@ async def _mark_row(conn: aiosqlite.Connection,
     if not isinstance(mark_id, str) or not mark_id:
         return None
     async with conn.execute(
-        "SELECT kind, color, style FROM note_marks WHERE id = ?", (mark_id,)
+        "SELECT kind, color, style, block_id, paper_content_id "
+        "FROM note_marks WHERE id = ?", (mark_id,)
     ) as cur:
         r = await cur.fetchone()
     if r is None:
         return None
-    return {"id": mark_id, "kind": r[0], "color": r[1], "style": r[2]}
+    return {"id": mark_id, "kind": r[0], "color": r[1], "style": r[2],
+            "block_id": r[3], "paper_id": r[4]}
 
 
 def _drawn(props: dict[str, Any], mark: dict[str, Any]) -> dict[str, Any]:
@@ -467,9 +469,10 @@ def _asked(ctx: _Ctx, row: _Row, blk: BlockIn) -> frozenset[str]:
     return frozenset(k for k in MARK_EDITABLE_PROPS if k in blk.props)
 
 
-async def _drawing_problem(ctx: _Ctx, row: _Row, blk: BlockIn) -> str | None:
-    """Why an update cannot draw its mark block's mark as it asks (an
-    unknown colour, a style the mark's kind does not have), else None."""
+async def _redraw_asked(ctx: _Ctx, row: _Row,
+                       blk: BlockIn) -> dict[str, Any] | None:
+    """The mark an update of a mark block would redraw (its colour or
+    style differs from the mark's row), else None."""
     asked = _asked(ctx, row, blk)
     mark = await _mark_row(ctx.conn, row.props.get("markId")) if asked else None
     if mark is None:
@@ -478,9 +481,34 @@ async def _drawing_problem(ctx: _Ctx, row: _Row, blk: BlockIn) -> str | None:
     style = blk.props["style"] if "style" in asked else mark["style"]
     if (color, style) == (mark["color"], mark["style"]):
         return None
+    return {**mark, "want_color": color, "want_style": style}
+
+
+async def _drawing_problem(conn: aiosqlite.Connection, kind: str,
+                           color: Any, style: Any) -> str | None:
     # marks.py builds on this module: imported here, not at the top.
     from paperhub.notes.marks import drawing_problem
-    return await drawing_problem(ctx.conn, str(mark["kind"]), color, style)
+    return await drawing_problem(conn, kind, color, style)
+
+
+async def _ai_owns(conn: aiosqlite.Connection, mark: dict[str, Any]) -> bool:
+    """Whether the AI made the mark (its reference block is the AI's) and
+    every live block showing it is the AI's: only then may an agent change
+    its colour or style without the user's Accept."""
+    async with conn.execute(
+        "SELECT author FROM note_blocks WHERE id = ?", (mark["block_id"],),
+    ) as cur:
+        made = await cur.fetchone()
+    if made is None or made[0] != "ai":
+        return False
+    types = sorted(MARK_BLOCK_TYPES)
+    async with conn.execute(
+        "SELECT 1 FROM note_blocks WHERE deleted_at IS NULL AND author != 'ai' "
+        f"AND type IN ({','.join('?' for _ in types)}) "  # noqa: S608
+        "AND json_extract(payload_json, '$.props.markId') = ? LIMIT 1",
+        (*types, mark["id"]),
+    ) as cur:
+        return await cur.fetchone() is None
 
 
 def _section_ends(anchor: _Row, candidate: _Row) -> bool:
@@ -741,16 +769,24 @@ async def _apply_one(ctx: _Ctx, op: Op, base_revision: int) -> None:
         if changed is not None:
             ctx.reject(row.id, "changed_since_base", changed)
             return
+    redraw: dict[str, Any] | None = None
     if op.op == "update":
         assert op.block is not None
-        problem = await _drawing_problem(ctx, row, op.block)
+        redraw = await _redraw_asked(ctx, row, op.block)
+        problem = None if redraw is None else await _drawing_problem(
+            ctx.conn, str(redraw["kind"]), redraw["want_color"],
+            redraw["want_style"])
         if problem is not None:
             # Checked before a suggestion is made too: nothing is written.
             ctx.reject(row.id, "invalid", row, hint=problem)
             return
     if ctx.actor == "agent" and op.op in ("update", "delete") and (
             row.author == "user"
-            or any(d.author == "user" for d in live_desc)):
+            or any(d.author == "user" for d in live_desc)
+            # The mark is whoever made it: the agent's recolour of a mark
+            # the user made, or one the user's blocks show, waits for
+            # their Accept.
+            or (redraw is not None and not await _ai_owns(ctx.conn, redraw))):
         # Never overwrite or remove the user's words: one suggestion on the
         # target block, nothing changes until the user accepts.
         await _suggest(ctx, row, op)
