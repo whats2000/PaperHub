@@ -45,7 +45,7 @@ import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/store/canvas";
 import { savedNoteId, useNotesStore } from "@/store/notes";
 
-import { atomCaret } from "./atomCaret";
+import { atomCaret, isOpeningMove } from "./atomCaret";
 import { insertInlineMath } from "./blocks/InlineMath";
 import { textRange } from "./blocks/MarkCite";
 import { turnBlockIntoCite } from "./blocks/citeForms";
@@ -452,6 +452,9 @@ function LoadedNoteEditor({ noteId, variant, onBlockFocus, onOpenGuide, card }: 
   }, [editor, focusOn, activePart, folded, cardPart, variant]);
 
   const onSelectionChange = useCallback(() => {
+    // Opening the note moved its selection off a first block that takes no
+    // text: not a caret of the user's.
+    if (isOpeningMove(editor._tiptapEditor.view)) return;
     let blockId: string;
     try {
       blockId = editor.getTextCursorPosition().block.id;

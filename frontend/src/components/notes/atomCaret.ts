@@ -236,13 +236,29 @@ function onKey(view: EditorView, event: KeyboardEvent): boolean {
   }
 }
 
+/** Views whose selection is being moved off an opening atom right now. */
+const opening = new WeakSet<EditorView>();
+
+/** Whether the selection change under way only moves a note's opening
+ * selection off an atom block: no caret of the user's, so it names no
+ * part you are in and no block you were at. */
+export function isOpeningMove(view: EditorView): boolean {
+  return opening.has(view);
+}
+
 /** An opening node selection (the editor not focused, no caret beside the
  * block) moved to the document's first text position. */
 function unselectOpeningAtom(view: EditorView) {
   const { selection } = view.state;
   if (!(selection instanceof NodeSelection) || view.hasFocus() || atomCaretKey.getState(view.state)) return;
   const text = Selection.findFrom(view.state.doc.resolve(0), 1, true);
-  if (text) view.dispatch(view.state.tr.setSelection(text).setMeta("addToHistory", false));
+  if (!text) return;
+  opening.add(view);
+  try {
+    view.dispatch(view.state.tr.setSelection(text).setMeta("addToHistory", false));
+  } finally {
+    opening.delete(view);
+  }
 }
 
 export const atomCaret = createExtension({
