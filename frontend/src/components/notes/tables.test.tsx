@@ -1143,6 +1143,24 @@ describe("table borders drawn from the table's lines", () => {
     expect(b.h[3]).toBe("22");
   });
 
+  it("deleting the merged cell's own row drops that row's lines, not the next row's", () => {
+    const c = (text: string, props: Record<string, unknown> = {}) => ({ type: "tableCell", props, content: text });
+    const content = {
+      type: "tableContent",
+      columnWidths: [null, null],
+      headerRows: 1,
+      rows: [{ cells: [c("h1"), c("h2")] }, { cells: [c("A", { rowspan: 2 }), c("x")] }, { cells: [c("y")] }, { cells: [c("z1"), c("z2")] }],
+    };
+    const lines = { preset: "paper" as const, h: ["22", "11", "00", "01", "22"], v: ["000", "020", "101", "000"] };
+    const editor = makeEditor([tableBorderView], [{ id: "t", type: "table", props: { borders: dumpBorders(lines) }, content }]);
+    // The row handle's Delete on row 1: prosemirror-tables moves A down into row 2.
+    deleteRowOrColumn(editor, "t", "row", 1);
+    expect(texts(tableOf(editor)!)).toEqual([["h1", "h2"], ["A", "y"], ["z1", "z2"]]);
+    const b = bordersProp(editor)!;
+    expect(b.v).toEqual(["000", "101", "000"]);
+    expect(b.h).toEqual(["22", "11", "01", "22"]);
+  });
+
   it("one undo takes back both the row and its lines", () => {
     const custom = dumpBorders({ preset: "paper", h: ["22", "11", "22"], v: ["202", "202"] });
     const editor = makeEditor([tableBorderView, tableKeys], plainTable(2, 2, custom));

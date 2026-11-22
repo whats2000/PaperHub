@@ -131,15 +131,44 @@ function align<T>(a: T[], b: T[], eq: (x: T, y: T) => boolean): Step[] | null {
   return out;
 }
 
-/** The ops of an edit script: within a run of changes, deletions and
- * insertions pair up as items edited in place (kept); a lone deletion and a
- * lone insertion of equal items is a move. */
+const children = (n: PMNode) => {
+  const out: PMNode[] = [];
+  n.forEach((c) => out.push(c));
+  return out;
+};
+
+/** Which items of the longer list pair with the shorter list's, in order,
+ * for the highest total `score` (ties: the earlier pairing). */
+function bestPairs(short: number, long: number, score: (s: number, l: number) => number): number[] {
+  // f[i][j]: best score pairing short[i..] with long[j..].
+  const f = Array.from({ length: short + 1 }, () => new Array<number>(long + 1).fill(0));
+  for (let i = short - 1; i >= 0; i--)
+    for (let j = long - (short - i); j >= 0; j--) {
+      const take = score(i, j) + f[i + 1]![j + 1]!;
+      const skip = long - j > short - i ? f[i]![j + 1]! : -Infinity;
+      f[i]![j] = Math.max(take, skip);
+    }
+  const out: number[] = [];
+  let j = 0;
+  for (let i = 0; i < short; i++) {
+    while (long - j > short - i && f[i]![j]! !== score(i, j) + f[i + 1]![j + 1]!) j++;
+    out.push(j++);
+  }
+  return out;
+}
+
+/** The ops of an edit script. Within a run of changes, deletions and
+ * insertions pair up as items edited in place (kept): the pairs whose old
+ * and new items share the most cells (deleting a merged cell's own row
+ * moves the cell into the next row: that next row is the one edited). A
+ * lone deletion and a lone insertion of equal items is a move. */
 function opsOf<T>(
   steps: Step[],
   a: T[],
   b: T[],
   eq: (x: T, y: T) => boolean,
   kinds: { ins: "insertRow" | "insertCol"; del: "deleteRow" | "deleteCol"; move: "moveRow" | "moveCol" },
+  shared: (x: T, y: T) => number,
 ): StructureOp[] {
   const dels = steps.filter((s) => s.kind === "del") as { kind: "del"; old: number }[];
   const ins = steps.filter((s) => s.kind === "ins") as { kind: "ins"; new: number }[];
@@ -155,29 +184,50 @@ function opsOf<T>(
       k++;
       continue;
     }
-    // A run of changes between two kept items: its first deletions and
-    // insertions pair up as items edited in place (a row whose merge
-    // shrank), the rest are deleted or inserted after them.
-    let dels = 0;
-    let ins = 0;
+    const d: number[] = [];
+    const n: number[] = [];
     while (k < steps.length && steps[k]!.kind !== "keep") {
-      if (steps[k]!.kind === "del") dels++;
-      else ins++;
+      const s = steps[k]!;
+      if (s.kind === "del") d.push(s.old);
+      else if (s.kind === "ins") n.push(s.new);
       k++;
     }
-    const edited = Math.min(dels, ins);
-    at += edited;
-    for (let i = edited; i < dels; i++) ops.push({ kind: kinds.del, at });
-    for (let i = edited; i < ins; i++) ops.push({ kind: kinds.ins, at: at++ });
+    // Pair the run's deletions and insertions: [old index in d, new index in n].
+    const pairs: [number, number][] =
+      d.length >= n.length
+        ? bestPairs(n.length, d.length, (i, j) => shared(a[d[j]!]!, b[n[i]!]!)).map((j, i) => [j, i])
+        : bestPairs(d.length, n.length, (i, j) => shared(a[d[i]!]!, b[n[j]!]!)).map((j, i) => [i, j]);
+    let di = 0;
+    let ni = 0;
+    for (const [pd, pn] of [...pairs, [d.length, n.length] as [number, number]]) {
+      for (; di < pd; di++) ops.push({ kind: kinds.del, at });
+      for (; ni < pn; ni++) ops.push({ kind: kinds.ins, at: at++ });
+      if (pd < d.length) {
+        at++; // edited in place
+        di++;
+        ni++;
+      }
+    }
   }
   return ops;
 }
 
-const children = (n: PMNode) => {
-  const out: PMNode[] = [];
-  n.forEach((c) => out.push(c));
-  return out;
-};
+/** How many cells two rows share (equal nodes, each used once). */
+function sharedCells(x: PMNode, y: PMNode): number {
+  const left = children(y);
+  let n = 0;
+  x.forEach((cell) => {
+    const i = left.findIndex((c) => c.eq(cell));
+    if (i >= 0) {
+      left.splice(i, 1);
+      n++;
+    }
+  });
+  return n;
+}
+
+/** How many positions two columns share. */
+const sharedPositions = (x: PMNode[], y: PMNode[]) => x.filter((n, i) => y[i] !== undefined && n.eq(y[i])).length;
 
 /** Each grid column's cells, top to bottom (a merged cell in each column it
  * covers). */
@@ -211,24 +261,24 @@ export function fitLines(oldTable: PMNode, table: PMNode, b: Borders): Borders |
     const a = children(oldTable);
     const c = children(table);
     const steps = align(a, c, (x, y) => x.eq(y));
-    if (steps) ops = opsOf(steps, a, c, (x, y) => x.eq(y), { ins: "insertRow", del: "deleteRow", move: "moveRow" });
+    if (steps) ops = opsOf(steps, a, c, (x, y) => x.eq(y), { ins: "insertRow", del: "deleteRow", move: "moveRow" }, sharedCells);
   } else if (was.rows === now.rows && was.cols !== now.cols) {
     const a = columns(oldTable);
     const c = columns(table);
     const steps = align(a, c, sameColumn);
-    if (steps) ops = opsOf(steps, a, c, sameColumn, { ins: "insertCol", del: "deleteCol", move: "moveCol" });
+    if (steps) ops = opsOf(steps, a, c, sameColumn, { ins: "insertCol", del: "deleteCol", move: "moveCol" }, sharedPositions);
   } else if (was.rows === now.rows && was.cols === now.cols) {
     // Same shape: a dragged row or column moves its lines.
     const a = children(oldTable);
     const c = children(table);
     const steps = align(a, c, (x, y) => x.eq(y));
-    const rowOps = steps ? opsOf(steps, a, c, (x, y) => x.eq(y), { ins: "insertRow", del: "deleteRow", move: "moveRow" }) : [];
+    const rowOps = steps ? opsOf(steps, a, c, (x, y) => x.eq(y), { ins: "insertRow", del: "deleteRow", move: "moveRow" }, sharedCells) : [];
     if (rowOps.length === 1 && rowOps[0]!.kind === "moveRow") ops = rowOps;
     else {
       const ca = columns(oldTable);
       const cc = columns(table);
       const cs = align(ca, cc, sameColumn);
-      const colOps = cs ? opsOf(cs, ca, cc, sameColumn, { ins: "insertCol", del: "deleteCol", move: "moveCol" }) : [];
+      const colOps = cs ? opsOf(cs, ca, cc, sameColumn, { ins: "insertCol", del: "deleteCol", move: "moveCol" }, sharedPositions) : [];
       if (colOps.length === 1 && colOps[0]!.kind === "moveCol") ops = colOps;
       else return null; // an edit inside cells: the lines stay
     }
