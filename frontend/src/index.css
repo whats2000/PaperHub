@@ -433,6 +433,12 @@
   content: "";
   position: absolute;
   inset: 0 -8px;
+  /* A table or code block is marked on BlockNote's own .bn-block-content,
+     whose ::before BlockNote sets to height 0 with a 0.2s transition: the
+     tint takes the block's full height and appears at once. */
+  height: auto;
+  margin: 0;
+  transition: none;
   /* Over the block's own positioned parts (a code block's box, a table). */
   z-index: 1;
   border-radius: 6px;

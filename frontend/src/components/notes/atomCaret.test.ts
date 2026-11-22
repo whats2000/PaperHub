@@ -2,6 +2,8 @@ import { act, fireEvent } from "@testing-library/react";
 import { NodeSelection } from "@tiptap/pm/state";
 import { afterEach, describe, expect, it } from "vitest";
 
+import indexCss from "@/index.css?raw";
+
 import { ATOM_CARET_TYPES, ATOM_GUTTER_PX, atomCaret, atomCaretKey } from "./atomCaret";
 import { cleanupEditors, makeEditor, press, type AnyEditor } from "./testEditor";
 
@@ -141,5 +143,29 @@ describe("every object block takes the caret", () => {
     expect(caretOf("c1")).toBe("after");
     expect(caretOf("t1")).toBeNull();
     expect(atomCaretKey.getState(view.state)?.side).toBe("after");
+  });
+});
+
+describe("the selected object block's tint", () => {
+  // A table or code block has no React wrapper: the mark lands on BlockNote's
+  // own .bn-block-content, whose ::before BlockNote sets to height 0 (and a
+  // 0.2s transition), which collapsed the tint to nothing.
+  it.each([
+    ["table", table],
+    ["code block", code],
+  ])("a selected %s is marked on its .bn-block-content", (_name, block) => {
+    const editor = makeEditor([atomCaret], [line, block]);
+    contentOf(block.id).getBoundingClientRect = () => box(100, 500, 50, 150);
+    act(() => {
+      fireEvent.click(editor._tiptapEditor.view.dom, { clientX: 503, clientY: 90 });
+    });
+    expect(selectedOf(block.id)?.classList.contains("bn-block-content")).toBe(true);
+  });
+
+  it("the tint takes the block's full height over BlockNote's ::before", () => {
+    const rule = /\.paperhub-notes \[data-object-selected\]::before\s*\{([^}]*)\}/.exec(indexCss)?.[1] ?? "";
+    expect(rule).toMatch(/inset:\s*0 -8px/);
+    expect(rule).toMatch(/height:\s*auto/);
+    expect(rule).toMatch(/transition:\s*none/);
   });
 });
