@@ -92,3 +92,59 @@ async def test_undo_of_the_recolour_still_reverts_every_copy(
     assert await _row_colour(conn) == "green"
     for note_id in (n, other):
         assert {b.props["color"] for b in await list_blocks(conn, note_id)} == {"green"}
+
+
+async def _trash(conn, note_id):
+    await conn.execute("UPDATE notes SET deleted_at = 'then' WHERE id = ?",
+                       (note_id,))
+    await conn.commit()
+
+
+async def test_a_recolour_skips_copies_in_trashed_notes(
+        conn: aiosqlite.Connection):
+    """A note in the trash is not redrawn (no change set lands in it)."""
+    from tests.notes.test_mark_drawing import _props_of
+    await _mark(conn)
+    n = await _note(conn, blocks=[("q1", _props())])
+    trashed = await _note(conn, target_id="2", blocks=[("q9", _props())])
+    await _trash(conn, trashed)
+    before = (await get_note(conn, trashed)).revision
+    res = await _update(conn, n, "q1", {"color": "blue"})
+    assert res.redrawn == [] and res.marks[0]["blocks"] == []
+    assert (await get_note(conn, trashed)).revision == before
+    assert (await _props_of(conn, trashed, "q9"))["color"] == "green"
+
+
+async def test_a_user_copy_in_the_trash_does_not_make_a_recolour_a_suggestion(
+        conn: aiosqlite.Connection):
+    from paperhub.notes.ops import BlockIn, Op, apply_ops
+    await _mark(conn)
+    n = await _note(conn, blocks=[("q1", _props())])
+    other = await _note(conn, target_id="2")
+    note = await get_note(conn, other)
+    await apply_ops(conn, other, base_revision=note.revision, actor="user",
+                    ops=[Op(op="insert", block_id="q9", block=BlockIn(
+                        type="paperQuote", props=_props()))])
+    await _trash(conn, other)
+    res = await _update(conn, n, "q1", {"color": "blue"})
+    assert "q1" in res.applied and res.suggested == []
+
+
+async def test_a_restored_chat_note_is_redrawn_from_the_mark_row(
+        conn: aiosqlite.Connection):
+    """Restoring a chat (and its note) brings its mark blocks back drawn
+    as the mark row is now; the row itself never moves."""
+    from paperhub.notes.ops import redraw_from_rows
+    from tests.notes.test_mark_drawing import _props_of, _row
+    await _mark(conn)
+    n = await _note(conn, blocks=[("q1", _props())])
+    trashed = await _note(conn, target_id="2", blocks=[("q9", _props())])
+    await _trash(conn, trashed)
+    await _update(conn, n, "q1", {"color": "blue"})
+    await conn.execute("UPDATE notes SET deleted_at = NULL WHERE id = ?",
+                       (trashed,))
+    await conn.commit()
+    res = await redraw_from_rows(conn, trashed)
+    assert res is not None and res.applied == ["q9"]
+    assert (await _props_of(conn, trashed, "q9"))["color"] == "blue"
+    assert await _row(conn) == ("blue", "highlight")

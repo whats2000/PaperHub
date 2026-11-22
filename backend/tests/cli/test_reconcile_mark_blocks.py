@@ -168,3 +168,18 @@ async def test_undo_of_the_reconcile_set_is_refused(tmp_path: Path) -> None:
             assert (await cur.fetchone())[0] == "applied"
     props = await _props_of(db)
     assert (props["q1"]["color"], props["q1"]["style"]) == ("blue", "wavy")
+
+
+async def test_a_trashed_note_is_left_for_its_restore(tmp_path: Path) -> None:
+    """A note in the trash is not redrawn (restoring it redraws it)."""
+    db = tmp_path / "p.db"
+    note_id = await _seed(db)
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute("UPDATE notes SET deleted_at = 'then' WHERE id = ?",
+                           (note_id,))
+        await conn.commit()
+    before = await _props_of(db)
+    counts = await reconcile(db, dry_run=False)
+    assert counts == {"checked": 0, "matching": 0, "redrawn": 0, "no_mark": 0,
+                      "rejected": []}
+    assert await _props_of(db) == before

@@ -25,7 +25,7 @@ from typing import Any, Literal
 import aiosqlite
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from paperhub.db.connection import write_transaction
+from paperhub.db.connection import in_write_transaction, write_transaction
 from paperhub.notes.inline_merge import (
     MARK_BLOCK_TYPES,
     MARK_EDITABLE_PROPS,
@@ -423,12 +423,15 @@ class _Ctx:
     async def _redraw_copies(self, mark: dict[str, Any],
                              block_id: str) -> list[str]:
         """Redraw the other live blocks showing ``mark``: in this note as
-        part of this change, in another note as a change there."""
+        part of this change, in another live note as a change there (a
+        trashed note is redrawn when restored: ``redraw_from_rows``)."""
         types = sorted(MARK_BLOCK_TYPES)
         async with self.conn.execute(
             "SELECT id, note_id FROM note_blocks WHERE deleted_at IS NULL "
             f"AND id != ? AND type IN ({','.join('?' for _ in types)}) "  # noqa: S608
             "AND json_extract(payload_json, '$.props.markId') = ? "
+            # A note in the trash follows its mark when it is restored.
+            f"AND {LIVE_NOTE_SQL} "
             "ORDER BY note_id, id", (block_id, *types, mark["id"]),
         ) as cur:
             rows = await cur.fetchall()
@@ -552,6 +555,57 @@ async def _drawing_problem(conn: aiosqlite.Connection, kind: str,
     return await drawing_problem(conn, kind, color, style)
 
 
+# A ``note_blocks`` row's note is not in the trash.
+LIVE_NOTE_SQL = ("note_id IN (SELECT id FROM notes WHERE deleted_at IS NULL)")
+
+
+async def redraw_ops(conn: aiosqlite.Connection, note_id: int) -> list[Op]:
+    """Updates that redraw ``note_id``'s live mark blocks from their mark
+    rows (colour and style), one per block that differs; a block whose
+    mark has no row is left alone."""
+    types = sorted(MARK_BLOCK_TYPES)
+    async with conn.execute(
+        "SELECT b.id, b.type, b.payload_json, m.color, m.style "
+        "FROM note_blocks b JOIN note_marks m "
+        "ON m.id = json_extract(b.payload_json, '$.props.markId') "
+        f"WHERE b.note_id = ? AND b.deleted_at IS NULL AND b.type IN "
+        f"({','.join('?' for _ in types)}) ORDER BY b.id",  # noqa: S608
+        (note_id, *types),
+    ) as cur:
+        rows = await cur.fetchall()
+    ops: list[Op] = []
+    for bid, type_, payload, color, style in rows:
+        data = json.loads(payload)
+        props = data.get("props") or {}
+        want = drawn_props(props, {"color": color, "style": style})
+        if want != props:
+            ops.append(Op(op="update", block_id=bid, block=BlockIn(
+                type=type_, props=want, content=data.get("content"))))
+    return ops
+
+
+async def redraw_from_rows(
+    conn: aiosqlite.Connection, note_id: int,
+) -> ApplyResult | None:
+    """Redraw ``note_id``'s mark blocks from their mark rows as one system
+    change (a note restored from the trash, which a recolour skipped);
+    ``None`` when every block already matches. Joins the caller's write
+    transaction, else opens one. The rows never move."""
+    async def run() -> ApplyResult | None:
+        ops = await redraw_ops(conn, note_id)
+        note = await get_note(conn, note_id)
+        if not ops or note is None:
+            return None
+        return await _apply_in_tx(
+            conn, note_id, base_revision=note.revision, ops=ops,
+            actor="system", run_id=None, summary="Redraw marks from their rows",
+            redraw=True)
+    if in_write_transaction():
+        return await run()
+    async with write_transaction(conn):
+        return await run()
+
+
 async def _ai_owns(conn: aiosqlite.Connection, mark: dict[str, Any]) -> bool:
     """Whether the AI made the mark (its reference block is the AI's) and
     every live block showing it is the AI's: only then may an agent change
@@ -566,7 +620,8 @@ async def _ai_owns(conn: aiosqlite.Connection, mark: dict[str, Any]) -> bool:
     async with conn.execute(
         "SELECT 1 FROM note_blocks WHERE deleted_at IS NULL AND author != 'ai' "
         f"AND type IN ({','.join('?' for _ in types)}) "  # noqa: S608
-        "AND json_extract(payload_json, '$.props.markId') = ? LIMIT 1",
+        f"AND json_extract(payload_json, '$.props.markId') = ? AND {LIVE_NOTE_SQL} "
+        "LIMIT 1",
         (*types, mark["id"]),
     ) as cur:
         return await cur.fetchone() is None

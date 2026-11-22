@@ -3,7 +3,8 @@
 A mark's colour and style live on its ``note_marks`` row; its note blocks
 draw them. Before Task 16 an agent's recolour of a mark block changed the
 block only, so a block can disagree with its row. The row is the source of
-truth: every live mark block whose ``color`` / ``style`` differ from its
+truth: every live mark block of a live note (a trashed one is redrawn
+when restored) whose ``color`` / ``style`` differ from its
 row's is redrawn, one ``system`` change set per note (undoable like any
 change). Blocks naming no mark row are left alone. Idempotent: a second run
 redraws nothing.
@@ -24,7 +25,7 @@ from paperhub.config import load_settings
 from paperhub.db.connection import open_db
 from paperhub.db.migrate import has_table
 from paperhub.notes.inline_merge import MARK_BLOCK_TYPES
-from paperhub.notes.ops import BlockIn, Op, apply_ops, drawn_props
+from paperhub.notes.ops import LIVE_NOTE_SQL, BlockIn, Op, apply_ops, drawn_props
 from paperhub.notes.store import get_note
 
 
@@ -46,6 +47,8 @@ async def reconcile(db_path: Path, *, dry_run: bool) -> dict[str, Any]:
         async with conn.execute(
             "SELECT id, note_id, type, payload_json FROM note_blocks "
             f"WHERE deleted_at IS NULL AND type IN ({','.join('?' for _ in types)}) "  # noqa: S608
+            # A trashed note is redrawn when it is restored.
+            f"AND {LIVE_NOTE_SQL} "
             "ORDER BY note_id, id", types,
         ) as cur:
             rows = await cur.fetchall()

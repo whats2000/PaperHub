@@ -1113,6 +1113,48 @@ async def test_delete_of_a_chat_with_only_a_note_is_undoable(
     assert sid in [s["id"] for s in (await sessions_client.get("/sessions")).json()]
 
 
+async def test_restoring_a_chat_redraws_its_note_marks_from_their_rows(
+    sessions_client: AsyncClient, tmp_path: Path,
+) -> None:
+    """A recolour skipped the note while the chat was in the trash: the
+    restore brings its mark block back drawn as the mark is now (the mark
+    row itself does not move)."""
+    from paperhub.notes.ops import BlockIn, Op, apply_ops
+    from paperhub.notes.store import get_or_create_note, list_blocks
+    db = tmp_path / "paperhub.db"
+    sid = (await sessions_client.post("/sessions")).json()["session_id"]
+    props = {"markId": "mk_1", "color": "green", "kind": "text",
+             "style": "highlight", "quote": "q",
+             "pieces": [{"quote": "q", "page": 0}]}
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute(
+            "INSERT INTO paper_content (id, content_key, kind, sha256, title, "
+            "source_path, source_dir_path, html_path) VALUES "
+            "(7, 'k7', 'pdf_upload', 'abc', 'P', 's', 'd', 'h')")
+        await conn.execute(
+            "INSERT INTO note_marks (id, paper_content_id, block_id, kind, view, "
+            "pieces_json, created_at, color, style) VALUES "
+            "('mk_1', 7, 'q1', 'text', 'pdf', '[]', 'now', 'green', 'highlight')")
+        await conn.commit()
+        note = await get_or_create_note(
+            conn, target_kind="session", target_id=str(sid), title="",
+            session_id=sid)
+        await apply_ops(conn, note.id, base_revision=0, actor="user", ops=[
+            Op(op="insert", block_id="q9", block=BlockIn(
+                type="paperQuote", props=props))])
+    assert (await sessions_client.delete(f"/sessions/{sid}")).status_code == 204
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute("UPDATE note_marks SET color = 'blue' WHERE id = 'mk_1'")
+        await conn.commit()
+    assert (await sessions_client.post(f"/sessions/{sid}/restore")).status_code == 204
+    async with aiosqlite.connect(db) as conn:
+        [b] = await list_blocks(conn, note.id)
+        async with conn.execute(
+                "SELECT color FROM note_marks WHERE id = 'mk_1'") as cur:
+            row = await cur.fetchone()
+    assert b.props["color"] == "blue" and row == ("blue",)
+
+
 async def test_a_chat_whose_note_title_is_the_chat_title_stays_hidden(
     sessions_client: AsyncClient, tmp_path: Path,
 ) -> None:

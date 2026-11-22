@@ -22,6 +22,7 @@ from paperhub.feedback.review import maybe_review_fork
 from paperhub.llm.litellm_adapter import LiteLlmAdapter
 from paperhub.models.domain import ToolCallRecord
 from paperhub.models.events import AgentSummary, SearchCandidateModel
+from paperhub.notes.ops import redraw_from_rows
 from paperhub.notes.store import NOTE_HAS_CONTENT_SQL, linked_note_ids, note_first_line
 from paperhub.outbound import held
 
@@ -732,22 +733,30 @@ async def restore_session(session_id: int) -> None:
             (session_id,),
         ) as dcur:
             drow = await dcur.fetchone()
-        cur = await conn.execute(
-            "UPDATE chat_sessions SET deleted_at = NULL "
-            "WHERE id = ? AND internal = 0",
-            (session_id,),
-        )
-        if cur.rowcount == 0:
-            raise HTTPException(404, f"chat_sessions row {session_id} not found")
-        # Only the note that went down with the session (same tombstone);
-        # one deleted on its own earlier stays deleted.
-        if drow is not None and drow[0] is not None:
-            await conn.execute(
-                "UPDATE notes SET deleted_at = NULL WHERE "
-                "target_kind = 'session' AND target_id = ? AND deleted_at = ?",
-                (str(session_id), drow[0]),
+        async with write_transaction(conn):
+            cur = await conn.execute(
+                "UPDATE chat_sessions SET deleted_at = NULL "
+                "WHERE id = ? AND internal = 0",
+                (session_id,),
             )
-        await conn.commit()
+            if cur.rowcount == 0:
+                raise HTTPException(404, f"chat_sessions row {session_id} not found")
+            # Only the note that went down with the session (same
+            # tombstone); one deleted on its own earlier stays deleted.
+            if drow is not None and drow[0] is not None:
+                async with conn.execute(
+                    "SELECT id FROM notes WHERE target_kind = 'session' "
+                    "AND target_id = ? AND deleted_at = ?",
+                    (str(session_id), drow[0]),
+                ) as ncur:
+                    restored = [int(r[0]) for r in await ncur.fetchall()]
+                for note_id in restored:
+                    await conn.execute(
+                        "UPDATE notes SET deleted_at = NULL WHERE id = ?",
+                        (note_id,))
+                    # A recolour skipped it in the trash: its mark blocks
+                    # come back drawn as their marks are now.
+                    await redraw_from_rows(conn, note_id)
 
 
 @router.post(
