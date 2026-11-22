@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { prefersReducedMotion } from "@/lib/motion";
 import { PAPER_TAB_LEAVE_MS } from "@/lib/paperTabs";
+import { truncatedTitle } from "@/lib/truncatedTitle";
 import { cn } from "@/lib/utils";
 
 import "./paperTabs.css";
@@ -40,8 +41,8 @@ interface Props {
   onAdd: (paperId: number) => void;
   onClose: (paperId: number) => void;
   onKeep: (paperId: number) => void;
-  /** A solid tab's tooltip (default: the paper's title); a dashed tab's
-   *  says it is not in the chat. */
+  /** A solid tab's tooltip (default: the full title, shown only when it is
+   *  cut off); a dashed tab's says it is not in the chat. */
   tabTitle?: (paper: PaperTabItem) => string;
   /** The tab's element id, and the panel it shows, for the pane's tabpanel. */
   tabId?: (paperId: number) => string;
@@ -163,8 +164,9 @@ export function PaperTabs({
     revealRef.current();
   }, [selected, papers.length, outside.length, selectedTitle]);
 
-  const titleOf = (tab: Tab) => {
-    if (!tab.dashed) return tabTitle ? tabTitle(tab) : tab.title;
+  // null: the full title shows on hover only when it is cut off.
+  const titleOf = (tab: Tab): string | null => {
+    if (!tab.dashed) return tabTitle ? tabTitle(tab) : null;
     const base = t("canvas:panel.viewingTitle", { title: tab.title });
     return tab.preview ? `${base} ${t("paperTabs:previewHint", "(opened by a link; double-click to keep)")}` : base;
   };
@@ -255,7 +257,7 @@ interface ShellProps {
   onEntered: () => void;
   selected: boolean;
   focusable: boolean;
-  title: string;
+  title: string | null;
   tabId?: string;
   panelId?: string;
   onSelect: (id: number) => void;
@@ -327,14 +329,14 @@ function PaperTabShell({
           aria-selected={selected}
           tabIndex={focusable ? 0 : -1}
           onClick={() => onSelect(tab.id)}
-          title={title}
+          {...(title === null ? truncatedTitle(tab.title) : { title })}
           className={cn(
             "inline-flex h-full min-w-0 items-center gap-1 rounded py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring",
             tab.dashed ? "pr-1 pl-2" : "px-2",
           )}
         >
           <FileText className="h-3 w-3 shrink-0" aria-hidden />
-          <span className={cn("min-w-0 truncate", tab.dashed && "max-w-[9rem]", preview && "italic")}>
+          <span data-truncate className={cn("min-w-0 truncate", tab.dashed && "max-w-[9rem]", preview && "italic")}>
             {tab.title}
           </span>
         </button>
