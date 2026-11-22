@@ -265,6 +265,12 @@ const safeStorage: StateStorage = {
 const pending = new Map<number, NoteOp[]>();
 const timers = new Map<number, ReturnType<typeof setTimeout>>();
 const inflight = new Map<number, Promise<void>>();
+/** Bursts sent per note: a reload that saw a burst go out while it was
+ * loading is stale (the server answered before that burst landed). */
+const sentBursts = new Map<number, number>();
+/** Notes the server changed beyond a saved burst (a recolour redrew other
+ * blocks): reloaded once nothing of theirs is unsaved or in flight. */
+const reloadDue = new Set<number>();
 /** Failed attempts of the burst at the head of a note's queue. */
 const attempts = new Map<number, number>();
 /** A burst whose request failed in transit, resent as-is (same ops, base
@@ -427,6 +433,8 @@ export function clearPendingNoteOps(): void {
   unsaved.clear();
   aliases.clear();
   creating.clear();
+  sentBursts.clear();
+  reloadDue.clear();
 }
 
 /** The edits of a note not yet saved, in send order (a copy). */
@@ -723,9 +731,35 @@ export const useNotesStore = create<NotesStore>()(
         };
       };
 
+      /** A reload a saved burst asked for (`reloadDue`), once the note has
+       * nothing unsaved or in flight. One that a burst sent while it loaded
+       * would show the note without that burst's edits: it is dropped and
+       * asked for again, and the burst's flush runs it. Edits queued
+       * meanwhile are put back on top by `rebase`. */
+      const reloadWhenSaved = async (noteId: number) => {
+        if (!reloadDue.has(noteId)) return;
+        if (inflight.has(noteId) || inRetry.has(noteId) || pending.get(noteId)?.length) return;
+        reloadDue.delete(noteId);
+        const sent = sentBursts.get(noteId) ?? 0;
+        try {
+          const d = await getNote(noteId);
+          if ((sentBursts.get(noteId) ?? 0) !== sent) {
+            reloadDue.add(noteId);
+            return;
+          }
+          show(noteId, d);
+        } catch {
+          /* the next reload (or the next edit's answer) shows it */
+        }
+      };
+
       /** Load the saved note and put the edits not yet sent back on top. */
       const reload = async (noteId: number, prepend?: (server: NoteBlock[]) => NoteOp[]) => {
-        const d = await getNote(noteId);
+        show(noteId, await getNote(noteId), prepend);
+      };
+
+      /** Show the saved note `d` with the edits not yet sent on top. */
+      const show = (noteId: number, d: NoteDetail, prepend?: (server: NoteBlock[]) => NoteOp[]) => {
         const { blocks, unsaved } = rebase(noteId, d.blocks, prepend);
         set((s) => {
           const cur = s.notes[noteId];
@@ -921,6 +955,7 @@ export const useNotesStore = create<NotesStore>()(
           burst = { ops, base: state.revision, key: newBurstKey() };
         }
         let res;
+        sentBursts.set(noteId, (sentBursts.get(noteId) ?? 0) + 1);
         try {
           res = await postNoteOps(noteId, {
             base_revision: burst.base,
@@ -970,8 +1005,9 @@ export const useNotesStore = create<NotesStore>()(
         tellMarkBlocks(noteId, burst.ops, applied);
         if (res.marks?.length) {
           // A mark changed colour: its other blocks here were redrawn by the
-          // server, so this note is shown as saved; other notes follow.
-          void reload(noteId).catch(() => undefined);
+          // server, so this note is reloaded once its edits are all saved
+          // (flush); other notes follow now.
+          reloadDue.add(noteId);
           followRedraws(res, noteId);
         }
         set((s) => {
@@ -1357,6 +1393,7 @@ export const useNotesStore = create<NotesStore>()(
           if ((inRetry.has(noteId) || pending.get(noteId)?.length) && !timers.has(noteId)) {
             schedule(noteId);
           }
+          void reloadWhenSaved(noteId);
         },
 
         onConflict: (noteId, rejected) => resolveConflict(noteId, rejected, []),

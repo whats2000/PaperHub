@@ -105,3 +105,68 @@ describe("a mark recolour that redrew other notes", () => {
     expect(loads).toEqual([]);
   });
 });
+
+describe("the reload after a saved recolour (Task 16, round 2)", () => {
+  const para = (text: string, rev: number): NoteBlock => ({
+    id: "p1",
+    note_id: 7,
+    parent_id: null,
+    type: "paragraph",
+    props: {},
+    content: [{ type: "text", text, styles: {} }],
+    text,
+    author: "user",
+    section_key: null,
+    changed_rev: rev,
+  });
+  const upd = (text: string) => ({
+    op: "update" as const,
+    block_id: "p1",
+    block: { type: "paragraph" as const, props: {}, content: [{ type: "text", text, styles: {} }] },
+  });
+  const gate = () => {
+    let open!: () => void;
+    const p = new Promise<void>((r) => (open = r));
+    return { p, open };
+  };
+
+  it("never drops an edit saved while it was loading", async () => {
+    let serverText = "A";
+    let revision = 4;
+    let posts = 0;
+    const getGate = gate();
+    const secondPost = gate();
+    useNotesStore.setState({
+      notes: { 7: { note: note(7), blocks: [para("A", 1)], suggestions: [], comments: [], revision: 4 } },
+    });
+    server.use(
+      http.post(`${API_BASE_URL}/notes/7/ops`, async ({ request }) => {
+        posts += 1;
+        const body = (await request.json()) as { ops: { block: { content: { text: string }[] } }[] };
+        if (posts === 2) await secondPost.p;
+        serverText = body.ops.at(-1)!.block.content[0]!.text;
+        revision += 1;
+        // The first save recoloured a mark: the client reloads the note.
+        return HttpResponse.json({ ...accepted, revision, applied: ["p1"], redrawn: [], ...(posts === 1 ? {} : { marks: [] }) });
+      }),
+      http.get(`${API_BASE_URL}/notes/7`, async () => {
+        const snapshot = { text: serverText, revision };
+        await getGate.p;
+        return HttpResponse.json({ note: { ...note(7), revision: snapshot.revision }, blocks: [para(snapshot.text, snapshot.revision)], suggestions: [], comments: [] });
+      }),
+    );
+    const store = useNotesStore.getState();
+    store.applyLocal(7, [upd("A1")]);
+    await store.flush(7); // saved; its reload is loading (held)
+    store.applyLocal(7, [upd("A1 B")]);
+    const second = store.flush(7); // in flight while the reload lands
+    await new Promise((r) => setTimeout(r, 20));
+    getGate.open();
+    await new Promise((r) => setTimeout(r, 20));
+    const text = () => useNotesStore.getState().notes[7]!.blocks[0]!.text;
+    expect(text()).toBe("A1 B");
+    secondPost.open();
+    await second;
+    await waitFor(() => expect(text()).toBe("A1 B"));
+  });
+});
