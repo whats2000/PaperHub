@@ -1486,3 +1486,94 @@ describe("merging and splitting cells", () => {
     expect(canMerge(editor._tiptapEditor.view.state)).toBe(true);
   });
 });
+
+describe("a cell holds one line run, its lines split by line breaks (user report, 2026-11-23)", () => {
+  const table = (): unknown[] => [
+    {
+      id: "t",
+      type: "table",
+      content: {
+        type: "tableContent",
+        columnWidths: [null, null],
+        headerRows: 1,
+        rows: [{ cells: ["h1", "h2"] }, { cells: ["RoboTTT", ""] }, { cells: ["GR00T", "x"] }],
+      },
+    },
+  ];
+  /** The cells' node shapes: how many paragraphs each holds. */
+  const paragraphs = (editor: AnyEditor) => {
+    const out: number[] = [];
+    editor._tiptapEditor.view.state.doc.descendants((node) => {
+      if (node.type.name === "tableCell" || node.type.name === "tableHeader") {
+        out.push(node.childCount);
+        return false;
+      }
+      return true;
+    });
+    return out;
+  };
+  /** The position just inside the start of the n-th paragraph of the cell at grid (r, c). */
+  const lineStart = (editor: AnyEditor, r: number, c: number, n: number) => {
+    let at = -1;
+    let row = -1;
+    editor._tiptapEditor.view.state.doc.descendants((node, pos) => {
+      if (at >= 0) return false;
+      if (node.type.name === "tableRow") {
+        row += 1;
+        if (row !== r) return false;
+        let p = pos + 1;
+        node.forEach((cell, _o, i) => {
+          if (i !== c) {
+            p += cell.nodeSize;
+            return;
+          }
+          let q = p + 1;
+          for (let k = 0; k < n; k++) q += cell.child(k).nodeSize;
+          at = q + 1;
+        });
+        return false;
+      }
+      return true;
+    });
+    return at;
+  };
+
+  it("a merge puts the cells' texts on lines of one paragraph (as saved), never a second paragraph", () => {
+    const editor = makeEditor([tableClean, tableBorderView], table());
+    selectCells(editor, [1, 0], [2, 0]);
+    expect(mergeSelected(editor)).toBe(true);
+    expect(paragraphs(editor).every((n) => n === 1)).toBe(true);
+    expect(texts(tableOf(editor)!)[1]![0]).toBe("RoboTTT\nGR00T");
+  });
+
+  it("a merge and its join are one undo step", () => {
+    const editor = makeEditor([tableClean, tableBorderView], table());
+    selectCells(editor, [1, 0], [2, 0]);
+    mergeSelected(editor);
+    editor.undo();
+    expect(texts(tableOf(editor)!).map((r) => r[0])).toEqual(["h1", "RoboTTT", "GR00T"]);
+  });
+
+  it("a cell left with an empty second paragraph keeps one line (the stray line goes)", () => {
+    const editor = makeEditor([tableClean], table());
+    const view = editor._tiptapEditor.view;
+    const { tableParagraph } = view.state.schema.nodes;
+    // What a merge-then-split left behind: a second, empty paragraph.
+    const pos = lineStart(editor, 1, 0, 1) - 1;
+    view.dispatch(view.state.tr.insert(pos, tableParagraph!.create()));
+    expect(paragraphs(editor).every((n) => n === 1)).toBe(true);
+    expect(texts(tableOf(editor)!)[1]![0]).toBe("RoboTTT");
+  });
+
+  it("Backspace at the start of a cell's second line joins it to the first", () => {
+    const editor = makeEditor([tableClean, tableBorderView], table());
+    selectCells(editor, [1, 0], [2, 0]);
+    mergeSelected(editor);
+    const view = editor._tiptapEditor.view;
+    // The caret right after the line break, before "GR00T".
+    const start = lineStart(editor, 1, 0, 0) + "RoboTTT".length + 1;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, start)));
+    view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", keyCode: 8, bubbles: true, cancelable: true }));
+    expect(texts(tableOf(editor)!)[1]![0]).toBe("RoboTTTGR00T");
+  });
+});

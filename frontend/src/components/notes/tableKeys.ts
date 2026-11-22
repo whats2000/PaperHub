@@ -6,7 +6,8 @@
  * - A table keeps only what the notes store, whatever brought it in
  *   (`tableClean`): merged cells yes, cell colours no, whole-pixel widths; a
  *   pasted one also gets a header row and its column alignment
- *   (`notePasteHandler`).
+ *   (`notePasteHandler`); a cell holds one paragraph, its lines split by
+ *   line breaks (`joinCellParagraphs`).
  */
 import {
   contentNodeToTableContent,
@@ -18,7 +19,7 @@ import {
   tableContentToNodes,
 } from "@blocknote/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { Plugin, TextSelection } from "@tiptap/pm/state";
+import { Plugin, TextSelection, type EditorState, type Transaction } from "@tiptap/pm/state";
 import { TableMap, removeColumn, removeRow } from "@tiptap/pm/tables";
 import type { EditorView } from "@tiptap/pm/view";
 
@@ -220,6 +221,45 @@ export function tablesIn(doc: PMNode, from: number, to: number): { pos: number; 
   return out;
 }
 
+/** Every cell of these tables holding more than one paragraph (a merge
+ * appends each merged cell's text as a paragraph of its own) as one
+ * paragraph, its lines joined by line breaks. A cell is saved as one run of
+ * text, its lines split by "
+" (a line break), so a second paragraph was
+ * saved run on to the first; and BlockNote's Backspace stops at the start
+ * of every cell paragraph, so an empty second one could not be removed.
+ * Empty paragraphs go. */
+export function joinCellParagraphs(
+  state: EditorState,
+  tables: { pos: number; node: PMNode }[],
+): Transaction | null {
+  const hardBreak = state.schema.nodes.hardBreak;
+  if (!hardBreak) return null;
+  const cells: { pos: number; node: PMNode }[] = [];
+  for (const t of tables) {
+    t.node.descendants((node, rel) => {
+      if (node.type.name !== "tableCell" && node.type.name !== "tableHeader") return true;
+      let textblocks = true;
+      node.forEach((p) => (textblocks &&= p.isTextblock));
+      if (node.childCount > 1 && textblocks) cells.push({ pos: t.pos + 1 + rel, node });
+      return false;
+    });
+  }
+  if (!cells.length) return null;
+  const tr = state.tr;
+  for (const { pos, node } of cells.reverse()) {
+    const parts: PMNode[] = [];
+    node.forEach((p) => {
+      if (!p.content.size) return;
+      if (parts.length) parts.push(hardBreak.create());
+      p.forEach((n) => void parts.push(n));
+    });
+    const first = node.firstChild!;
+    tr.replaceWith(pos + 1, pos + node.nodeSize - 1, first.type.create(first.attrs, parts));
+  }
+  return tr;
+}
+
 /** Every change that leaves a table holding what the notes do not keep (a
  * drop, a paste, an inserted block, a column drag) is followed by its
  * normalised form, so no path can save a coloured cell or a fractional
@@ -227,6 +267,14 @@ export function tablesIn(doc: PMNode, from: number, to: number): { pos: number; 
 export const tableClean = createExtension(({ editor }) => ({
   key: "tableClean",
   prosemirrorPlugins: [
+    // First: the normalising below reads a cell's paragraphs as one run.
+    new Plugin({
+      appendTransaction(trs, oldState, state) {
+        if (!trs.some((t) => t.docChanged)) return null;
+        const range = changedRange(oldState.doc, state.doc);
+        return range ? joinCellParagraphs(state, tablesIn(state.doc, range.from, range.to)) : null;
+      },
+    }),
     new Plugin({
       appendTransaction(trs, oldState, state) {
         if (!trs.some((t) => t.docChanged)) return null;

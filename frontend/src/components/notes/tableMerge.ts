@@ -154,7 +154,8 @@ function fadeSelected(view: EditorView) {
   for (const el of cells) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: "ease-out" });
 }
 
-/** Merges the selected cells (their texts joined into the first). */
+/** Merges the selected cells: their texts go into the first, each on a
+ * line of its own (`joinCellParagraphs`, in `tableClean`). */
 export function mergeSelected(editor: unknown): boolean {
   const e = editor as MergeEditor;
   const state = e._tiptapEditor.view.state;
