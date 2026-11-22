@@ -140,6 +140,19 @@ describe("a [[ link chip", () => {
     expect(chip()!.querySelector("svg")).not.toBeNull();
   });
 
+  it("flows inline in the sentence: a long name wraps inside the chip, never on a line of its own", async () => {
+    note12();
+    seed([link()]);
+    mount();
+    await waitFor(() => expect(chip()?.textContent).toBe("RoboTTT"));
+    // An inline-flex / inline-block box is atomic: a name wider than the
+    // rest of the line drops whole onto the next line. Plain inline boxes
+    // break inside the name, like a Notion mention.
+    const boxes = [chip()!, chip()!.closest("[data-note-link]")!];
+    for (const el of boxes) expect(el.className).not.toMatch(/\binline-(flex|block)\b/);
+    expect(chip()!.className).toMatch(/box-decoration-clone/);
+  });
+
   it("adds › heading for a heading link, and a label replaces both", async () => {
     note12();
     seed([link({ blockId: "h1" }), { type: "text", text: " and ", styles: {} }, link({ label: "見此", blockId: "h1" })]);

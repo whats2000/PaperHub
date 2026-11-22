@@ -215,10 +215,10 @@ export function NoteLinkView({
       : t("notes:link.noteGone", "This note was deleted");
 
   return (
-    <span contentEditable={false} className="inline-flex items-baseline align-baseline" data-note-link={targetId}>
+    <span contentEditable={false} className="align-baseline" data-note-link={targetId}>
       <span
         data-state={editing ? "open" : "closed"}
-        className="inline-block max-w-[40ch] overflow-hidden whitespace-nowrap align-baseline transition-[max-width,opacity] duration-200 ease-out data-[state=closed]:max-w-0 data-[state=closed]:opacity-0 motion-reduce:transition-none"
+        className="inline-block max-w-[40ch] overflow-hidden whitespace-nowrap align-baseline transition-[max-width,opacity] duration-200 ease-out data-[state=closed]:h-0 data-[state=closed]:max-w-0 data-[state=closed]:opacity-0 motion-reduce:transition-none"
       >
         <input
           ref={field}
@@ -254,7 +254,7 @@ export function NoteLinkView({
         aria-disabled={dead || undefined}
         aria-label={dead ? `${shown} (${goneText})` : t("notes:link.openNamed", "Open {{name}}", { name: shown })}
         className={cn(
-          "inline-flex items-baseline gap-0.5 rounded-sm px-px align-baseline underline underline-offset-2 outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
+          "box-decoration-clone rounded-sm px-px align-baseline underline underline-offset-2 outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
           dead
             ? "text-muted-foreground line-through decoration-muted-foreground/60"
             : "cursor-pointer text-foreground decoration-foreground/40 hover:bg-accent hover:decoration-foreground",
@@ -294,7 +294,11 @@ export function NoteLinkView({
           }
         }}
       >
-        <KindIcon kind={targetKind} noteKind={info?.noteKind} className="size-[0.85em] shrink-0 self-center opacity-70" />
+        <KindIcon
+          kind={targetKind}
+          noteKind={info?.noteKind}
+          className="mr-0.5 inline size-[0.85em] align-[-0.1em] opacity-70"
+        />
         <span>{shown}</span>
       </span>
       <Popover open={preview && !editing} onOpenChange={(o) => !o && setPreview(false)}>
