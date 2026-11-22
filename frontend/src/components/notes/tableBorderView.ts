@@ -131,9 +131,9 @@ function align<T>(a: T[], b: T[], eq: (x: T, y: T) => boolean): Step[] | null {
   return out;
 }
 
-/** The ops of an edit script: a deletion next to an insertion is the same
- * row edited in place (kept); a lone deletion and a lone insertion of equal
- * items is a move. */
+/** The ops of an edit script: within a run of changes, deletions and
+ * insertions pair up as items edited in place (kept); a lone deletion and a
+ * lone insertion of equal items is a move. */
 function opsOf<T>(
   steps: Step[],
   a: T[],
@@ -148,15 +148,27 @@ function opsOf<T>(
   }
   const ops: StructureOp[] = [];
   let at = 0;
-  for (let k = 0; k < steps.length; k++) {
-    const s = steps[k]!;
-    const next = steps[k + 1];
-    if (s.kind === "keep") at++;
-    else if ((s.kind === "del" && next?.kind === "ins") || (s.kind === "ins" && next?.kind === "del")) {
-      at++; // edited in place
+  let k = 0;
+  while (k < steps.length) {
+    if (steps[k]!.kind === "keep") {
+      at++;
       k++;
-    } else if (s.kind === "del") ops.push({ kind: kinds.del, at });
-    else ops.push({ kind: kinds.ins, at: at++ });
+      continue;
+    }
+    // A run of changes between two kept items: its first deletions and
+    // insertions pair up as items edited in place (a row whose merge
+    // shrank), the rest are deleted or inserted after them.
+    let dels = 0;
+    let ins = 0;
+    while (k < steps.length && steps[k]!.kind !== "keep") {
+      if (steps[k]!.kind === "del") dels++;
+      else ins++;
+      k++;
+    }
+    const edited = Math.min(dels, ins);
+    at += edited;
+    for (let i = edited; i < dels; i++) ops.push({ kind: kinds.del, at });
+    for (let i = edited; i < ins; i++) ops.push({ kind: kinds.ins, at: at++ });
   }
   return ops;
 }

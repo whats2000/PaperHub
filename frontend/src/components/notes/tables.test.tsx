@@ -1128,7 +1128,7 @@ describe("table borders drawn from the table's lines", () => {
         { cells: ["z1", "z2"] },
       ],
     };
-    const lines = { preset: "paper" as const, h: ["22", "11", "00", "01", "22"], v: ["000", "020", "020", "000"] };
+    const lines = { preset: "paper" as const, h: ["22", "11", "00", "01", "22"], v: ["000", "020", "101", "000"] };
     const editor = makeEditor([tableBorderView], [{ id: "t", type: "table", props: { borders: dumpBorders(lines) }, content }]);
     const t = tableOf(editor)!;
     const anchor = t.rows[1]!.cells[0]!;
@@ -1138,7 +1138,8 @@ describe("table borders drawn from the table's lines", () => {
     };
     expect(() => editor.updateBlock("t", { type: "table", content: shrunk } as never)).not.toThrow();
     const b = bordersProp(editor)!;
-    expect(b.v).toHaveLength(3);
+    // The edited row (its merge shrank) keeps its lines; the deleted row's go.
+    expect(b.v).toEqual(["000", "020", "000"]);
     expect(b.h[3]).toBe("22");
   });
 
