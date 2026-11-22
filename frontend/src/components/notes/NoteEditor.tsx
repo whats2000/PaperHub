@@ -70,6 +70,7 @@ import { noteSuggestionMarks, useNoteSuggestions, useSuggestionHosts } from "./n
 import { codeFence, dividerRule, inlineMarks } from "./inlineMarks";
 import { isFindKey, noteFind } from "./noteFind";
 import { NoteFindBar } from "./NoteFindBar";
+import { foldKeyGuard, foldKeyOf } from "./foldKeys";
 import { caretFoldOwner, foldOwners } from "./folds";
 import { FoldControls } from "./FoldControls";
 import "./gutter.css";
@@ -294,6 +295,7 @@ function LoadedNoteEditor({
         tableBorderView,
         mathInput,
         atomCaret,
+        foldKeyGuard,
         commentKeys,
         inlineMarks,
         codeFence,
@@ -487,6 +489,10 @@ function LoadedNoteEditor({
     // Opening the note moved its selection off a first block that takes no
     // text: not a caret of the user's.
     if (isOpeningMove(editor._tiptapEditor.view)) return;
+    // A reload of the note (a mark saved or deleted, another editor's
+    // change) moved the selection with the blocks it replaced: not the
+    // user's caret either, or the next mark lands at the note's end.
+    if (applyingRemote.current) return;
     let blockId: string;
     try {
       blockId = editor.getTextCursorPosition().block.id;
@@ -771,13 +777,13 @@ function LoadedNoteEditor({
   }
   const onFindGone = useCallback(() => setFindMounted(false), []);
 
-  // Ctrl+Shift+[ / ] (⌘⇧[ / ] on a Mac): fold / unfold the caret's heading
-  // (or list item): the block itself, else the fold the caret is in.
+  // Ctrl+Shift+[ / ] (⌘⌥[ / ] on a Mac, foldKeys.ts): fold / unfold the
+  // caret's heading (or list item): the block itself, else the fold the
+  // caret is in.
   const onFoldKey = useCallback(
     (e: KeyboardEvent) => {
-      const mac = /Mac|iPhone|iPad/.test(navigator.platform);
-      if (variant !== "pane" || !e.shiftKey || e.altKey || !(mac ? e.metaKey : e.ctrlKey)) return;
-      if (e.code !== "BracketLeft" && e.code !== "BracketRight") return;
+      const which = variant === "pane" ? foldKeyOf(e) : null;
+      if (!which) return;
       e.preventDefault();
       e.stopPropagation();
       let blockId: string;
@@ -793,7 +799,7 @@ function LoadedNoteEditor({
       }
       const store = useNotesStore.getState();
       const cur = store.folded[noteId] ?? [];
-      const fold = e.code === "BracketLeft";
+      const fold = which === "fold";
       if (fold === cur.includes(owner)) return;
       // Folding from inside it: the caret goes to the end of the heading.
       if (fold && owner !== blockId) {

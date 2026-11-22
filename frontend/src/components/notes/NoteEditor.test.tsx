@@ -1446,6 +1446,60 @@ describe("dividers, Focus and folding", () => {
     expect(useNotesStore.getState().folded[7]).toEqual([]);
   });
 
+  it("the fold keys work through an input method and never type their bracket", async () => {
+    seed([h2a, q2, p3, h2b, p4]);
+    mount();
+    await screen.findByText("Fourth");
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { view: EditorView; commands: { setTextSelection: (pos: number) => boolean } };
+    };
+    let at = -1;
+    pm.editor.view.state.doc.descendants((n, pos) => {
+      if (n.type.name === "blockContainer" && n.attrs.id === "ha") at = pos + 3;
+      return at < 0;
+    });
+    act(() => {
+      pm.editor.commands.setTextSelection(at);
+    });
+    const before = pm.editor.view.state.doc.textContent;
+    // Bopomofo: the keydown says "Process", then the IME commits `{`.
+    fireEvent.keyDown(pm, { key: "Process", keyCode: 229, code: "BracketLeft", ctrlKey: true, shiftKey: true });
+    expect(useNotesStore.getState().folded[7]).toEqual(["ha"]);
+    const view = pm.editor.view;
+    const { from, to } = view.state.selection;
+    act(() => {
+      view.someProp("handleTextInput", (f) => f(view, from, to, "{", () => view.state.tr.insertText("{", from, to)));
+    });
+    fireEvent.keyUp(pm, { key: "{", code: "BracketLeft", ctrlKey: true, shiftKey: true });
+    expect(pm.editor.view.state.doc.textContent).toBe(before);
+  });
+
+  it("on a Mac the fold keys are ⌘⌥[ / ]; ⌘⇧[ is left to the browser's tabs", async () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    seed([h2a, q2, p3, h2b, p4]);
+    mount();
+    await screen.findByText("Fourth");
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: { view: EditorView; commands: { setTextSelection: (pos: number) => boolean } };
+    };
+    let at = -1;
+    pm.editor.view.state.doc.descendants((n, pos) => {
+      if (n.type.name === "blockContainer" && n.attrs.id === "p3") at = pos + 3;
+      return at < 0;
+    });
+    act(() => {
+      pm.editor.commands.setTextSelection(at);
+    });
+    const tabs = fireEvent.keyDown(pm, { key: "{", code: "BracketLeft", metaKey: true, shiftKey: true });
+    expect(tabs).toBe(true);
+    expect(useNotesStore.getState().folded[7] ?? []).toEqual([]);
+    fireEvent.keyDown(pm, { key: "“", code: "BracketLeft", metaKey: true, altKey: true });
+    expect(useNotesStore.getState().folded[7]).toEqual(["ha"]);
+    const host = outer("ha").querySelector<HTMLElement>(":scope > .bn-block > .note-fold-host")!;
+    expect(within(host).getByRole("button", { name: "Unfold" }).title).toBe("Unfold · ⌘⌥]");
+    vi.restoreAllMocks();
+  });
+
   it("the notes menu folds and unfolds every heading, section and list item at once", async () => {
     const { NotesToolbar } = await import("./NotesToolbar");
     seed([section, quote, h2a, p3, h2b, p4, d1, q2]);
@@ -1476,6 +1530,38 @@ describe("Add note from the reader", () => {
     expect(line?.getAttribute("data-content-type")).toBe("paragraph");
     expect(line?.textContent).toBe("");
     expect(useNotesStore.getState().caretAfter).toBeNull();
+  });
+
+  it("a reload of the note (a mark saved or deleted elsewhere) is not a caret of the user's", async () => {
+    // The user's caret is in "Mine"; a mark from the reader then reloads the
+    // note. The reload moves the editor's selection, but the next mark must
+    // still go after "Mine", not after the note's last block.
+    const last = blk("p9", { content: [{ type: "text", text: "Last", styles: {} }], text: "Last" });
+    seed([section, mine, last]);
+    mount();
+    await screen.findByText("Last");
+    const pm = document.querySelector(".ProseMirror") as HTMLElement & {
+      editor: {
+        commands: { setTextSelection: (pos: number) => boolean };
+        state: { doc: { descendants: (f: (n: { isText: boolean; text?: string }, pos: number) => void) => void } };
+      };
+    };
+    let at = -1;
+    pm.editor.state.doc.descendants((n, pos) => {
+      if (n.isText && n.text === "Mine") at = pos + 2;
+    });
+    act(() => {
+      pm.editor.commands.setTextSelection(at);
+    });
+    await waitFor(() => expect(useNotesStore.getState().lastCaret[7]).toBe("p1"));
+    act(() => {
+      useNotesStore.setState((s) => ({
+        notes: { 7: { ...s.notes[7]!, blocks: [section, mine, last, quote] } },
+        reloads: { 7: { seq: 1, blockIds: null } },
+      }));
+    });
+    await waitFor(() => expect(document.querySelector('.bn-block-outer[data-id="q1"]')).not.toBeNull());
+    expect(useNotesStore.getState().lastCaret[7]).toBe("p1");
   });
 
   it("waits for the reference to arrive with the note's reload", async () => {
