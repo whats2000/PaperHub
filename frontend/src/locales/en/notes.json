@@ -357,6 +357,26 @@
     "unfoldAll": "Unfold all",
     "showToc": "Show table of contents"
   },
+  "borders": {
+    "title": "Borders · {{rows}}×{{cols}} cells",
+    "weight": "Line weight",
+    "thin": "Thin",
+    "thick": "Thick",
+    "sets": "Border sets",
+    "all": "All borders",
+    "inner": "Inner borders",
+    "innerH": "Inner horizontal borders",
+    "innerV": "Inner vertical borders",
+    "outer": "Outer borders",
+    "left": "Left border",
+    "top": "Top border",
+    "right": "Right border",
+    "bottom": "Bottom border",
+    "clear": "Clear borders",
+    "unusable": "{{name}} (this selection has none of these lines)",
+    "preview": "Preview of the selection's borders",
+    "note": "Click an icon again to clear those lines. A merged cell's edge is its whole span; an edge without a border shows dashed only while editing."
+  },
   "card": {
     "added_one": "Added {{count}} note",
     "added_other": "Added {{count}} notes",

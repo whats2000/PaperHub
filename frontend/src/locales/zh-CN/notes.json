@@ -357,6 +357,26 @@
     "unfoldAll": "全部展开",
     "showToc": "显示目录"
   },
+  "borders": {
+    "title": "边框 · {{rows}}×{{cols}} 格",
+    "weight": "线的粗细",
+    "thin": "细",
+    "thick": "粗",
+    "sets": "边框样式",
+    "all": "全部边框",
+    "inner": "内框",
+    "innerH": "内部水平边框",
+    "innerV": "内部垂直边框",
+    "outer": "外框",
+    "left": "左边框",
+    "top": "上边框",
+    "right": "右边框",
+    "bottom": "下边框",
+    "clear": "清除边框",
+    "unusable": "{{name}}（这个选区没有这些线）",
+    "preview": "选区的边框预览",
+    "note": "再点一次同一个图标会清除那些线。合并的单元格以整个范围的边为准；没有边框的边只在编辑时以虚线显示。"
+  },
   "card": {
     "added_one": "新增了 {{count}} 条笔记",
     "added_other": "新增了 {{count}} 条笔记",

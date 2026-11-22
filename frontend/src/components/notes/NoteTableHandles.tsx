@@ -47,6 +47,7 @@ import { useNotesStore } from "@/store/notes";
 import type { TableContent } from "@/types/notes";
 
 import type { TablePart } from "./noteFind";
+import { TableBordersPicker } from "./TableBordersPicker";
 import { partRequests } from "./tableCaptions";
 import { columnAlignment, deleteRowOrColumn, setColumnAlignment, type Alignment } from "./tableKeys";
 import { shrinkAway } from "./tableMotion";
@@ -501,13 +502,36 @@ function TableMoreMenu() {
 
 /** Rendered inside `BlockNoteView` (with `tableHandles={false}`). */
 export function NoteTableHandles() {
+  const editor = useBlockNoteEditor();
+  // The last request stays while the picker closes, so it can animate out.
   const [borders, setBorders] = useState<BordersRequest | null>(null);
-  const CellHandle = useMemo(() => makeCellHandle(setBorders), []);
-  void borders; // the Borders… picker (Task 10)
+  const [bordersOpen, setBordersOpen] = useState(false);
+  const CellHandle = useMemo(
+    () =>
+      makeCellHandle((req) => {
+        // After the cell menu has closed (its exit), the picker opens on ⌄.
+        window.setTimeout(() => {
+          setBorders(req);
+          setBordersOpen(true);
+        }, 150);
+      }),
+    [],
+  );
   return (
     <>
       <TableHandlesController tableHandle={NoteTableHandle} tableCellHandle={CellHandle} />
       <TableMoreMenu />
+      {borders && (
+        <TableBordersPicker
+          key={`${borders.blockId}:${borders.selection.r0},${borders.selection.c0},${borders.selection.r1},${borders.selection.c1}`}
+          editor={editor}
+          blockId={borders.blockId}
+          selection={borders.selection}
+          anchor={borders.anchor}
+          open={bordersOpen}
+          onClose={() => setBordersOpen(false)}
+        />
+      )}
     </>
   );
 }

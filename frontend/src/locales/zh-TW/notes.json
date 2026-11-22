@@ -357,6 +357,26 @@
     "unfoldAll": "全部展開",
     "showToc": "顯示目錄"
   },
+  "borders": {
+    "title": "框線 · {{rows}}×{{cols}} 格",
+    "weight": "線的粗細",
+    "thin": "細",
+    "thick": "粗",
+    "sets": "框線樣式",
+    "all": "全部框線",
+    "inner": "內框",
+    "innerH": "內部水平框線",
+    "innerV": "內部垂直框線",
+    "outer": "外框",
+    "left": "左框線",
+    "top": "上框線",
+    "right": "右框線",
+    "bottom": "下框線",
+    "clear": "清除框線",
+    "unusable": "{{name}}（這個選取範圍沒有這些線）",
+    "preview": "選取範圍的框線預覽",
+    "note": "再點一次同一個圖示會清除那些線。合併的儲存格以整個範圍的邊為準；沒有框線的邊只在編輯時以虛線顯示。"
+  },
   "card": {
     "added_one": "新增了 {{count}} 則筆記",
     "added_other": "新增了 {{count}} 則筆記",

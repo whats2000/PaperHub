@@ -1330,6 +1330,21 @@ describe("merging and splitting cells", () => {
     expect(canMerge(editor._tiptapEditor.view.state)).toBe(true);
   });
 
+  it("Borders… in the cell menu opens the picker on the cell's lines", async () => {
+    seed([seededTable]);
+    const pm = mountEditor();
+    hoverCell(pm, 1, 1);
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Cell options", ...HIDDEN }));
+    });
+    const menu = await screen.findByRole("menu", HIDDEN);
+    act(() => {
+      fireEvent.click(within(menu).getByText("Borders…"));
+    });
+    const dialog = await screen.findByRole("dialog", { name: /Borders · 1×1 cells/, ...HIDDEN });
+    expect(within(dialog).getAllByRole("button", HIDDEN).length).toBeGreaterThanOrEqual(12);
+  });
+
   it("the cell menu: Merge off on one plain cell, Split only on a merged one, no colour", async () => {
     seed([seededTable]);
     const pm = mountEditor();
