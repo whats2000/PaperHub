@@ -336,6 +336,14 @@ export function resetLinkTargets(): void {
   useNotesStore.setState({ linkTargets: {} });
 }
 
+/** A note changed where this tab did not see it (the agent, a pick from
+ * the `[[` picker's fresh outline): a lookup of it already made is made
+ * again, so its chips show its headings as they are now. */
+export function refreshLinkTarget(kind: "note" | "paper", id: number): void {
+  const st = useNotesStore.getState();
+  if (st.linkTargets[linkTargetKey(kind, id)]) void st.resolveLinkTarget(kind, id, { maxAgeMs: 0 });
+}
+
 const isGone = (err: unknown) => err instanceof ApiError && err.status === 404;
 
 /** A link target as the server has it: never rejects. */
@@ -1500,7 +1508,7 @@ export const useNotesStore = create<NotesStore>()(
           const key = linkTargetKey(kind, id);
           const known = get().linkTargets[key];
           const stale =
-            opts?.maxAgeMs !== undefined && Date.now() - (known?.checkedAt ?? 0) > opts.maxAgeMs;
+            opts?.maxAgeMs !== undefined && Date.now() - (known?.checkedAt ?? 0) >= opts.maxAgeMs;
           if (known && known.status !== "failed" && !stale) return Promise.resolve();
           const inflight = linkRequests.get(key);
           if (inflight) return inflight;

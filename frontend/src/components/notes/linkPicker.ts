@@ -16,7 +16,7 @@ import {
   searchNotes,
   type NoteSearchHit,
 } from "@/lib/api";
-import { useNotesStore } from "@/store/notes";
+import { refreshLinkTarget, useNotesStore } from "@/store/notes";
 import type { LibraryItem } from "@/types/domain";
 
 type Ed = BlockNoteEditor<any, any, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -331,7 +331,10 @@ export function reopenLinkPicker(editor: Ed, query: string): void {
   editor.transact((tr) => tr.insertText(query));
 }
 
-/** Puts a link chip at the caret, then a space (as the `@` menu does). */
+/** Puts a link chip at the caret, then a space (as the `@` menu does). The
+ * picker read the target fresh: a lookup of it made earlier is redone, so
+ * the new chip never draws a heading it just offered as deleted. */
 export function insertNoteLink(editor: Ed, p: NoteLinkProps): void {
   editor.insertInlineContent([{ type: "noteLink", props: p } as never, " "]);
+  if (p.targetId > 0) refreshLinkTarget(p.targetKind, p.targetId);
 }

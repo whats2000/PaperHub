@@ -18,7 +18,7 @@ import { createBackendSession, listSessionReferences } from "@/lib/api";
 import { laterIso, nowIso, parseBackendTime } from "@/lib/sessionTime";
 import { useMemoriesStore } from "@/store/memories";
 import { useNavStore } from "@/store/nav";
-import { noteMarksChanged, paperMarksChanged, setNoteSessionCreator, useNotesStore } from "@/store/notes";
+import { noteMarksChanged, paperMarksChanged, refreshLinkTarget, setNoteSessionCreator, useNotesStore } from "@/store/notes";
 import { useSlidesStore } from "@/store/slides";
 
 interface ChatState {
@@ -810,7 +810,11 @@ export const useChatStore = create<ChatState>()(
         } else if (name === "notes_changed") {
           // The agent changed a note: an open editor shows it at once.
           const noteId = (data as { note_id?: number }).note_id;
-          if (typeof noteId === "number") noteMarksChanged(noteId);
+          if (typeof noteId === "number") {
+            noteMarksChanged(noteId);
+            // Its `[[` chips in other notes show its headings as they are now.
+            refreshLinkTarget("note", noteId);
+          }
           const notes = useNotesStore.getState();
           // Other notes the recolour redrew (part of this one change, no
           // card of their own): open ones reload too.

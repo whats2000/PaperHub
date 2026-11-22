@@ -42,16 +42,41 @@ export interface NoteLinkProps {
   name: string;
 }
 
+/** A looked-up "gone" (the note, or the heading) older than this is checked
+ * again before a chip draws it dead: the note may have been restored, or
+ * the heading added, since. */
+const DEAD_RECHECK_MS = 5_000;
+
+/** Whether `info` says the link's target (its heading, for one) is gone. */
+function isDead(info: LinkTargetInfo | undefined, kind: "note" | "paper", blockId: string): boolean {
+  if (info?.status === "dead") return true;
+  return kind === "note" && !!blockId && info?.status === "ok" && !(info.blocks ?? []).some((b) => b.id === blockId);
+}
+
 /** The target as known now: the loaded note if open somewhere, else the
- * session's lookup. */
-function useTarget(kind: "note" | "paper", id: number): LinkTargetInfo | undefined {
+ * session's lookup (a "gone" verdict from it checked again once it is a
+ * few seconds old). */
+function useTarget(kind: "note" | "paper", id: number, blockId: string): LinkTargetInfo | undefined {
   const live = useNotesStore((s) => (kind === "note" ? s.notes[id] : undefined));
   const cached = useNotesStore((s) => s.linkTargets[linkTargetKey(kind, id)]);
   const resolve = useNotesStore((s) => s.resolveLinkTarget);
+  const dead = !live && isDead(cached, kind, blockId);
   useEffect(() => {
-    if (!live && id > 0) void resolve(kind, id);
-  }, [live, kind, id, resolve]);
+    if (live || id <= 0) return;
+    // A fresh "gone" stands; an older one is looked up again (once: the
+    // new lookup is fresh).
+    void resolve(kind, id, dead ? { maxAgeMs: DEAD_RECHECK_MS } : undefined);
+  }, [live, kind, id, resolve, dead]);
   return live ? noteTargetInfo(live) : cached;
+}
+
+/** Checks a link the chip shows as gone once more (a cached lookup only;
+ * a loaded note is current): true when it is there after all. */
+async function stillThere(kind: "note" | "paper", id: number, blockId: string): Promise<boolean> {
+  const st = useNotesStore.getState();
+  if (kind === "note" && st.notes[id]) return false;
+  await st.resolveLinkTarget(kind, id, { maxAgeMs: 0 });
+  return !isDead(useNotesStore.getState().linkTargets[linkTargetKey(kind, id)], kind, blockId);
 }
 
 function KindIcon({ kind, noteKind, className }: { kind: "note" | "paper"; noteKind?: NoteTargetKind; className?: string }) {
@@ -79,7 +104,7 @@ export function NoteLinkView({
 }) {
   const { t } = useTranslation();
   const { targetKind, targetId, blockId, sectionKey, label, name } = link;
-  const info = useTarget(targetKind, targetId);
+  const info = useTarget(targetKind, targetId, blockId);
   const isNote = targetKind === "note";
   const blocks = info?.status === "ok" ? (info.blocks ?? []) : [];
   const heading = isNote && blockId ? blocks.find((b) => b.id === blockId) : undefined;
@@ -129,11 +154,19 @@ export function NoteLinkView({
   const hover = (on: boolean) => {
     clearTimeout(timer.current);
     if (editing) return;
+    // A chip drawn dead from an older lookup: hovering checks it again.
+    if (on && dead && targetId > 0 && !useNotesStore.getState().notes[targetId]) {
+      void useNotesStore.getState().resolveLinkTarget(targetKind, targetId, { maxAgeMs: DEAD_RECHECK_MS });
+    }
     timer.current = setTimeout(() => setPreview(on), on ? OPEN_DELAY_MS : CLOSE_DELAY_MS);
   };
 
-  const open = () => {
-    if (dead || targetId <= 0) return;
+  const open = async () => {
+    if (targetId <= 0) return;
+    // A dead verdict may be out of date (a heading added, a note restored
+    // since): check once more before refusing; still gone stays quiet (the
+    // chip already says so).
+    if (dead && !(await stillThere(targetKind, targetId, blockId))) return;
     setPreview(false);
     void openNoteLink(link).then((outcome) => {
       // Plain notices, never an error: deleted meanwhile (the chip turns
@@ -148,7 +181,7 @@ export function NoteLinkView({
         );
       } else if (outcome === "unreachable") {
         toast(t("notes:link.cantOpen", "Can't open this right now"), {
-          action: { label: t("notes:link.retry", "Retry"), onClick: open },
+          action: { label: t("notes:link.retry", "Retry"), onClick: () => void open() },
         });
       }
     });
@@ -233,7 +266,7 @@ export function NoteLinkView({
           if (editing) e.preventDefault();
         }}
         onClick={() => {
-          if (!editing) open();
+          if (!editing) void open();
         }}
         onFocus={() => {
           clearTimeout(timer.current);
@@ -246,7 +279,7 @@ export function NoteLinkView({
           if (e.key === "Enter") {
             e.preventDefault();
             e.stopPropagation();
-            open();
+            void open();
           } else if (e.key === "Tab" && !e.shiftKey && preview) {
             // The preview is in a portal: Tab steps into its buttons.
             const first = previewBox.current?.querySelector<HTMLElement>("button");
@@ -294,7 +327,7 @@ export function NoteLinkView({
               <button
                 type="button"
                 className="inline-flex h-5 shrink-0 items-center gap-0.5 rounded px-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                onClick={open}
+                onClick={() => void open()}
               >
                 <ArrowUpRight className="size-3" aria-hidden />
                 {t("notes:link.open", "Open")}

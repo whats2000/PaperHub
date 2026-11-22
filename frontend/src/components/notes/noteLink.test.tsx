@@ -267,6 +267,50 @@ describe("a [[ link chip", () => {
     expect(errorFn).not.toHaveBeenCalled();
   });
 
+  it("a click on a dead chip checks again first: a heading added since opens", async () => {
+    note12();
+    seed([link({ blockId: "h1" })]);
+    useNotesStore.setState({
+      linkTargets: {
+        "note:12": { status: "ok", checkedAt: Date.now(), noteKind: "paper", targetId: 47, name: "RoboTTT", blocks: [] },
+      },
+    });
+    mount();
+    await waitFor(() => expect(chip()).toHaveAttribute("data-dead", "true"));
+    fireEvent.click(chip()!);
+    await waitFor(() => expect(chip()).not.toHaveAttribute("data-dead", "true"));
+    expect(chip()!.textContent).toBe("RoboTTT › 閘控");
+    await waitFor(() =>
+      expect(useNotesPaneStore.getState().request).toMatchObject({ noteId: 12, blockId: "h1" }),
+    );
+    expect(toastFn).not.toHaveBeenCalled();
+  });
+
+  it("a dead verdict a few seconds old is checked again when drawn: a restored note shows live", async () => {
+    note12();
+    seed([link()]);
+    useNotesStore.setState({ linkTargets: { "note:12": { status: "dead", checkedAt: Date.now() - 30_000 } } });
+    mount();
+    await waitFor(() => expect(chip()?.textContent).toBe("RoboTTT"));
+    expect(chip()).not.toHaveAttribute("data-dead", "true");
+  });
+
+  it("an agent change to the target note refreshes its looked-up outline", async () => {
+    note12();
+    seed([link({ blockId: "h1" })]);
+    useNotesStore.setState({
+      linkTargets: {
+        "note:12": { status: "ok", checkedAt: Date.now(), noteKind: "paper", targetId: 47, name: "RoboTTT", blocks: [] },
+      },
+    });
+    useChatStore.setState({ sessions: [{ id: 1, backend_session_id: 9, title: "c", messages: [] }] });
+    mount();
+    await waitFor(() => expect(chip()).toHaveAttribute("data-dead", "true"));
+    act(() => useChatStore.getState().applyAgentEvent(1, 5, "notes_changed", { note_id: 12 }));
+    await waitFor(() => expect(chip()).not.toHaveAttribute("data-dead", "true"));
+    expect(chip()!.textContent).toBe("RoboTTT › 閘控");
+  });
+
   it("Edit display text starts empty, never from the placeholder", async () => {
     server.use(http.get(`${API_BASE_URL}/notes/12`, () => new Promise(() => undefined)));
     seed([link({ name: "" })]);
