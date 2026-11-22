@@ -72,6 +72,21 @@ export function tableSelection(
   };
 }
 
+/** The caret back in the cell after a cell menu or picker closes with Esc,
+ * the editor focused so typing and Backspace work at once: a caret stays
+ * where it was; a cell selection becomes a caret at the end of its anchor
+ * cell's text. */
+export function caretIntoCell(view: EditorView) {
+  const sel = view.state.selection;
+  if (sel instanceof CellSelection) {
+    const cellPos = sel.$anchorCell.pos;
+    const cell = view.state.doc.nodeAt(cellPos);
+    // The cell's close token, then its last paragraph's.
+    if (cell) view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, cellPos + cell.nodeSize - 2)));
+  }
+  view.focus();
+}
+
 /** Selects the grid rectangle from cell `a` to cell `b` ([row, column]) of
  * the first table around the selection, or of the document's first table. */
 export function selectCells(editor: unknown, a: [number, number], b: [number, number]) {

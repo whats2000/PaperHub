@@ -118,6 +118,13 @@ function caretIn(pm: PM, r: number, c: number) {
   });
 }
 
+/** The caret: a text selection's cell text and offset in it (null for any other selection). */
+function caret(pm: PM): { text: string; offset: number } | null {
+  const sel = pm.editor.view.state.selection;
+  if (!(sel instanceof TextSelection) || !sel.empty || sel.$from.parent.type.name !== "tableParagraph") return null;
+  return { text: sel.$from.parent.textContent, offset: sel.$from.parentOffset };
+}
+
 const HIDDEN = { hidden: true } as const;
 const handle = () => document.querySelector<HTMLButtonElement>(".note-cell-handle")!;
 const outline = () => document.querySelector<HTMLElement>(".note-cell-outline")!;
@@ -272,7 +279,26 @@ describe("the cell menu, from the handle", () => {
     expect(document.activeElement).toBe(pm);
   });
 
-  it("Ctrl+/ in a cell opens it on its first item; arrows, Home and End move; Esc returns to the handle", async () => {
+  it("mouse-opened on a cell selection: Esc puts the caret at the end of the anchor cell's text", async () => {
+    const pm = mount([["a", "b"], ["12", "3"]]);
+    act(() => {
+      pm.focus();
+      selectCells({ _tiptapEditor: { view: pm.editor.view } }, [1, 0], [1, 1]);
+    });
+    await waitFor(() => expect(handle()).toHaveAttribute("data-on"));
+    act(() => {
+      fireEvent.click(handle(), { detail: 1 });
+    });
+    await screen.findByRole("menu", HIDDEN);
+    act(() => {
+      fireEvent.keyDown(pm, { key: "Escape" });
+    });
+    await waitFor(() => expect(screen.queryByRole("menu", HIDDEN)).toBeNull());
+    await waitFor(() => expect(caret(pm)).toEqual({ text: "12", offset: 2 }));
+    expect(document.activeElement).toBe(pm);
+  });
+
+  it("Ctrl+/ in a cell opens it on its first item; arrows, Home and End move; Esc puts the caret back in the cell", async () => {
     const pm = mount();
     caretIn(pm, 1, 0);
     await waitFor(() => expect(handle()).toHaveAttribute("data-on"));
@@ -303,7 +329,9 @@ describe("the cell menu, from the handle", () => {
       fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     });
     await waitFor(() => expect(screen.queryByRole("menu", HIDDEN)).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(handle()));
+    // Where it was (caretIn: before the cell's text), focused: typing goes on at once.
+    await waitFor(() => expect(document.activeElement).toBe(pm));
+    expect(caret(pm)).toEqual({ text: "1", offset: 0 });
   });
 
   it("Enter on the focused handle opens it from the keyboard", async () => {
@@ -363,13 +391,14 @@ describe("the cell menu, from the handle", () => {
     });
     const dialog = await screen.findByRole("dialog", { name: /Borders · 1×1 cells/, ...HIDDEN });
     expect(within(dialog).getAllByRole("button", HIDDEN).length).toBeGreaterThanOrEqual(12);
-    // The handle stays while the picker is open; Esc returns to it.
+    // The handle stays while the picker is open; Esc puts the caret back in the cell.
     expect(handle()).toHaveAttribute("data-on");
     await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
     act(() => {
       fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     });
-    await waitFor(() => expect(document.activeElement).toBe(handle()));
+    await waitFor(() => expect(document.activeElement).toBe(pm));
+    expect(caret(pm)).toEqual({ text: "2", offset: 0 });
     expect(handle()).toHaveAttribute("data-on");
   });
 

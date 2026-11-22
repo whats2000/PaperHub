@@ -6,8 +6,8 @@
  * clears them when they already all are; a set the selection has no lines
  * of is disabled. Lines inside a merged cell are never drawn. Each click is
  * one undo step. Arrow keys move across the toolbar (wrapping), Home /
- * End jump, Enter applies; Escape closes back to the ⋮ on the selection,
- * which it opens beside (`placement`), as the cell menu does.
+ * End jump, Enter applies; Escape puts the caret back in the cell, as the
+ * cell menu's does. It opens beside the ⋮ on the selection (`placement`).
  */
 import { closeHistory } from "@tiptap/pm/history";
 import type { EditorView } from "@tiptap/pm/view";
@@ -32,6 +32,7 @@ import {
   type Borders,
   type Selection,
 } from "./tableBorders";
+import { caretIntoCell } from "./tableMerge";
 
 interface PickerEditor {
   getBlock: (id: string) => { type: string; props: unknown; content?: unknown } | undefined;
@@ -148,6 +149,7 @@ export function TableBordersPicker({
   const [weight, setWeight] = useState<1 | 2>(1);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const firstUsable = useRef<HTMLButtonElement | null>(null);
+  const escaped = useRef(false);
 
   const block = e.getBlock(blockId);
   const content = block?.type === "table" ? (block.content as TableContent) : null;
@@ -193,8 +195,10 @@ export function TableBordersPicker({
   return (
     <Popover
       open={open}
-      onOpenChange={(o) => {
-        if (!o) onClose();
+      onOpenChange={(o, details) => {
+        if (o) return;
+        escaped.current = details.reason === "escape-key";
+        onClose();
       }}
     >
       <PopoverContent
@@ -207,7 +211,11 @@ export function TableBordersPicker({
         data-note-cell-popup=""
         aria-label={t("notes:borders.title", "Borders · {{rows}}×{{cols}} cells", { rows: nr, cols: nc })}
         initialFocus={firstUsable}
-        finalFocus={() => (anchor.isConnected ? anchor : true)}
+        finalFocus={() => {
+          if (!escaped.current) return anchor.isConnected ? anchor : true;
+          caretIntoCell(e._tiptapEditor.view);
+          return false;
+        }}
         className="w-[252px] origin-(--transform-origin) p-2 motion-reduce:animate-none"
       >
         {b && content ? (

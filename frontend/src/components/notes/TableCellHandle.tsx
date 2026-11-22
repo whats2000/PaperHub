@@ -11,8 +11,9 @@
  * (or over) the selection, never on it, growing from the pill. Enter or
  * Space on the focused pill, or Ctrl/⌘ + / (also the context menu key and
  * Shift + F10) in a cell, open it from the keyboard: arrows, Home and End
- * move, Esc closes back to the pill. Opened with the mouse, the caret stays
- * in the cell, and Esc leaves it there. A second click on the pill closes it.
+ * move. Esc, however it was opened, puts the caret back in the cell (a cell
+ * selection's: at the end of its anchor cell's text), so typing and
+ * Backspace work at once. A second click on the pill closes it.
  *
  * During a mouse drag in the editor the pill takes no pointer events, so a
  * text drag ending over it is never turned into a cell selection.
@@ -59,6 +60,7 @@ import {
   alignSelectedColumns,
   canMerge,
   canSplit,
+  caretIntoCell,
   clearCells,
   deleteSelectedRows,
   filledCells,
@@ -118,7 +120,7 @@ function setOn(el: HTMLElement, on: boolean) {
   if (el.hasAttribute("data-on") !== on) el.toggleAttribute("data-on", on);
 }
 
-type After = "editor" | "handle" | "stay";
+type After = "editor" | "caret" | "handle" | "stay";
 
 type Command = "merge" | "split" | "borders" | "clear" | "above" | "below" | "align-left" | "align-center" | "align-right" | "delete";
 
@@ -290,7 +292,7 @@ export function TableCellHandle({
       if (openRef.current && e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        close("stay");
+        close("caret");
         return;
       }
       if (!isCellMenuKey(e) || !handleRef.current?.hasAttribute("data-on")) return;
@@ -524,7 +526,7 @@ export function TableCellHandle({
             // A press on the handle is its own toggle (its click closes).
             const target = details.event?.target;
             if (details.reason === "outside-press" && target instanceof Node && handleRef.current?.contains(target)) return;
-            close(details.reason === "escape-key" ? "handle" : "stay");
+            close(details.reason === "escape-key" ? "caret" : "stay");
           }}
         >
           <PopoverContent
@@ -542,7 +544,9 @@ export function TableCellHandle({
               returning.current = false;
               queueMicrotask(layout);
               if (go === "handle" && handleRef.current?.hasAttribute("data-on")) return handleRef.current;
-              if (go === "editor" || go === "handle") focusEditor();
+              const view = editor.prosemirrorView as EditorView | undefined;
+              if (go === "caret" && view) caretIntoCell(view);
+              else if (go === "editor" || go === "handle") focusEditor();
               return false;
             }}
             onKeyDown={move}
