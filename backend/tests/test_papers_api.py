@@ -215,8 +215,10 @@ async def test_get_library_q_lists_title_matches_first(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A paper named by the query comes before newer papers that only
-    mention it in their abstract (the notes `[[LoRA` picker showed three
-    abstract matches above "LoRA: ..." and Enter linked the wrong one)."""
+    mention it in their abstract, and a title where the query starts a
+    word before one where it sits inside a word (the notes `[[LoRA` picker
+    listed "...an ExpLORAtion..." above "LoRA: ..." and Enter linked the
+    wrong paper)."""
     db_path = await _get_db_path(tmp_path, monkeypatch)
 
     async with aiosqlite.connect(db_path) as conn:
@@ -230,6 +232,11 @@ async def test_get_library_q_lists_title_matches_first(
             conn, content_key="arxiv:2601.00001", title="Beyond Language Modeling",
             arxiv_id="2601.00001", year=2026, abstract="we fine-tune with LoRA",
         )
+        # "explORAtion" holds "lora" inside a word: a weaker title match.
+        await _seed_paper_content(
+            conn, content_key="arxiv:2601.00002", title="An Exploration of Pretraining",
+            arxiv_id="2601.00002", year=2026, abstract="x",
+        )
 
     app = create_app()
     transport = ASGITransport(app=app)
@@ -238,7 +245,8 @@ async def test_get_library_q_lists_title_matches_first(
 
     assert r.status_code == 200
     assert [i["title"] for i in r.json()] == [
-        "LoRA: Low-Rank Adaptation", "Beyond Language Modeling"]
+        "LoRA: Low-Rank Adaptation", "An Exploration of Pretraining",
+        "Beyond Language Modeling"]
 
 
 async def test_post_from_library_idempotent(

@@ -328,6 +328,19 @@ async def upload_paper(
     )
 
 
+def _title_rank(title: str, tokens: list[str]) -> int:
+    """0: every (normalized) token starts a word of the title; 1: the
+    normalized title holds every token; 2: neither (an abstract match)."""
+    from paperhub.db.connection import norm_for_match
+
+    words = [norm_for_match(w) for w in re.split(r"[^\w]+", title)]
+    tail = ["".join(words[i:]) for i in range(len(words))]
+    if all(any(t.startswith(tok) for t in tail if t) for tok in tokens):
+        return 0
+    whole = norm_for_match(title)
+    return 1 if all(tok in whole for tok in tokens) else 2
+
+
 @router.get("/library", response_model=list[LibraryItem])
 async def list_library(
     session_id: int = Query(...),
@@ -346,14 +359,13 @@ async def list_library(
     are whitespace-split and AND-joined across title+abstract. The
     LLM-driven path (``search_library_dispatch``) keeps FTS5 keyword
     semantics; this endpoint is human-facing, where forgiving substring
-    is expected. Rows whose title holds every token come first, then the
-    newest.
+    is expected. With `q`, a title where every token starts a word ranks
+    first, then a title holding every token, then the rest; each newest
+    first.
     """
     where = ["pc.id NOT IN (SELECT paper_content_id FROM papers WHERE session_id = ?)"]
     args: list[int | str] = [session_id]
-    # Papers whose title holds every token come first: a paper named by the
-    # query must not sink below newer ones that only mention it.
-    in_title: list[str] = []
+    tokens: list[str] = []
     if q:
         from paperhub.db.connection import norm_for_match
 
@@ -372,21 +384,24 @@ async def list_library(
                 "OR paperhub_norm(pc.abstract) LIKE ?)"
             )
             args.extend([pattern, pattern])
-            in_title.append(pattern)
-    title_first = (
-        "(" + " AND ".join("paperhub_norm(pc.title) LIKE ?" for _ in in_title) + ") DESC, "
-        if in_title else ""
-    )
+            tokens.append(normalized)
     sql = (
         "SELECT pc.id, pc.arxiv_id, pc.title, pc.abstract, pc.year, pc.is_private "
         f"FROM paper_content pc WHERE {' AND '.join(where)} "
-        f"ORDER BY {title_first}pc.year DESC NULLS LAST, pc.id DESC "
-        "LIMIT ? OFFSET ?"
+        "ORDER BY pc.year DESC NULLS LAST, pc.id DESC"
     )
-    args.extend([*in_title, limit, offset])
+    if not tokens:
+        sql += " LIMIT ? OFFSET ?"
+        args.extend([limit, offset])
     settings = load_settings()
     async with open_db(settings.db_path) as conn, conn.execute(sql, args) as cur:
-        rows = await cur.fetchall()
+        rows = list(await cur.fetchall())
+    if tokens:
+        # A paper named by the query must not sink below newer ones that
+        # only mention it ("[[LoRA" vs "...an ExpLORAtion..."); the sort is
+        # stable, so each tier stays newest first.
+        rows.sort(key=lambda r: _title_rank(r[2] or "", tokens))
+        rows = rows[offset:offset + limit]
     return [
         LibraryItem(
             paper_content_id=int(r[0]),
