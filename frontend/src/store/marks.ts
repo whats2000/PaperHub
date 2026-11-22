@@ -29,7 +29,7 @@ import { chunkMap, type ChunkMap } from "@/lib/marks/anchor";
 import { citeBlockOf } from "@/lib/marks/cites";
 import { livePieceIndexes, type PenMark } from "@/lib/marks/pieces";
 import { DEFAULT_PALETTE } from "@/lib/marks/palette";
-import { onMarkBlocksChanged, useNotesStore } from "@/store/notes";
+import { onMarkBlocksChanged, onPaperMarksChanged, useNotesStore } from "@/store/notes";
 import type {
   CiteAt,
   Mark,
@@ -595,6 +595,12 @@ export const useMarksStore = create<MarksState>()(
           record(action);
           announceDeleted(action);
         }
+      });
+
+      /** A mark changed colour or style (from any note, e.g. an agent's
+       * edit of a chat note's copy): its paper's marks are fetched again. */
+      onPaperMarksChanged((paperIds) => {
+        for (const pid of paperIds) if (get().marksByPaper[pid]) resync(pid);
       });
 
       // Ctrl+Z and the notice's Undo bring marks back through it.

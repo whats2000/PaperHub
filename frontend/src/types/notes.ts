@@ -146,6 +146,30 @@ export interface RejectedOp {
    * an op naming a block an earlier op of the call failed to make. */
   reason: "changed_since_base" | "missing" | "invalid" | "stale" | "depends_on_failed";
   current: NoteBlock | null;
+  /** Why an `invalid` op was refused (e.g. an unknown mark colour). */
+  hint?: string;
+}
+
+/** A mark's colour / style change a call wrote to the mark (the mark is the
+ * one place they live; its blocks draw them). */
+export interface MarkRedraw {
+  mark_id: string;
+  paper_id: number;
+  /** The block whose change recoloured the mark. */
+  block_id: string;
+  color?: { from: string | null; to: string | null };
+  style?: { from: string | null; to: string | null };
+  /** The other blocks showing the mark, redrawn with it. */
+  blocks: string[];
+}
+
+/** That change's redraw of the mark's copies in another note (a change set
+ * there): an open editor of that note reloads. */
+export interface NoteRedrawn {
+  note_id: number;
+  revision: number;
+  change_set_id: string;
+  blocks: string[];
 }
 
 export interface ApplyResult {
@@ -163,6 +187,10 @@ export interface ApplyResult {
    * block pasted from another note keeps its id): the id sent and the one
    * the block got. The client re-keys the block. */
   renamed?: { from: string; to: string }[];
+  /** Marks this call recoloured or restyled. */
+  marks?: MarkRedraw[];
+  /** Other notes those marks were redrawn in. */
+  redrawn?: NoteRedrawn[];
 }
 
 /** One line of a change set's Details. */

@@ -1,3 +1,5 @@
+import type { MarkRedraw } from "./notes";
+
 export type Intent =
   | "paper_search"
   | "paper_suggest"
@@ -341,6 +343,8 @@ export interface NotesChangedData {
   note_title: string;
   summary: NotesChangeSummary;
   revision: number;
+  /** Marks the change recoloured: the reader redraws their papers. */
+  marks?: MarkRedraw[];
 }
 
 /** A tool UI event of an agent turn, live (SSE) or replayed (agent_events). */

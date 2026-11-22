@@ -713,6 +713,14 @@ describe("a mark's block deleted in the note (live bug A)", () => {
     noteMarksChanged(7);
     await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]).toEqual([]));
   });
+
+  it("a mark recoloured from another note resyncs its paper (Task 16)", async () => {
+    server.use(http.get(`${API_BASE_URL}/marks`, () => HttpResponse.json([{ ...MARK, note_id: 7, color: "blue" }])));
+    useMarksStore.setState({ marksByPaper: { 3: [{ ...MARK, note_id: 7 }], 4: [] } });
+    const { paperMarksChanged } = await import("@/store/notes");
+    paperMarksChanged([3, 99]);
+    await waitFor(() => expect(useMarksStore.getState().marksByPaper[3]?.[0]?.color).toBe("blue"));
+  });
 });
 
 describe("a mark action on stale state (409/404) resyncs quietly", () => {

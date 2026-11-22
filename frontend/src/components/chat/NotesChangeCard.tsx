@@ -20,7 +20,7 @@ import { prefersReducedMotion } from "@/lib/motion";
 import { diffText } from "@/lib/notes/textDiff";
 import { truncatedTitle } from "@/lib/truncatedTitle";
 import { useNotesPaneStore } from "@/store/notesPane";
-import { noteMarksChanged, useNotesStore } from "@/store/notes";
+import { followRedraws, noteMarksChanged, useNotesStore } from "@/store/notes";
 import type { NotesChangedData } from "@/types/domain";
 import type { ChangeSetChange, ChangeSetStatus } from "@/types/notes";
 
@@ -89,11 +89,13 @@ export function NotesChangeCard({ data }: { data: NotesChangedData }) {
       .then(async () => {
         if (target.status === "applied") {
           const res = await undoChangeSet(target.id);
+          followRedraws(res, data.note_id);
           // Set on Undo only: the line keeps its text while it folds away.
           setKept(res.rejected.length);
           setLive({ id: target.id, status: "undone" });
         } else {
           const res = await reapplyChangeSet(target.id);
+          followRedraws(res, data.note_id);
           if (res.change_set_id === null) {
             // Nothing was put back: the change stays undone.
             refreshNote(data.note_id);

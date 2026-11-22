@@ -372,6 +372,34 @@ export function noteMarksChanged(noteId: number): void {
   markBlockListeners.forEach((fn) => fn(noteId, null));
 }
 
+/** Who redraws the reader when marks change colour (the marks store). */
+type PaperMarksListener = (paperIds: readonly number[]) => void;
+const paperMarksListeners = new Set<PaperMarksListener>();
+
+/** Registers `fn` to hear of papers whose marks changed colour or style. */
+export function onPaperMarksChanged(fn: PaperMarksListener): () => void {
+  paperMarksListeners.add(fn);
+  return () => paperMarksListeners.delete(fn);
+}
+
+/** A mark of these papers was recoloured or restyled (from any note): the
+ * reader fetches their marks again. */
+export function paperMarksChanged(paperIds: readonly number[]): void {
+  if (!paperIds.length) return;
+  paperMarksListeners.forEach((fn) => fn(paperIds));
+}
+
+/** After a change that recoloured marks (an agent edit, an accept, an undo):
+ * the other open notes the server redrew reload, and the reader redraws the
+ * marks' papers. `own` is the note the caller reloads itself. */
+export function followRedraws(res: Pick<ApplyResult, "marks" | "redrawn">, own?: number): void {
+  const notes = useNotesStore.getState();
+  for (const r of res.redrawn ?? []) {
+    if (r.note_id !== own && notes.notes[r.note_id]) void notes.loadNote(r.note_id).catch(() => undefined);
+  }
+  paperMarksChanged([...new Set((res.marks ?? []).map((m) => m.paper_id))]);
+}
+
 /** After a saved burst: blocks it deleted, and whether it put a mark block
  * back (the editor's undo of a delete revives the mark on the server). */
 function tellMarkBlocks(noteId: number, ops: readonly NoteOp[], applied: ReadonlySet<string>): void {
@@ -940,6 +968,12 @@ export const useNotesStore = create<NotesStore>()(
         const applied = new Set(res.applied);
         for (const id of applied) rebuilds.delete(id);
         tellMarkBlocks(noteId, burst.ops, applied);
+        if (res.marks?.length) {
+          // A mark changed colour: its other blocks here were redrawn by the
+          // server, so this note is shown as saved; other notes follow.
+          void reload(noteId).catch(() => undefined);
+          followRedraws(res, noteId);
+        }
         set((s) => {
           const cur = s.notes[noteId];
           if (!cur) return {};
@@ -1417,6 +1451,7 @@ export const useNotesStore = create<NotesStore>()(
           const res = await postSuggestionDecision(suggestionId, accept);
           await exit?.(res);
           await reload(noteId);
+          followRedraws(res, noteId);
           return res;
         },
 

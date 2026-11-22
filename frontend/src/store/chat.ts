@@ -18,7 +18,7 @@ import { createBackendSession, listSessionReferences } from "@/lib/api";
 import { laterIso, nowIso, parseBackendTime } from "@/lib/sessionTime";
 import { useMemoriesStore } from "@/store/memories";
 import { useNavStore } from "@/store/nav";
-import { noteMarksChanged, setNoteSessionCreator, useNotesStore } from "@/store/notes";
+import { noteMarksChanged, paperMarksChanged, setNoteSessionCreator, useNotesStore } from "@/store/notes";
 import { useSlidesStore } from "@/store/slides";
 
 interface ChatState {
@@ -811,6 +811,12 @@ export const useChatStore = create<ChatState>()(
           // The agent changed a note: an open editor shows it at once.
           const noteId = (data as { note_id?: number }).note_id;
           if (typeof noteId === "number") noteMarksChanged(noteId);
+          // A recoloured mark may live on another note's paper (a chat
+          // note's copy): its reader redraws too.
+          const marks = (data as { marks?: { paper_id?: unknown }[] }).marks ?? [];
+          paperMarksChanged([
+            ...new Set(marks.flatMap((m) => (typeof m.paper_id === "number" ? [m.paper_id] : []))),
+          ]);
           const notes = useNotesStore.getState();
           if (typeof noteId === "number" && notes.notes[noteId]) {
             void notes.loadNote(noteId).catch(() => undefined);
