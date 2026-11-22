@@ -12,7 +12,7 @@ import { API_BASE_URL } from "@/lib/api";
 import { clearPendingNoteOps, useNotesStore } from "@/store/notes";
 import type { ApplyResult, NoteBlock, NoteOpsBody, TableContent } from "@/types/notes";
 
-import { cleanPastedTable, notePasteHandler, pickAlignments, tableClean, tableKeys } from "./tableKeys";
+import { cleanPastedTable, insertNoteTable, notePasteHandler, pickAlignments, tableClean, tableKeys } from "./tableKeys";
 import { createCaptionHosts, partRequests, tableCaptions } from "./tableCaptions";
 import { shrinkAway, tableMotion } from "./tableMotion";
 import { tableBorderView } from "./tableBorderView";
@@ -747,7 +747,7 @@ describe("table caption and notes", () => {
     seed([seededTable]);
     const pm = mountEditor();
     const menu = await openTableMenu(pm);
-    expect(items(menu)).toEqual(["Header row", "Header column", "Add caption", "Add notes"]);
+    expect(items(menu).slice(2, 6)).toEqual(["Header row", "Header column", "Add caption", "Add notes"]);
     act(() => {
       fireEvent.click(within(menu).getByText("Add caption"));
     });
@@ -830,7 +830,7 @@ describe("table caption and notes", () => {
     seed([blk("t", { ...seededTable, props: { caption: "C", notes: "N" } })]);
     const pm = mountEditor();
     let menu = await openTableMenu(pm);
-    expect(items(menu)).toEqual(["Header row", "Header column", "Remove caption", "Remove notes"]);
+    expect(items(menu).slice(2, 6)).toEqual(["Header row", "Header column", "Remove caption", "Remove notes"]);
     act(() => {
       fireEvent.click(within(menu).getByText("Remove notes"));
     });
@@ -1172,5 +1172,77 @@ describe("table borders drawn from the table's lines", () => {
     expect(tables.map((t) => t.getAttribute("data-table-preset"))).toEqual(["notion", "paper"]);
     expect(indexCss).toMatch(/\[data-table-preset="notion"\][^{]*th\s*\{[^}]*background/);
     expect(indexCss).not.toMatch(/data-table-style/);
+  });
+});
+
+describe("per-table presets (H5b.1)", () => {
+  afterEach(() => {
+    useNotesStore.setState({ tablePreset: "paper", tableGuides: true });
+  });
+
+  const twoTables = () => [
+    seededTable,
+    blk("u", {
+      type: "table",
+      content: { type: "tableContent", columnWidths: [null, null], headerRows: 1, rows: [{ cells: ["x", "y"] }, { cells: ["3", "4"] }] },
+    }),
+  ];
+  const propsOf = (pm: PM, id: string) => {
+    const el = pm.querySelector(`[data-id="${id}"] [data-content-type="table"]`);
+    return el;
+  };
+
+  it("the table ⋯ menu shows Paper first; Notion re-draws only that table and becomes the default", async () => {
+    seed(twoTables());
+    const pm = mountEditor();
+    hoverCell(pm, 1, 1);
+    await screen.findByRole("button", { name: "Column options" });
+    act(() => {
+      fireEvent.click(tableOptions());
+    });
+    const menu = await screen.findByRole("menu", HIDDEN);
+    const items = [...menu.querySelectorAll("[role^=menuitem]")].map((e) => e.textContent ?? "");
+    expect(items[0]).toMatch(/^Paper/);
+    expect(items[1]).toMatch(/^Notion/);
+    expect(items.at(-1)).toMatch(/Hide edit guides/);
+    const paper = within(menu).getByRole("menuitemcheckbox", { name: /^Paper/, ...HIDDEN });
+    expect(paper).toHaveAttribute("aria-checked", "true");
+    act(() => {
+      fireEvent.click(within(menu).getByRole("menuitemcheckbox", { name: /^Notion/, ...HIDDEN }));
+    });
+    await waitFor(() => expect(propsOf(pm, "t")).toHaveAttribute("data-table-preset", "notion"));
+    expect(propsOf(pm, "u")).toHaveAttribute("data-table-preset", "paper");
+    expect(useNotesStore.getState().tablePreset).toBe("notion");
+  });
+
+  it("/table and a pasted table take the last preset chosen", () => {
+    useNotesStore.setState({ tablePreset: "notion" });
+    const slash = makeEditor([], [{ id: "p0", type: "paragraph", content: "" }]);
+    insertNoteTable(slash);
+    const inserted = slash.document.find((b) => b.type === "table");
+    expect(parseBorders((inserted?.props as Record<string, unknown>).borders)).toEqual(presetLines(3, 3, 1, "notion"));
+
+    const editor = makeEditor([], [{ id: "p", type: "paragraph", content: "" }], { pasteHandler: notePasteHandler });
+    paste(editor, { "text/html": "<table><tr><th>a</th><th>b</th></tr><tr><td>1</td><td>2</td></tr></table>" });
+    const pasted = editor.document.find((b) => b.type === "table");
+    expect(parseBorders((pasted?.props as Record<string, unknown>).borders)?.preset).toBe("notion");
+  });
+
+  it("Hide edit guides turns the guides off for every table, and is remembered", async () => {
+    seed([seededTable]);
+    const pm = mountEditor();
+    const root = screen.getByTestId("note-editor");
+    expect(root).toHaveAttribute("data-guides", "on");
+    hoverCell(pm, 1, 1);
+    await screen.findByRole("button", { name: "Column options" });
+    act(() => {
+      fireEvent.click(tableOptions());
+    });
+    const menu = await screen.findByRole("menu", HIDDEN);
+    act(() => {
+      fireEvent.click(within(menu).getByText("Hide edit guides"));
+    });
+    await waitFor(() => expect(root).toHaveAttribute("data-guides", "off"));
+    expect(useNotesStore.getState().tableGuides).toBe(false);
   });
 });

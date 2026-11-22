@@ -38,12 +38,15 @@ import {
 import { useMemo, useRef, type FC } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useNotesStore } from "@/store/notes";
 import type { TableContent } from "@/types/notes";
 
 import type { TablePart } from "./noteFind";
 import { partRequests } from "./tableCaptions";
 import { columnAlignment, deleteRowOrColumn, setColumnAlignment, type Alignment } from "./tableKeys";
 import { shrinkAway } from "./tableMotion";
+import { bordersOf, dumpBorders, presetLines, tableShape, type Preset } from "./tableBorders";
+import { headerDepth } from "./tableGrid";
 
 const ICON = "size-4";
 
@@ -148,7 +151,19 @@ const NoCellHandle = () => null;
 /** Floating 6 px above the table's top right corner. */
 const ABOVE = { name: "paperhubAbove", fn: ({ x, y }: { x: number; y: number }) => ({ x, y: y - 6 }) };
 
-/** The table's ⋯ (top right): header row / header column. */
+/** One preset in the table's ⋯: its name over its hint. */
+function PresetLabel({ name, hint }: { name: string; hint: string }) {
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span>{name}</span>
+      <small className="max-w-[16rem] text-[11px] whitespace-normal text-muted-foreground">{hint}</small>
+    </span>
+  );
+}
+
+/** The table's ⋯ (top right): its preset (Paper / Notion, also the next
+ * new table's default), header row / header column, caption and notes,
+ * and the edit guides switch. */
 function TableMoreMenu() {
   const { t } = useTranslation();
   const C = useComponentsContext()!;
@@ -172,8 +187,14 @@ function TableMoreMenu() {
   const headerCol = Boolean(content?.headerCols);
   const setHeader = (key: "headerRows" | "headerCols", on: boolean) => {
     if (!block) return;
-    editor.updateBlock(block.id, { type: "table", content: { ...block.content, [key]: on ? 1 : undefined } } as never);
+    const now = (editor.getBlock(block.id)?.content ?? block.content) as unknown as TableContent;
+    // The header row covers every row a row-0 cell spans into.
+    const value = on ? (key === "headerRows" ? headerDepth({ ...now, headerRows: 1 }) : 1) : undefined;
+    editor.updateBlock(block.id, { type: "table", content: { ...now, [key]: value } } as never);
   };
+  const tableGuides = useNotesStore((s) => s.tableGuides);
+  const setTableGuides = useNotesStore((s) => s.setTableGuides);
+  const setTablePreset = useNotesStore((s) => s.setTablePreset);
   // The table's caption / notes as they are now (the handles' block is a
   // snapshot from the last hover).
   const blockId = block?.id;
@@ -181,9 +202,23 @@ function TableMoreMenu() {
     editor,
     selector: ({ editor: e }) => {
       const props = blockId ? (e.getBlock(blockId)?.props as Record<string, unknown> | undefined) : undefined;
-      return { caption: Boolean(props?.caption), notes: Boolean(props?.notes) };
+      const got = blockId ? e.getBlock(blockId) : undefined;
+      const preset =
+        got?.type === "table"
+          ? bordersOf(props ?? {}, got.content as unknown as TableContent).preset
+          : ("paper" as Preset);
+      return { caption: Boolean(props?.caption), notes: Boolean(props?.notes), preset };
     },
   });
+  // A preset re-draws this table and becomes the next new table's default.
+  const choosePreset = (p: Preset) => {
+    if (!block) return;
+    const now = editor.getBlock(block.id)?.content as unknown as TableContent | undefined;
+    if (!now) return;
+    const s = tableShape(now);
+    editor.updateBlock(block.id, { props: { borders: dumpBorders(presetLines(s.rows, s.cols, s.headerRows, p)) } });
+    setTablePreset(p);
+  };
   // "Add …" opens the part with the caret in it: the closing menu must not
   // hand the focus back to the editor.
   const keepFocus = useRef(false);
@@ -244,6 +279,26 @@ function TableMoreMenu() {
             </C.TableHandle.Root>
           </C.Generic.Menu.Trigger>
           <C.Generic.Menu.Dropdown className="bn-table-handle-menu">
+            <C.Generic.Menu.Label>{t("notes:table.style", "Table style")}</C.Generic.Menu.Label>
+            <C.Generic.Menu.Item checked={parts.preset === "paper"} onClick={() => choosePreset("paper")}>
+              <PresetLabel
+                name={t("notes:table.presetPaper", "Paper")}
+                hint={t(
+                  "notes:table.presetPaperHint",
+                  "Thick rules at the top and end, a thin rule under the header · also the next new table's default",
+                )}
+              />
+            </C.Generic.Menu.Item>
+            <C.Generic.Menu.Item checked={parts.preset === "notion"} onClick={() => choosePreset("notion")}>
+              <PresetLabel
+                name={t("notes:table.presetNotion", "Notion")}
+                hint={t(
+                  "notes:table.presetNotionHint",
+                  "Every line thin, the header tinted · also the next new table's default",
+                )}
+              />
+            </C.Generic.Menu.Item>
+            <C.Generic.Menu.Divider />
             <C.Generic.Menu.Item checked={headerRow} onClick={() => setHeader("headerRows", !headerRow)}>
               {t("notes:table.headerRow", "Header row")}
             </C.Generic.Menu.Item>
@@ -253,6 +308,12 @@ function TableMoreMenu() {
             <C.Generic.Menu.Divider />
             {partItem("caption")}
             {partItem("notes")}
+            <C.Generic.Menu.Divider />
+            <C.Generic.Menu.Item onClick={() => setTableGuides(!tableGuides)}>
+              {tableGuides
+                ? t("notes:table.guidesHide", "Hide edit guides")
+                : t("notes:table.guidesShow", "Show edit guides")}
+            </C.Generic.Menu.Item>
           </C.Generic.Menu.Dropdown>
         </C.Generic.Menu.Root>
       )}

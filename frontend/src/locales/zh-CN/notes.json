@@ -95,7 +95,14 @@
     "notesKeys": "Enter：换行 · Ctrl+Enter 或 Esc：完成",
     "captionPlaceholder": "表格标题 — 可用 $数学式$",
     "notesPlaceholder": "表注 — 缩写、* p < 0.05",
-    "editPart": "点击即可编辑"
+    "editPart": "点击即可编辑",
+    "style": "表格样式",
+    "presetPaper": "论文",
+    "presetPaperHint": "顶部与结尾粗线，标题行下细线 · 也会成为下一个新表格的默认",
+    "presetNotion": "Notion",
+    "presetNotionHint": "每条线都是细线，标题行有底色 · 也会成为下一个新表格的默认",
+    "guidesHide": "隐藏编辑辅助线",
+    "guidesShow": "显示编辑辅助线"
   },
   "mention": {
     "sections": "这篇论文的章节",
@@ -225,7 +232,9 @@
       "fold": "标题或列表旁的 ⌄",
       "trash": "区块上的垃圾桶",
       "tocRail": "右缘的短线",
-      "tableStyle": "⋯ › 表格样式",
+      "tablePresets": "⋯ › 论文 / Notion",
+      "tableBorders": "单元格菜单 › 边框…",
+      "tableMerge": "单元格菜单 › 合并 / 拆分",
       "selectPaper": "选中文字",
       "highlighter": "荧光笔",
       "box": "框选",
@@ -275,7 +284,9 @@
       "following": "点击，停止笔记随论文滚动",
       "focus": "淡化其他笔记及其标记",
       "fold": "折叠它下方的内容（Ctrl+Shift+[ / ]）",
-      "trash": "删除，可撤销",
+      "tablePresets": "重画这个表格；下一个新表格也用它",
+      "tableBorders": "为选中的单元格设置任一条线，细或粗",
+      "tableMerge": "把选中的单元格合并成一格，或拆分合并的单元格",
       "tocRail": "目录：鼠标移上去展开，点击跳转",
       "tableStyle": "三线表（论文样式）或网格，应用于所有表格",
       "selectPaper": "选样式和颜色，即存入笔记",
@@ -338,12 +349,7 @@
     "shortcuts": "快捷键",
     "foldAll": "全部折叠",
     "unfoldAll": "全部展开",
-    "showToc": "显示目录",
-    "tableStyle": "表格样式",
-    "tableThreeLine": "三线表",
-    "tableThreeLineHint": "论文样式",
-    "tableGrid": "网格",
-    "tableGridHint": "每格都有边框"
+    "showToc": "显示目录"
   },
   "card": {
     "added_one": "新增了 {{count}} 条笔记",

@@ -95,7 +95,14 @@
     "notesKeys": "Enter：換行 · Ctrl+Enter 或 Esc：完成",
     "captionPlaceholder": "表格標題 — 可用 $數學式$",
     "notesPlaceholder": "表註 — 縮寫、* p < 0.05",
-    "editPart": "點一下即可編輯"
+    "editPart": "點一下即可編輯",
+    "style": "表格樣式",
+    "presetPaper": "論文",
+    "presetPaperHint": "上方與結尾粗線，標題列下細線 · 也會成為下一個新表格的預設",
+    "presetNotion": "Notion",
+    "presetNotionHint": "每條線都是細線，標題列有底色 · 也會成為下一個新表格的預設",
+    "guidesHide": "隱藏編輯輔助線",
+    "guidesShow": "顯示編輯輔助線"
   },
   "mention": {
     "sections": "這篇論文的章節",
@@ -225,7 +232,9 @@
       "fold": "標題或清單旁的 ⌄",
       "trash": "區塊上的垃圾桶",
       "tocRail": "右緣的短線",
-      "tableStyle": "⋯ › 表格樣式",
+      "tablePresets": "⋯ › 論文 / Notion",
+      "tableBorders": "儲存格選單 › 框線…",
+      "tableMerge": "儲存格選單 › 合併 / 拆分",
       "selectPaper": "選取文字",
       "highlighter": "螢光筆",
       "box": "框選",
@@ -275,7 +284,9 @@
       "following": "點一下，停止筆記隨論文捲動",
       "focus": "淡化其他筆記與其標記",
       "fold": "收合它下方的內容（Ctrl+Shift+[ / ]）",
-      "trash": "刪除，可復原",
+      "tablePresets": "重畫這個表格；下一個新表格也用它",
+      "tableBorders": "為選取的儲存格設定任一條線，細或粗",
+      "tableMerge": "把選取的儲存格合併成一格，或拆開合併的儲存格",
       "tocRail": "目錄：游標移上去展開，點一下跳過去",
       "tableStyle": "三線表（論文樣式）或格線，套用到所有表格",
       "selectPaper": "選樣式和顏色，就會存進筆記",
@@ -338,12 +349,7 @@
     "shortcuts": "快速鍵",
     "foldAll": "全部收合",
     "unfoldAll": "全部展開",
-    "showToc": "顯示目錄",
-    "tableStyle": "表格樣式",
-    "tableThreeLine": "三線表",
-    "tableThreeLineHint": "論文樣式",
-    "tableGrid": "格線",
-    "tableGridHint": "每格都有框線"
+    "showToc": "顯示目錄"
   },
   "card": {
     "added_one": "新增了 {{count}} 則筆記",

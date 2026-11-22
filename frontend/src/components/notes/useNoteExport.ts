@@ -11,7 +11,6 @@ import {
   type DocxUnavailableReason,
   type NoteExportFormat,
 } from "@/lib/api";
-import { useNotesStore } from "@/store/notes";
 
 function save(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -57,11 +56,9 @@ export function useNoteExport(noteId: number | null) {
     async (format: NoteExportFormat) => {
       if (noteId === null) return;
       try {
-        // The tables come out in the style the viewer reads them in.
-        const { tableStyle } = useNotesStore.getState();
         // Word's table captions read "Table 1." in the viewer's language.
         const label = t("notes:table.captionWord", "Table");
-        const { blob, filename } = await exportNote(noteId, format, tableStyle, label);
+        const { blob, filename } = await exportNote(noteId, format, label);
         save(blob, filename);
       } catch (err) {
         const reason = reasonOf(err);

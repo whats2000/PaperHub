@@ -21,7 +21,10 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 
+import { useNotesStore } from "@/store/notes";
 import type { TableCell, TableContent } from "@/types/notes";
+
+import { dumpBorders, presetLines, tableShape } from "./tableBorders";
 
 export type Alignment = "left" | "center" | "right";
 
@@ -58,9 +61,21 @@ export function newTableContent(rows = 3, cols = 3): TableContent {
   };
 }
 
-/** `/table`: a 3 × 3 table with a header row, the caret in its first cell. */
+/** The viewer's default preset's lines for a table (`/table`, a paste). */
+function defaultBorders(content: TableContent): string {
+  const s = tableShape(content);
+  return dumpBorders(presetLines(s.rows, s.cols, s.headerRows, useNotesStore.getState().tablePreset));
+}
+
+/** `/table`: a 3 × 3 table with a header row in the viewer's last preset,
+ * the caret in its first cell. */
 export function insertNoteTable(editor: unknown) {
-  insertOrUpdateBlockForSlashMenu(editor as never, { type: "table", content: newTableContent() } as never);
+  const content = newTableContent();
+  insertOrUpdateBlockForSlashMenu(editor as never, {
+    type: "table",
+    props: { borders: defaultBorders(content) },
+    content,
+  } as never);
 }
 
 /** Run styles a table cell keeps: everything but colours. */
@@ -340,7 +355,7 @@ export function notePasteHandler(context: {
   );
   added.forEach((t, i) => {
     const content = cleanPastedTable(withAlignments(t.content, aligns?.[i]));
-    editor.updateBlock(t.id, { type: "table", content } as never);
+    editor.updateBlock(t.id, { type: "table", props: { borders: defaultBorders(content) }, content } as never);
   });
   return handled;
 }

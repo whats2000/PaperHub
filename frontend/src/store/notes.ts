@@ -27,12 +27,12 @@ import {
   getPaperInfo,
   listMarkColors,
   postNoteOps,
-  type NoteTableStyle,
   replyToNoteComment,
   resolveSuggestion as postSuggestionDecision,
   patchNoteTitle,
   setNoteCommentStatus,
 } from "@/lib/api";
+import { PRESETS, type Preset } from "@/components/notes/tableBorders";
 import i18n from "@/lib/i18n";
 import { applyOpsLocally, blockText } from "@/lib/notes/ops";
 import { MARK_TYPES } from "@/lib/marks/blockTypes";
@@ -52,9 +52,6 @@ import type {
 
 export const FLUSH_DELAY_MS = 600;
 
-/** Three-line (booktabs: rules above and under the header and at the end)
- * or grid (every cell border). */
-export type TableStyle = NoteTableStyle;
 /** Waits before each retry of a burst the server could not take. */
 export const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000] as const;
 
@@ -151,10 +148,13 @@ interface NotesStore {
   /** The floating table of contents at the notes pane's right edge. */
   tocOn: boolean;
   setTocOn: (on: boolean) => void;
-  /** How every table is drawn, in the editor and the Word export: the
-   * viewer's preference, not note content (the Markdown never changes). */
-  tableStyle: TableStyle;
-  setTableStyle: (style: TableStyle) => void;
+  /** The preset the next new table (`/table`, a paste) takes: the last
+   * one the viewer chose on a table (each table keeps its own lines). */
+  tablePreset: Preset;
+  setTablePreset: (preset: Preset) => void;
+  /** Whether a table's edges with no line show dashed while editing. */
+  tableGuides: boolean;
+  setTableGuides: (on: boolean) => void;
   /** The folded blocks per note (headings, § sections, list items; see
    * components/notes/folds.ts): the viewer's, kept in this browser. */
   folded: Record<number, string[]>;
@@ -1438,8 +1438,10 @@ export const useNotesStore = create<NotesStore>()(
         setFollowOn: (on) => set({ followOn: on }),
         tocOn: true,
         setTocOn: (on) => set({ tocOn: on }),
-        tableStyle: "threeLine",
-        setTableStyle: (style) => set({ tableStyle: style }),
+        tablePreset: "paper",
+        setTablePreset: (preset) => set({ tablePreset: preset }),
+        tableGuides: true,
+        setTableGuides: (on) => set({ tableGuides: on }),
         folded: {},
         toggleFold: (noteId, blockId) =>
           set((s) => {
@@ -1566,14 +1568,18 @@ export const useNotesStore = create<NotesStore>()(
         focusOn: s.focusOn,
         followOn: s.followOn,
         tocOn: s.tocOn,
-        tableStyle: s.tableStyle,
+        tablePreset: s.tablePreset,
+        tableGuides: s.tableGuides,
         folded: s.folded,
       }),
-      // A saved table style this build does not know is ignored (the default stays).
+      // A saved preset this build does not know is ignored (the default
+      // stays); an older build's global table style is dropped.
       merge: (saved, current) => {
-        const s = (saved ?? {}) as Partial<NotesStore>;
-        const ok = s.tableStyle === "threeLine" || s.tableStyle === "grid";
-        return { ...current, ...s, tableStyle: ok ? s.tableStyle! : current.tableStyle };
+        const s = { ...((saved ?? {}) as Partial<NotesStore> & { tableStyle?: unknown }) };
+        delete s.tableStyle;
+        const preset = PRESETS.includes(s.tablePreset as Preset) ? s.tablePreset! : current.tablePreset;
+        const guides = typeof s.tableGuides === "boolean" ? s.tableGuides : current.tableGuides;
+        return { ...current, ...s, tablePreset: preset, tableGuides: guides };
       },
     },
   ),

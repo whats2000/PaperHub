@@ -5,7 +5,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { useNoteExport } from "@/components/notes/useNoteExport";
 import { exportFileName } from "@/lib/api";
-import { useNotesStore } from "@/store/notes";
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { error: toastError } }));
@@ -43,7 +42,6 @@ const revoke = vi.fn();
 beforeEach(() => {
   caps = { md: true, docx: true, docx_reason: null };
   requested = [];
-  useNotesStore.setState({ tableStyle: "threeLine" });
   clicked = [];
   URL.createObjectURL = vi.fn(() => "blob:x");
   revoke.mockReset();
@@ -83,16 +81,13 @@ describe("useNoteExport", () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  it("asks for the tables in the viewer's table style", async () => {
+  it("asks for no table style: each table carries its own lines", async () => {
     const { result } = renderHook(() => useNoteExport(7));
     await act(() => result.current.onExport("docx"));
-    act(() => {
-      useNotesStore.setState({ tableStyle: "grid" });
-    });
-    await act(() => result.current.onExport("docx"));
-    expect(requested.map((p) => [p.get("format"), p.get("table_style")])).toEqual([
-      ["docx", "threeLine"],
-      ["docx", "grid"],
+    await act(() => result.current.onExport("md"));
+    expect(requested.map((p) => [p.get("format"), p.has("table_style")])).toEqual([
+      ["docx", false],
+      ["md", false],
     ]);
   });
 

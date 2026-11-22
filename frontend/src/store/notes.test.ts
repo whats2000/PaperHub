@@ -845,14 +845,14 @@ describe("useNotesStore", () => {
     expect(useNotesStore.getState().notes[7]?.blocks[0]?.text).toBe("Not sent yet");
   });
 
-  it("keeps Focus, Follow, the table of contents, the table style and folded parts across reloads (persisted)", () => {
+  it("keeps Focus, Follow, the table of contents, the table preferences and folded parts across reloads (persisted)", () => {
     const s = useNotesStore.getState();
     expect(s.tocOn).toBe(true);
-    expect(s.tableStyle).toBe("threeLine");
+    expect(s.tablePreset).toBe("paper");
     s.setFocusOn(true);
     s.setFollowOn(false);
     s.setTocOn(false);
-    s.setTableStyle("grid");
+    s.setTablePreset("notion");
     s.toggleFold(7, "d1");
     const raw = localStorage.getItem("paperhub-notes-v1") ?? "{}";
     const saved = JSON.parse(raw) as { state: Record<string, unknown> };
@@ -860,7 +860,8 @@ describe("useNotesStore", () => {
       focusOn: true,
       followOn: false,
       tocOn: false,
-      tableStyle: "grid",
+      tablePreset: "notion",
+      tableGuides: true,
       folded: { "7": ["d1"] },
     });
     useNotesStore.getState().toggleFold(7, "d1");
@@ -1101,5 +1102,34 @@ describe("a first write that can never be saved (Task 14)", () => {
     await useNotesStore.getState().flush(ph);
     expect(toastFn).toHaveBeenCalledWith("Couldn't save this note.");
     expect(useNotesStore.getState().retrying[ph] ?? false).toBe(false);
+  });
+});
+
+describe("table preferences", () => {
+  it("keeps the last table preset and the guides switch, and drops a legacy table style", async () => {
+    localStorage.removeItem("paperhub-notes-v1");
+    const init = useNotesStore.getInitialState();
+    expect(init.tablePreset).toBe("paper");
+    expect(init.tableGuides).toBe(true);
+    useNotesStore.getState().setTablePreset("notion");
+    useNotesStore.getState().setTableGuides(false);
+    const saved = JSON.parse(localStorage.getItem("paperhub-notes-v1") ?? "{}") as {
+      state: { tablePreset?: string; tableGuides?: boolean };
+    };
+    expect(saved.state).toMatchObject({ tablePreset: "notion", tableGuides: false });
+    useNotesStore.setState({ tablePreset: "paper", tableGuides: true });
+    localStorage.setItem("paperhub-notes-v1", JSON.stringify(saved));
+    await useNotesStore.persist.rehydrate();
+    expect(useNotesStore.getState().tablePreset).toBe("notion");
+    expect(useNotesStore.getState().tableGuides).toBe(false);
+    // An old build's global style, or an unknown preset: the default.
+    localStorage.setItem("paperhub-notes-v1", JSON.stringify({ state: { tableStyle: "grid" }, version: 0 }));
+    useNotesStore.setState({ tablePreset: "paper", tableGuides: true });
+    await useNotesStore.persist.rehydrate();
+    expect(useNotesStore.getState().tablePreset).toBe("paper");
+    expect("tableStyle" in useNotesStore.getState()).toBe(false);
+    localStorage.setItem("paperhub-notes-v1", JSON.stringify({ state: { tablePreset: "dotted" }, version: 0 }));
+    await useNotesStore.persist.rehydrate();
+    expect(useNotesStore.getState().tablePreset).toBe("paper");
   });
 });

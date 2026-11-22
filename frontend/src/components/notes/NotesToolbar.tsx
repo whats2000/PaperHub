@@ -12,11 +12,9 @@ import {
   Ellipsis,
   FileDown,
   FileText,
-  Grid3x3,
   Keyboard,
   Loader2,
   LocateFixed,
-  Rows3,
   ScanEye,
   Search,
   TableOfContents,
@@ -27,7 +25,7 @@ import { useTranslation } from "react-i18next";
 import type { DocxUnavailableReason } from "@/lib/api";
 import { hasOpenLayer } from "@/lib/openLayer";
 import { cn } from "@/lib/utils";
-import { useNotesStore, type TableStyle } from "@/store/notes";
+import { useNotesStore } from "@/store/notes";
 
 import { foldOwners, treeFromRows } from "./folds";
 import { partsOfNote } from "./parts";
@@ -89,22 +87,6 @@ function ExportItem(props: {
   );
 }
 
-function RadioItem(props: { value: TableStyle; icon: ReactNode; label: string; hint: string }) {
-  return (
-    <Menu.RadioItem className={ITEM} value={props.value} closeOnClick={false}>
-      {props.icon}
-      {props.label}
-      <small className="ml-auto pl-2.5 text-[11px] text-muted-foreground">{props.hint}</small>
-      <Menu.RadioItemIndicator
-        keepMounted
-        className="pl-1.5 transition-opacity duration-150 ease-out data-[unchecked]:opacity-0 motion-reduce:transition-none"
-      >
-        <Check className="size-3" aria-hidden />
-      </Menu.RadioItemIndicator>
-    </Menu.RadioItem>
-  );
-}
-
 export function NotesToolbar({
   noteId,
   followLabel,
@@ -123,8 +105,6 @@ export function NotesToolbar({
   const setFocusOn = useNotesStore((s) => s.setFocusOn);
   const tocOn = useNotesStore((s) => s.tocOn);
   const setTocOn = useNotesStore((s) => s.setTocOn);
-  const tableStyle = useNotesStore((s) => s.tableStyle);
-  const setTableStyle = useNotesStore((s) => s.setTableStyle);
   const revision = useNotesStore((s) =>
     noteId === null ? null : (s.notes[noteId]?.note.revision ?? null),
   );
@@ -349,27 +329,6 @@ export function NotesToolbar({
                     <Check className="size-3" aria-hidden />
                   </Menu.CheckboxItemIndicator>
                 </Menu.CheckboxItem>
-                <Menu.Separator className="mx-1 my-[3px] h-px bg-border" />
-                <Menu.RadioGroup
-                  value={tableStyle}
-                  onValueChange={(v: TableStyle) => setTableStyle(v)}
-                >
-                  <Menu.GroupLabel className="px-2 pt-[3px] pb-[2px] text-[11px] text-muted-foreground">
-                    {t("notes:toolbar.tableStyle", "Table style")}
-                  </Menu.GroupLabel>
-                  <RadioItem
-                    value="threeLine"
-                    icon={<Rows3 className="size-3 shrink-0" aria-hidden />}
-                    label={t("notes:toolbar.tableThreeLine", "Three-line")}
-                    hint={t("notes:toolbar.tableThreeLineHint", "Paper style")}
-                  />
-                  <RadioItem
-                    value="grid"
-                    icon={<Grid3x3 className="size-3 shrink-0" aria-hidden />}
-                    label={t("notes:toolbar.tableGrid", "Grid")}
-                    hint={t("notes:toolbar.tableGridHint", "Every cell lined")}
-                  />
-                </Menu.RadioGroup>
                 <Menu.Separator className="mx-1 my-[3px] h-px bg-border" />
                 <Menu.Item className={ITEM} onClick={() => onGuideOpenChange(true)}>
                   <Keyboard className="size-3 shrink-0" aria-hidden />

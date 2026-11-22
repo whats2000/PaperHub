@@ -95,7 +95,14 @@
     "notesKeys": "Enter：改行 · Ctrl+Enter または Esc：完了",
     "captionPlaceholder": "キャプション — $数式$ も使えます",
     "notesPlaceholder": "注 — 略語、* p < 0.05",
-    "editPart": "クリックして編集"
+    "editPart": "クリックして編集",
+    "style": "表のスタイル",
+    "presetPaper": "論文",
+    "presetPaperHint": "上端と末尾に太線、見出し行の下に細線 · 次に作る表の既定にもなります",
+    "presetNotion": "Notion",
+    "presetNotionHint": "すべて細線、見出し行に色 · 次に作る表の既定にもなります",
+    "guidesHide": "編集用の補助線を隠す",
+    "guidesShow": "編集用の補助線を表示"
   },
   "mention": {
     "sections": "この論文のセクション",
@@ -225,7 +232,9 @@
       "fold": "見出しやリストの横の ⌄",
       "trash": "ブロックのごみ箱",
       "tocRail": "右端の短い線",
-      "tableStyle": "⋯ › 表のスタイル",
+      "tablePresets": "⋯ › 論文 / Notion",
+      "tableBorders": "セルメニュー › 罫線…",
+      "tableMerge": "セルメニュー › 結合 / 分割",
       "selectPaper": "文字を選択",
       "highlighter": "蛍光ペン",
       "box": "ボックス",
@@ -275,7 +284,9 @@
       "following": "クリックで、ノートが論文に合わせて動くのを止める",
       "focus": "ほかのノートとそのマークを薄くする",
       "fold": "その下の内容を折りたたむ（Ctrl+Shift+[ / ]）",
-      "trash": "削除（元に戻せる）",
+      "tablePresets": "この表を描き直し、次の新しい表にも使います",
+      "tableBorders": "選んだセルの間の線を細線か太線で設定",
+      "tableMerge": "選んだセルを1つに結合、または結合を分割",
       "tocRail": "目次：ホバーで開き、クリックで移動",
       "tableStyle": "三線表（論文スタイル）または格子。すべての表に適用",
       "selectPaper": "スタイルと色を選ぶとノートに入ります",
@@ -338,12 +349,7 @@
     "shortcuts": "ショートカット",
     "foldAll": "すべて折りたたむ",
     "unfoldAll": "すべて展開",
-    "showToc": "目次を表示",
-    "tableStyle": "表のスタイル",
-    "tableThreeLine": "三線表",
-    "tableThreeLineHint": "論文スタイル",
-    "tableGrid": "格子",
-    "tableGridHint": "すべてのセルに罫線"
+    "showToc": "目次を表示"
   },
   "card": {
     "added_one": "ノートを {{count}} 件追加しました",
