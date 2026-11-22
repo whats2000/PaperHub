@@ -41,14 +41,17 @@ interface Props {
   onAdd: (paperId: number) => void;
   onClose: (paperId: number) => void;
   onKeep: (paperId: number) => void;
-  /** A tab's tooltip (default: the paper's title; a dashed tab says it is
-   *  not in the chat). */
+  /** A solid tab's tooltip (default: the paper's title); a dashed tab's
+   *  says it is not in the chat. */
   tabTitle?: (paper: PaperTabItem) => string;
   /** The tab's element id, and the panel it shows, for the pane's tabpanel. */
   tabId?: (paperId: number) => string;
   panelId?: string;
   /** A new value (another chat) redraws the tabs without motion. */
   resetKey?: unknown;
+  /** False when another tab of the strip is selected (the notes pane's
+   *  This chat): none of these is then the strip's Tab stop. */
+  tabStop?: boolean;
 }
 
 type Tab = (PaperTabItem & { dashed: false }) | (OutsidePaperTabItem & { dashed: true });
@@ -123,6 +126,7 @@ export function PaperTabs({
   tabId,
   panelId,
   resetKey,
+  tabStop = true,
 }: Props) {
   const { t } = useTranslation(["canvas", "paperTabs"]);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -136,7 +140,7 @@ export function PaperTabs({
   const { shown, entered, settle } = usePresence(tabs, resetKey);
   const moreSelected = hidden.some((p) => p.id === selected);
   // Reachable by Tab: the selected tab, else the first.
-  const focusable = tabs.some((x) => x.id === selected) ? selected : (tabs[0]?.id ?? null);
+  const focusable = !tabStop ? null : tabs.some((x) => x.id === selected) ? selected : (tabs[0]?.id ?? null);
 
   // The selected tab is scrolled into the strip's view (a narrow pane).
   const root = useRef<HTMLSpanElement>(null);
@@ -151,8 +155,7 @@ export function PaperTabs({
   }, [selected, papers.length, outside.length]);
 
   const titleOf = (tab: Tab) => {
-    if (tabTitle) return tabTitle(tab);
-    if (!tab.dashed) return tab.title;
+    if (!tab.dashed) return tabTitle ? tabTitle(tab) : tab.title;
     const base = t("canvas:panel.viewingTitle", { title: tab.title });
     return tab.preview ? `${base} ${t("paperTabs:previewHint", "(opened by a link; double-click to keep)")}` : base;
   };

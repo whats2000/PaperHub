@@ -4,8 +4,9 @@ import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { REVEAL_GIVE_UP_MS, revealBlock, unfoldInNote } from "@/lib/notes/reveal";
+import { addPaperToChat, neighbourOf } from "@/lib/paperTabs";
 import { cn } from "@/lib/utils";
-import { useCanvasStore } from "@/store/canvas";
+import { useCanvasStore, type OutsideTab } from "@/store/canvas";
 import { useChatStore } from "@/store/chat";
 import { useNotesPaneStore } from "@/store/notesPane";
 import { isUnsavedNote, noteHasContent, useNotesStore } from "@/store/notes";
@@ -22,6 +23,9 @@ import { useNoteExport } from "./useNoteExport";
 interface Props {
   onClose: () => void;
 }
+
+/** Stable "no dashed tabs" (keeps the selector's result stable). */
+const NO_OUTSIDE: OutsideTab[] = [];
 
 /** The chat tab's target is the chat's local id. */
 type Target = { kind: "paper" | "chat"; id: number };
@@ -48,6 +52,13 @@ export function NotesPane({ onClose }: Props) {
   const refs = useChatStore((s) =>
     backendSessionId === null ? undefined : s.referencesBySession[backendSessionId],
   );
+  const [chosen, setChosen] = useState<NoteTab>("paper");
+  // A chat starts on the paper's tab: a tab choice belongs to one chat.
+  const [chosenFor, setChosenFor] = useState(activeSessionId);
+  if (chosenFor !== activeSessionId) {
+    setChosenFor(activeSessionId);
+    setChosen("paper");
+  }
   const [paper, setPaper] = useState({ id: readerPaperId, session: activeSessionId, reader: readerPaperId });
   if (paper.session !== activeSessionId) {
     // Entering a chat: the reader may still show the chat left behind (it
@@ -57,6 +68,9 @@ export function NotesPane({ onClose }: Props) {
     setPaper({ id: ours ? readerPaperId : null, session: activeSessionId, reader: readerPaperId });
   } else if (readerPaperId !== paper.reader) {
     setPaper({ id: readerPaperId ?? paper.id, session: activeSessionId, reader: readerPaperId });
+    // The reader switched papers: the notes switch with it (off This chat
+    // too); the reader merely opening or closing leaves the tab alone.
+    if (readerPaperId !== null && paper.reader !== null) setChosen("paper");
   }
   // A chat whose reader has shown no paper yet opens on the paper whose
   // note was last on screen in it, else its first paper (Obsidian / Notion
@@ -64,18 +78,23 @@ export function NotesPane({ onClose }: Props) {
   const lastViewed = useNotesPaneStore((s) =>
     activeSessionId === null ? undefined : s.lastPaperByChat[activeSessionId],
   );
+  const enabledRefs = refs?.filter((r) => r.enabled);
   const fallbackPaperId =
-    lastViewed !== undefined && (refs === undefined || refs.some((r) => r.paper_content_id === lastViewed))
+    lastViewed !== undefined &&
+    (enabledRefs === undefined || enabledRefs.some((r) => r.paper_content_id === lastViewed))
       ? lastViewed
-      : (refs?.[0]?.paper_content_id ?? null);
+      : (enabledRefs?.[0]?.paper_content_id ?? null);
   const paperId = paper.id ?? fallbackPaperId;
-
-  const [chosen, setChosen] = useState<NoteTab>("paper");
-  // A chat starts on the paper's tab: a tab choice belongs to one chat.
-  const [chosenFor, setChosenFor] = useState(activeSessionId);
-  if (chosenFor !== activeSessionId) {
-    setChosenFor(activeSessionId);
-    setChosen("paper");
+  // A dashed tab closed (here or in the reader) while its note is on
+  // screen: the pane lands on the neighbouring paper.
+  const closedTab = useCanvasStore((s) => s.closedTab);
+  const [seenClosed, setSeenClosed] = useState(closedTab?.n ?? 0);
+  if (closedTab && closedTab.n !== seenClosed) {
+    setSeenClosed(closedTab.n);
+    if (closedTab.chat === activeSessionId && paperId === closedTab.paperId) {
+      const neighbour = closedTab.neighbour;
+      setPaper((p) => ({ ...p, id: neighbour }));
+    }
   }
   // "Open in notes" (the agent's change card): the note's tab comes forward.
   const request = useNotesPaneStore((s) => s.request);
@@ -148,6 +167,60 @@ export function NotesPane({ onClose }: Props) {
   const paperTitle =
     paperId === null ? null : (refTitle ?? paperNoteTitle ?? t("pane.paper", "Paper"));
 
+  // The paper tabs: the same set the reader shows (the chat's papers, then
+  // a dashed tab for a paper shown but not in the chat).
+  const outsideTabs = useCanvasStore((s) =>
+    activeSessionId === null ? NO_OUTSIDE : (s.outsideByChat[activeSessionId] ?? NO_OUTSIDE),
+  );
+  const paperTitles = useCanvasStore((s) => s.paperTitles);
+  const enabledIds = (enabledRefs ?? []).map((r) => r.paper_content_id);
+  // Papers not loaded yet: the paper on screen still has its tab.
+  const paperTabs =
+    enabledRefs === undefined
+      ? paperId !== null && paperTitle !== null
+        ? [{ id: paperId, title: paperTitle }]
+        : []
+      : enabledRefs.map((r) => ({ id: r.paper_content_id, title: r.title }));
+  const outsideItems = outsideTabs
+    .filter((o) => !enabledIds.includes(o.paperId))
+    .map((o) => ({
+      id: o.paperId,
+      preview: o.preview,
+      title:
+        refs?.find((r) => r.paper_content_id === o.paperId)?.title ??
+        paperTitles[o.paperId] ??
+        (o.paperId === paperId ? paperNoteTitle : undefined) ??
+        t("pane.paper", "Paper"),
+    }));
+  const tabOrder = [...paperTabs.map((p) => p.id), ...outsideItems.map((o) => o.id)];
+  const enabledKey = enabledRefs === undefined ? null : enabledIds.join(",");
+  // A paper on screen here that is not one of the chat's (a switched-off
+  // paper, a note opened from elsewhere) takes a dashed tab, as in the reader.
+  useEffect(() => {
+    if (activeSessionId === null || tab !== "paper" || paperId === null || enabledKey === null) return;
+    if (enabledKey.split(",").includes(String(paperId)) || outsideTabs.some((o) => o.paperId === paperId)) return;
+    useCanvasStore.getState().showOutside(activeSessionId, paperId);
+  }, [activeSessionId, tab, paperId, enabledKey, outsideTabs]);
+  const selectPaperTab = (id: number) => {
+    setChosen("paper");
+    setPaper((p) => ({ ...p, id }));
+    // Both panes show the same paper: the reader follows (closed, it shows
+    // the paper when it opens).
+    if (useCanvasStore.getState().activePaperId !== id) useCanvasStore.getState().selectPaper(id);
+  };
+  const addPaperTab = async (id: number) => {
+    const chat = activeSessionId;
+    if (backendSessionId === null || chat === null) return;
+    if (await addPaperToChat(backendSessionId, id)) useCanvasStore.getState().forgetOutside(chat, id);
+  };
+  const closePaperTab = (id: number) => {
+    if (activeSessionId === null) return;
+    useCanvasStore.getState().closeOutside(activeSessionId, id, neighbourOf(tabOrder, id));
+  };
+  const keepPaperTab = (id: number) => {
+    if (activeSessionId !== null) useCanvasStore.getState().keepOutside(activeSessionId, id);
+  };
+
   // `storeKey`: the store's `byTarget` key the note is shown under; it
   // follows a placeholder to its saved note (nothing is created by
   // looking: an unsaved note is a placeholder until its first write).
@@ -207,6 +280,14 @@ export function NotesPane({ onClose }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetKey, hasDraft, localChat, loadTarget, openChatDraft]);
 
+  // The note slides in from the side of the tab picked (This chat is last).
+  const tabPos = tab === "chat" ? tabOrder.length : paperId === null ? -1 : tabOrder.indexOf(paperId);
+  const [slideFrom, setSlideFrom] = useState({ key: targetKey, session: activeSessionId, pos: tabPos, dir: 0 });
+  if (slideFrom.key !== targetKey) {
+    const same = slideFrom.session === activeSessionId && tabPos >= 0 && slideFrom.pos >= 0;
+    setSlideFrom({ key: targetKey, session: activeSessionId, pos: tabPos, dir: same ? Math.sign(tabPos - slideFrom.pos) : 0 });
+  }
+
   const current = loaded.key === targetKey ? loaded : null;
   const storeKey = hasDraft && target?.kind === "chat" ? draftKey : localChat ? null : (current?.storeKey ?? null);
   const shownId = useNotesStore((s) => (storeKey === null ? undefined : s.byTarget[storeKey]));
@@ -251,6 +332,23 @@ export function NotesPane({ onClose }: Props) {
     return () => ctrl.abort();
   }, [request, panel, noteId, backendSessionId, consumeRequest]);
 
+  // Editing a temporary paper's note keeps its tab (the note belongs to the
+  // paper in the library, not to the chat: the paper is not added).
+  const previewPaper =
+    tab === "paper" && paperId !== null && outsideTabs.some((o) => o.paperId === paperId && o.preview)
+      ? paperId
+      : null;
+  useEffect(() => {
+    if (!panel || previewPaper === null || activeSessionId === null) return;
+    const chat = activeSessionId;
+    const keep = () => useCanvasStore.getState().keepOutside(chat, previewPaper);
+    const events = ["beforeinput", "paste", "drop"] as const;
+    for (const e of events) panel.addEventListener(e, keep);
+    return () => {
+      for (const e of events) panel.removeEventListener(e, keep);
+    };
+  }, [panel, previewPaper, activeSessionId]);
+
   const sharedBy = useNotesStore((s) => (noteId === null ? null : (s.notes[noteId]?.sharedBy ?? null)));
   const { onExport, docxReason } = useNoteExport(savedId);
 
@@ -268,12 +366,19 @@ export function NotesPane({ onClose }: Props) {
       <NotesTabs
         active={tab}
         idBase={idBase}
-        paperTitle={paperTitle}
+        papers={paperTabs}
+        outside={outsideItems}
+        paperId={paperId}
         chatTitle={session?.title ?? ""}
         chatAvailable={chatShown}
         animateChatIn={seenEmpty !== null && seenEmpty === activeSessionId}
-        onSelect={setChosen}
+        onSelectPaper={selectPaperTab}
+        onAddPaper={(id) => void addPaperTab(id)}
+        onClosePaper={closePaperTab}
+        onKeepPaper={keepPaperTab}
+        onSelectChat={() => setChosen("chat")}
         onClose={onClose}
+        resetKey={activeSessionId}
       />
       <NotesToolbar
         noteId={noteId}
@@ -292,7 +397,7 @@ export function NotesPane({ onClose }: Props) {
         ref={setPanel}
         id={notePanelId(idBase)}
         role="tabpanel"
-        aria-labelledby={noteTabId(idBase, tab)}
+        aria-labelledby={noteTabId(idBase, tab === "paper" && paperId !== null ? `paper-${paperId}` : "chat")}
         // Clipped, never scrolled: the note editor inside scrolls itself. A
         // scrolling pane grew a second scrollbar whenever a floating layer
         // (BlockNote's side menu, left at an old block during a fast
@@ -309,7 +414,8 @@ export function NotesPane({ onClose }: Props) {
             key={storeKey ?? ""}
             className={cn(
               "h-full animate-in fade-in-0 duration-200 ease-out motion-reduce:animate-none",
-              tab === "chat" ? "slide-in-from-right-3" : "slide-in-from-left-3",
+              slideFrom.dir > 0 && "slide-in-from-right-3",
+              slideFrom.dir < 0 && "slide-in-from-left-3",
             )}
           >
             <NoteEditor

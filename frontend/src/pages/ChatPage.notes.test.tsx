@@ -74,7 +74,15 @@ beforeEach(() => {
   useChatStore.getState().reset();
   useNotesStore.setState({ notes: {}, byTarget: {} });
   useNotesPaneStore.setState({ open: false, activeTab: "reader", notesWidth: NOTES_DEFAULT_WIDTH });
-  useCanvasStore.setState({ open: false, width: 600, activePaperId: null, readerView: null, readingSection: null });
+  useCanvasStore.setState({
+    open: false,
+    width: 600,
+    activePaperId: null,
+    readerView: null,
+    readingSection: null,
+    outsideByChat: {},
+    closedTab: null,
+  });
   const sid = useChatStore.getState().newSession();
   useChatStore.getState().patchSessionBackendId(sid, 42);
   useChatStore.setState((s) => ({
@@ -320,6 +328,24 @@ describe("ChatPage Notes pane", () => {
   });
 
   it("names the paper and the chat on the note tabs", async () => {
+    // The paper the reader shows is the chat's paper.
+    server.use(
+      http.get(`${API_BASE_URL}/papers`, () =>
+        HttpResponse.json([
+          {
+            papers_id: 107,
+            paper_content_id: 7,
+            enabled: true,
+            added_at: "2026-11-16T00:00:00Z",
+            arxiv_id: null,
+            title: PAPER_TITLE,
+            year: 2026,
+            kind: "arxiv",
+            is_private: false,
+          },
+        ]),
+      ),
+    );
     useCanvasStore.setState({ open: true, width: 900, activePaperId: 7 });
     render(<ChatPage />);
     await userEvent.click(notesButton());

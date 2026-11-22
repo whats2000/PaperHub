@@ -1,6 +1,6 @@
 /** Which note the pane opens on when the reader has not shown a paper:
  * the chat's last-viewed paper, else its first paper, else the hint. */
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -15,7 +15,11 @@ import { useNotesStore } from "@/store/notes";
 import type { ReferenceItem } from "@/types/domain";
 
 vi.mock("@/components/notes/NoteEditor", () => ({
-  NoteEditor: ({ noteId }: { noteId: number }) => <div data-testid="note-editor">note {noteId}</div>,
+  NoteEditor: ({ noteId }: { noteId: number }) => (
+    <div data-testid="note-editor" contentEditable suppressContentEditableWarning>
+      note {noteId}
+    </div>
+  ),
 }));
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }) }));
 
@@ -38,6 +42,8 @@ const ref = (id: number): ReferenceItem => ({
 
 /** Paper N's saved note is note 100+N; the chat's note is empty. */
 let posts: string[] = [];
+/** The chat's papers the server lists after an Add. */
+let papersAfterAdd: ReferenceItem[] = [];
 const server = setupServer(
   http.get(`${API_BASE_URL}/notes/target`, ({ request }) => {
     const url = new URL(request.url);
@@ -51,6 +57,7 @@ const server = setupServer(
     }
     return HttpResponse.json({ note: null, blocks: [], shared_by: 0, default_title: "Chat" });
   }),
+  http.get(`${API_BASE_URL}/papers`, () => HttpResponse.json(papersAfterAdd)),
   http.post("*", ({ request }) => {
     posts.push(new URL(request.url).pathname);
     return HttpResponse.json({});
@@ -68,12 +75,22 @@ beforeEach(() => {
   useChatStore.getState().reset();
   useNotesStore.setState({ notes: {}, byTarget: {} });
   useNotesPaneStore.setState({ open: true, activeTab: "notes", request: null, lastPaperByChat: {} });
-  useCanvasStore.setState({ open: false, activePaperId: null, readerView: null, readingSection: null });
+  useCanvasStore.setState({
+    open: false,
+    activePaperId: null,
+    readerView: null,
+    readingSection: null,
+    outsideByChat: {},
+    closedTab: null,
+    paperTitles: {},
+    requestedPaperId: null,
+  });
   chatA = useChatStore.getState().newSession();
   useChatStore.getState().patchSessionBackendId(chatA, 42);
 });
 
-const paperTab = () => screen.queryByRole("tab", { name: /RoboTTT|Gated Adapters|World Models/ });
+/** The selected paper tab. */
+const paperTab = () => screen.queryByRole("tab", { name: /RoboTTT|Gated Adapters|World Models/, selected: true });
 
 describe("NotesPane: the paper it opens on", () => {
   it("opens the chat's first paper's note when the reader has shown none", async () => {
@@ -240,5 +257,111 @@ describe("NotesPane: the paper it opens on", () => {
     expect(await screen.findByText("note 109")).toBeInTheDocument();
     const pane = screen.getByRole("region", { name: "Notes" });
     expect(within(pane).getByRole("tab", { name: "World Models" })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+describe("NotesPane: paper tabs shared with the reader", () => {
+  const strip = () => within(screen.getByRole("region", { name: "Notes" })).getByRole("tablist", { name: "Notes" });
+  const shellOf = (name: string) => within(strip()).getByRole("tab", { name }).closest("[data-paper-tab]") as HTMLElement;
+
+  it("draws every paper of the chat in the reader's order; picking one moves the reader", async () => {
+    useChatStore.getState().setReferences(42, [ref(8), ref(7)]);
+    render(<NotesPane onClose={() => undefined} />);
+    expect(await screen.findByText("note 108")).toBeInTheDocument();
+    expect(within(strip()).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Gated Adapters", "RoboTTT"]);
+    await userEvent.click(within(strip()).getByRole("tab", { name: "RoboTTT" }));
+    expect(await screen.findByText("note 107")).toBeInTheDocument();
+    expect(paperTab()).toHaveAccessibleName("RoboTTT");
+    // The reader follows without being forced open.
+    expect(useCanvasStore.getState().requestedPaperId).toBe(7);
+    expect(useCanvasStore.getState().open).toBe(false);
+  });
+
+  it("a paper opened by a link is a dashed, temporary tab here too; Add makes it solid", async () => {
+    useChatStore.getState().setReferences(42, [ref(7)]);
+    papersAfterAdd = [ref(7), ref(9)];
+    useCanvasStore.setState({
+      open: true,
+      activePaperId: 9,
+      outsideByChat: { [chatA]: [{ paperId: 9, preview: true }] },
+      paperTitles: { 9: "World Models" },
+    });
+    render(<NotesPane onClose={() => undefined} />);
+    expect(await screen.findByText("note 109")).toBeInTheDocument();
+    expect(shellOf("World Models")).toHaveAttribute("data-dashed", "true");
+    expect(shellOf("World Models")).toHaveAttribute("data-preview", "true");
+    await userEvent.click(within(shellOf("World Models")).getByRole("button", { name: /Add/ }));
+    await vi.waitFor(() => expect(shellOf("World Models")).toHaveAttribute("data-dashed", "false"));
+    expect(posts).toContain("/papers/from-library");
+    expect(useCanvasStore.getState().outsideByChat[chatA]).toEqual([]);
+  });
+
+  it("× closes the temporary tab in both panes, landing on the neighbouring paper", async () => {
+    useChatStore.getState().setReferences(42, [ref(7)]);
+    useCanvasStore.setState({
+      activePaperId: 9,
+      outsideByChat: { [chatA]: [{ paperId: 9, preview: true }] },
+      paperTitles: { 9: "World Models" },
+    });
+    render(<NotesPane onClose={() => undefined} />);
+    expect(await screen.findByText("note 109")).toBeInTheDocument();
+    await userEvent.click(within(strip()).getByRole("button", { name: "Close World Models" }));
+    expect(await screen.findByText("note 107")).toBeInTheDocument();
+    expect(useCanvasStore.getState().closedTab).toMatchObject({ chat: chatA, paperId: 9, neighbour: 7 });
+    expect(useCanvasStore.getState().outsideByChat[chatA]).toEqual([]);
+  });
+
+  it("a tab closed in the reader closes here too", async () => {
+    useChatStore.getState().setReferences(42, [ref(7)]);
+    useCanvasStore.setState({
+      activePaperId: 9,
+      outsideByChat: { [chatA]: [{ paperId: 9, preview: true }] },
+      paperTitles: { 9: "World Models" },
+    });
+    render(<NotesPane onClose={() => undefined} />);
+    expect(await screen.findByText("note 109")).toBeInTheDocument();
+    act(() => useCanvasStore.getState().closeOutside(chatA, 9, 7));
+    expect(await screen.findByText("note 107")).toBeInTheDocument();
+  });
+
+  it("editing the temporary note keeps its tab; so does a double click", async () => {
+    useChatStore.getState().setReferences(42, [ref(7)]);
+    useCanvasStore.setState({
+      activePaperId: 9,
+      outsideByChat: { [chatA]: [{ paperId: 9, preview: true }, { paperId: 8, preview: false }] },
+      paperTitles: { 9: "World Models", 8: "Gated Adapters" },
+    });
+    render(<NotesPane onClose={() => undefined} />);
+    const editor = await screen.findByText("note 109");
+    fireEvent(editor, new InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: "x" }));
+    const nine = () => useCanvasStore.getState().outsideByChat[chatA]?.find((t) => t.paperId === 9);
+    expect(nine()).toEqual({ paperId: 9, preview: false });
+    // A kept tab is not italic.
+    expect(shellOf("World Models")).toHaveAttribute("data-preview", "false");
+    // The next link opens a temporary tab beside it; a double click keeps that one.
+    act(() => {
+      useCanvasStore.setState({ paperTitles: { 9: "World Models", 8: "Gated Adapters", 10: "Paper 10" } });
+    });
+    act(() => useCanvasStore.getState().showOutside(chatA, 10));
+    await userEvent.dblClick(within(strip()).getByRole("tab", { name: "Paper 10" }));
+    expect(useCanvasStore.getState().outsideByChat[chatA]?.every((t) => !t.preview)).toBe(true);
+  });
+
+  it("another chat draws its own papers, never this chat's dashed tabs", async () => {
+    useChatStore.getState().setReferences(42, [ref(7)]);
+    useCanvasStore.setState({
+      outsideByChat: { [chatA]: [{ paperId: 9, preview: false }] },
+      paperTitles: { 9: "World Models" },
+    });
+    render(<NotesPane onClose={() => undefined} />);
+    expect(await screen.findByText("note 107")).toBeInTheDocument();
+    expect(within(strip()).getByRole("tab", { name: "World Models" })).toBeInTheDocument();
+    act(() => {
+      const other = useChatStore.getState().newSession();
+      useChatStore.getState().patchSessionBackendId(other, 43);
+      useChatStore.getState().setReferences(43, [ref(8)]);
+    });
+    expect(await screen.findByText("note 108")).toBeInTheDocument();
+    expect(within(strip()).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Gated Adapters"]);
   });
 });
