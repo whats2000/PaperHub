@@ -382,9 +382,9 @@
     .note-sug-del.note-sug-enter, .note-sug-ins.note-sug-enter { animation: none; }
 }
 
-/* Notes: parts. Focus fades the other parts (section headings and dividers
-   stay); a divider's chevron folds the part below it, collapsing its height
-   toward the divider. The attributes are editor decorations (partsDecorations.ts). */
+/* Notes: parts and folds. Focus fades the other parts (section headings and
+   dividers stay); a fold (folds.ts) collapses its blocks' height toward the
+   heading. The attributes are editor decorations (partsDecorations.ts). */
 .paperhub-notes .bn-block-outer {
     transition: margin 0.2s, opacity 200ms ease-out;
 }
@@ -524,12 +524,12 @@
     opacity: 0.45;
     cursor: pointer;
 }
-.paperhub-notes .bn-block-outer[data-part-body] {
+.paperhub-notes .bn-block-outer[data-fold-body] {
     display: grid;
     grid-template-rows: 1fr;
     transition: margin 0.2s, opacity 200ms ease-out, grid-template-rows 200ms ease-out, visibility 200ms;
 }
-.paperhub-notes .bn-block-outer[data-part-body] > .bn-block {
+.paperhub-notes .bn-block-outer[data-fold-body] > .bn-block {
     min-height: 0;
     min-width: 0;
     /* Clipped only top and bottom (the fold): a selected object block's
@@ -593,18 +593,9 @@
 .note-card .paperhub-notes[data-variant="card"] .bn-editor {
     padding-inline: var(--note-card-pad) 10px;
 }
-/* The fold chevron shows on hover, on focus and while folded. */
-.paperhub-notes .note-fold {
-    opacity: 0;
-}
-.paperhub-notes .bn-block-outer:hover .note-fold,
-.paperhub-notes .note-fold:focus-visible,
-.paperhub-notes .note-fold[aria-expanded="false"] {
-    opacity: 1;
-}
 @media (prefers-reduced-motion: reduce) {
     .paperhub-notes .bn-block-outer,
-    .paperhub-notes .bn-block-outer[data-part-body] { transition: none; }
+    .paperhub-notes .bn-block-outer[data-fold-body] { transition: none; }
 }
 
 /* The highlighter (Plan H5b.1): with the pen on, a selection on a PDF's text
