@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { API_BASE_URL } from "@/lib/api";
 import { JUST_CREATED_GRACE_MS, useChatStore } from "@/store/chat";
+import { clearPendingNoteOps, useNotesStore } from "@/store/notes";
 
 let created = 0;
 const server = setupServer(
@@ -16,6 +17,7 @@ const server = setupServer(
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 afterEach(() => {
+  clearPendingNoteOps();
   server.resetHandlers();
   vi.useRealTimers();
 });
@@ -52,6 +54,26 @@ describe("ensureBackendSession (Task 14)", () => {
     await useChatStore.getState().ensureBackendSession(local);
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + JUST_CREATED_GRACE_MS + 1000);
+    useChatStore.getState().reconcileBackendSessions([]);
+    expect(useChatStore.getState().sessions.some((s) => s.id === local)).toBe(false);
+  });
+
+  it("past the grace period, a chat whose note still holds unsaved words stays listed", async () => {
+    const local = useChatStore.getState().newSession();
+    await useChatStore.getState().ensureBackendSession(local);
+    // The note's first save keeps failing: its words wait in the queue.
+    const ph = useNotesStore.getState().openChatDraft(local);
+    useNotesStore.getState().applyLocal(
+      ph,
+      [{ op: "insert", block_id: "p1", block: { type: "paragraph", props: {}, content: [{ type: "text", text: "kept", styles: {} }] } }],
+      "pane",
+    );
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + JUST_CREATED_GRACE_MS + 1000);
+    useChatStore.getState().reconcileBackendSessions([]);
+    expect(useChatStore.getState().sessions.some((s) => s.id === local)).toBe(true);
+    // Once nothing is left unsaved, the strict mirror applies again.
+    clearPendingNoteOps();
     useChatStore.getState().reconcileBackendSessions([]);
     expect(useChatStore.getState().sessions.some((s) => s.id === local)).toBe(false);
   });

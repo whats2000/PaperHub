@@ -18,7 +18,14 @@ import { createBackendSession, listSessionReferences } from "@/lib/api";
 import { laterIso, nowIso, parseBackendTime } from "@/lib/sessionTime";
 import { useMemoriesStore } from "@/store/memories";
 import { useNavStore } from "@/store/nav";
-import { noteMarksChanged, paperMarksChanged, refreshLinkTarget, setNoteSessionCreator, useNotesStore } from "@/store/notes";
+import {
+  chatNoteHasUnsaved,
+  noteMarksChanged,
+  paperMarksChanged,
+  refreshLinkTarget,
+  setNoteSessionCreator,
+  useNotesStore,
+} from "@/store/notes";
 import { useSlidesStore } from "@/store/slides";
 
 interface ChatState {
@@ -939,9 +946,17 @@ export const useChatStore = create<ChatState>()(
           const byBackendId = new Map(summaries.map((x) => [x.id, x]));
           // A chat this page just put on the server may not be listed yet
           // (a note-only chat until its note's first save lands): kept.
+          // Past the grace too while its note holds words not saved yet:
+          // the server failing for a while must not drop them.
           const now = Date.now();
+          const unsavedNote = (backendId: number) => {
+            const sess = s.sessions.find((x) => x.backend_session_id === backendId);
+            return sess !== undefined && chatNoteHasUnsaved(sess.id, backendId);
+          };
           for (const [id, at] of justCreated) {
-            if (byBackendId.has(id) || now - at > JUST_CREATED_GRACE_MS) justCreated.delete(id);
+            if (byBackendId.has(id) || (now - at > JUST_CREATED_GRACE_MS && !unsavedNote(id))) {
+              justCreated.delete(id);
+            }
           }
 
           const kept = s.sessions

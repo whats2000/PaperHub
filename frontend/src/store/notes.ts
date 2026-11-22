@@ -454,6 +454,18 @@ export function pendingNoteOps(noteId: number): NoteOp[] {
   return [...(inRetry.get(noteId)?.ops ?? []), ...(pending.get(noteId) ?? [])];
 }
 
+/** Whether a chat's note holds words not saved yet (queued, being retried,
+ * or its first save in flight), by the chat's local and backend ids. */
+export function chatNoteHasUnsaved(localSessionId: number, backendId: number | null): boolean {
+  const byTarget = useNotesStore.getState().byTarget;
+  const ids = [byTarget[`local:${localSessionId}`], backendId === null ? undefined : byTarget[`session:${backendId}`]];
+  return ids.some(
+    (id) =>
+      id !== undefined &&
+      [id, savedNoteId(id)].some((n) => pendingNoteOps(n).length > 0 || creating.has(n)),
+  );
+}
+
 function newBurstKey(): string {
   const c = globalThis.crypto as Crypto | undefined;
   if (c && typeof c.randomUUID === "function") return c.randomUUID();
