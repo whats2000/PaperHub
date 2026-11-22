@@ -596,6 +596,9 @@ def _gfm_block(raw: Any) -> Any:
         return raw
     # The notes as read_note shows them, echoed back: they set the notes.
     gfm = block["content"]
+    if len(_NOTES_TAG.findall(gfm)) > 1:
+        raise _TableError(f"a table takes one <{TABLE_NOTES}> after its rows; "
+                          "put all its notes in that one, a line each")
     notes = _NOTES_TAG.search(gfm)
     if notes:
         gfm = gfm[:notes.start()] + gfm[notes.end():]

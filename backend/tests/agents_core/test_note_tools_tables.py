@@ -381,3 +381,49 @@ async def test_notes_echoed_back_in_an_update_set_the_notes(
     [block] = await list_blocks(migrated_db, nid)
     assert block.props == {"caption": CAPTIONED["caption"],
                            "notes": "NR, not reached; $p<0.01$"}
+
+
+# ------------------------------------------------- fix round 1 (Task 13)
+
+async def test_a_changed_notes_on_a_user_table_is_a_suggestion_that_carries_it(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    from paperhub.notes.ops import resolve_suggestion
+
+    nid, bid, rev = await _captioned(migrated_db, actor="user")
+    out = await _update(_ctx(migrated_db, fake_tracer), bid, rev,
+                        "| k | v |\n|---|---|\n| ORR | 62% |\n"
+                        "<table_notes>NR, not reached</table_notes>")
+    [sugg] = out.record["suggested"]
+    async with migrated_db.execute(
+        "SELECT proposed_json FROM note_suggestions WHERE id = ?",
+        (sugg["suggestion_id"],),
+    ) as cur:
+        proposed = json.loads((await cur.fetchone())[0])  # type: ignore[index]
+    # The proposal names the new notes (the review shows them changing).
+    assert proposed["props"] == {"notes": "NR, not reached"}
+    [block] = await list_blocks(migrated_db, nid)
+    assert block.props == CAPTIONED  # nothing changes before the accept
+    await resolve_suggestion(migrated_db, sugg["suggestion_id"], accept=True)
+    [block] = await list_blocks(migrated_db, nid)
+    assert block.props == {"caption": CAPTIONED["caption"], "notes": "NR, not reached"}
+
+
+async def test_two_notes_tags_are_rejected_with_a_clear_reason(
+    migrated_db: aiosqlite.Connection, fake_tracer: Tracer,
+) -> None:
+    nid, bid, rev = await _captioned(migrated_db, actor="agent")
+    out = await _call(_ctx(migrated_db, fake_tracer), "edit_note", note="chat",
+                      base_revision=rev, ops=[{
+                          "op": "update", "block_id": bid, "block": {
+                              "type": "table", "content":
+                              "| k | v |\n|---|---|\n| ORR | 62% |\n"
+                              "<table_notes>a</table_notes>\n"
+                              "<table_notes>b</table_notes>"}}])
+    data = json.loads(out.content)
+    [rej] = data["rejected"]
+    assert rej["reason"] == "invalid"
+    assert "one <table_notes>" in rej["hint"]
+    assert "delimiter" not in rej["hint"] and "cell" not in rej["hint"]
+    [block] = await list_blocks(migrated_db, nid)
+    assert block.props == CAPTIONED
