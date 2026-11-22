@@ -1133,3 +1133,19 @@ describe("table preferences", () => {
     expect(useNotesStore.getState().tablePreset).toBe("paper");
   });
 });
+
+describe("a reload never drops edits not saved yet [user, 2026-11-23]", () => {
+  it("a mark's reload while the save is failing keeps the new line and the typing", async () => {
+    server.use(http.post(`${API_BASE_URL}/notes/7/ops`, () => HttpResponse.json({ detail: "down" }, { status: 503 })));
+    await useNotesStore.getState().loadTarget("paper", 3);
+    useNotesStore.getState().applyLocal(7, [
+      { op: "insert", block_id: "n", after: "a", block: { type: "paragraph", props: {}, content: [] } },
+      upd("b", "B typed"),
+    ]);
+    // The mark saved: its note reloads (the server has neither edit).
+    await useNotesStore.getState().loadNote(7);
+    const blocks = useNotesStore.getState().notes[7]?.blocks ?? [];
+    expect(blocks.map((b) => [b.id, b.text])).toEqual([["a", "A"], ["n", ""], ["b", "B typed"]]);
+    expect(pendingNoteOps(7).map((o) => o.block_id)).toEqual(["n", "b"]);
+  });
+});

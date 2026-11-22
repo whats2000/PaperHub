@@ -434,6 +434,25 @@ function tellMarkBlocks(noteId: number, ops: readonly NoteOp[], applied: Readonl
   if (!deleted.length && !revived) return;
   markBlockListeners.forEach((fn) => fn(noteId, { deleted, revived }));
 }
+/** Who sends a note's caret line (its open editors). */
+type KeepLineListener = (noteId: number, blockId: string) => void;
+const keepLineListeners = new Set<KeepLineListener>();
+
+/** Registers `fn` to be asked to send an empty line it holds. */
+export function onKeepLine(fn: KeepLineListener): () => void {
+  keepLineListeners.add(fn);
+  return () => keepLineListeners.delete(fn);
+}
+
+/** A mark is about to go at the note's last caret: an empty line there (an
+ * Enter, never sent while empty) is queued now, so the server knows the
+ * place. The caller flushes the note. [user, 2026-11-23] */
+export function keepCaretLine(rawId: number): void {
+  const noteId = savedNoteId(rawId);
+  const blockId = useNotesStore.getState().lastCaret[noteId];
+  if (blockId) keepLineListeners.forEach((fn) => fn(noteId, blockId));
+}
+
 let caretTimer: ReturnType<typeof setTimeout> | undefined;
 /** How long a caret request waits for its block (as "Open in notes" does). */
 export const CARET_GIVE_UP_MS = 5000;

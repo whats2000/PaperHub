@@ -29,7 +29,7 @@ import { chunkMap, type ChunkMap } from "@/lib/marks/anchor";
 import { citeBlockOf } from "@/lib/marks/cites";
 import { livePieceIndexes, type PenMark } from "@/lib/marks/pieces";
 import { DEFAULT_PALETTE } from "@/lib/marks/palette";
-import { onMarkBlocksChanged, onPaperMarksChanged, useNotesStore } from "@/store/notes";
+import { keepCaretLine, onMarkBlocksChanged, onPaperMarksChanged, useNotesStore } from "@/store/notes";
 import type {
   CiteAt,
   Mark,
@@ -284,6 +284,18 @@ function refreshNote(noteId: number | undefined): void {
   if (notes.notes[noteId]) void notes.loadNote(noteId).catch(() => undefined);
   // The mark made the note: an empty one shown for its paper shows it.
   else void notes.noteAppeared(noteId).catch(() => undefined);
+}
+
+/** Before a mark asks where it goes: the paper's note's last caret line,
+ * even an empty one just made with Enter, and every edit not yet saved
+ * reach the server first, so the mark lands at the caret and the note's
+ * reload after it shows the user's edits. [user, 2026-11-23] */
+export async function settleMarkPlace(paperId: number): Promise<void> {
+  const n = useNotesStore.getState();
+  const noteId = n.byTarget[`paper:${paperId}`];
+  if (noteId === undefined || !n.notes[noteId]) return;
+  if (n.quoteTarget?.noteId !== noteId) keepCaretLine(noteId);
+  await n.flush(noteId).catch(() => undefined);
 }
 
 /** Where in the paper's note a new mark should go: right after the block

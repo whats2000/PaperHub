@@ -17,6 +17,7 @@ import {
   groupMarkActions,
   inlineCiteAt,
   markHint,
+  settleMarkPlace,
   queueMarkOp,
   type MarkActionGroup,
   useMarksStore,
@@ -146,6 +147,7 @@ export function useMarkSave(paperId: number | null): {
       try {
         const groups = await getGroups();
         if (!groups?.length) return false;
+        await settleMarkPlace(paperId);
         const key = progressKey(kind, style, color, view, groups);
         if (progress.current?.key !== key) progress.current = { key, saved: new Map() };
         // A retry after a failure saves only the sections still missing.
@@ -358,6 +360,7 @@ export function usePenSave(paperId: number | null): (stroke: PenStroke) => void 
         const savedNow: MarkCreated[] = [];
         const opts = { silent: true, signal };
         try {
+          await settleMarkPlace(paperId);
           await saveMissing(
             create,
             { paper_content_id: paperId, kind, style, color, view: stroke.view, hint_block_id: markHint(paperId) },
