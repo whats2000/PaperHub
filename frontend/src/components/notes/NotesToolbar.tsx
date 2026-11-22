@@ -150,13 +150,15 @@ export function NotesToolbar({
     });
 
   // Esc stops Focus, unless it is closing something open over the page (a
-  // menu, the slash / @ menu, a dialog): checked before that closes, in the
+  // menu, the slash / @ menu, a dialog) or the find strip: checked before that closes, in the
   // capture phase, since the editor itself takes a bare Esc too.
   useEffect(() => {
     if (!focusOn) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (hasOpenLayer()) return;
+      // Esc in the find strip closes find (with the caret on its match).
+      if ((e.target as Element | null)?.closest?.('[data-testid="note-find"]')) return;
       setFocusOn(false);
     };
     document.addEventListener("keydown", onKey, true);

@@ -115,6 +115,20 @@ describe("NotesToolbar", () => {
     expect(screen.getByRole("button", { name: "Find" })).toBeDisabled();
   });
 
+  it("Esc in the find strip closes find only: Focus stays on", () => {
+    useNotesStore.setState({ focusOn: true });
+    render(
+      <>
+        <Toolbar />
+        <div role="search" data-testid="note-find">
+          <input aria-label="Find in the note" />
+        </div>
+      </>,
+    );
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Find in the note" }), { key: "Escape" });
+    expect(useNotesStore.getState().focusOn).toBe(true);
+  });
+
   it("Focus toggles, starts on the first part when none is chosen, and Esc stops it", () => {
     render(<Toolbar />);
     const focus = screen.getByRole("button", { name: "Focus" });
