@@ -698,3 +698,17 @@
     .paperhub-notes [data-content-type="table"] th,
     .paperhub-notes [data-content-type="table"] td { transition: none; }
 }
+
+/* The floating table of contents' list (TocRail.tsx): scrolls without a
+   bar, its top / bottom fading out while there is more that way (--ft /
+   --fb, set as it scrolls). */
+.toc-rail-list {
+  --ft: 0px;
+  --fb: 0px;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--ft), #000 calc(100% - var(--fb)), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--ft), #000 calc(100% - var(--fb)), transparent 100%);
+}
+.toc-rail-list::-webkit-scrollbar {
+  display: none;
+}

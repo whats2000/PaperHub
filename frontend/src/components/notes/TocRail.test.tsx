@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { TOC_PIN_SETTLE_MS, TOC_RAIL_CLOSE_MS, TocRail } from "@/components/notes/TocRail";
+import { TOC_PIN_SETTLE_MS, TOC_RAIL_CLOSE_MS, TOC_RAIL_OPEN_MS, TocRail } from "@/components/notes/TocRail";
+import { listLayout, RAIL_CLEAR_PX } from "@/components/notes/tocRailLayout";
 import { revealBlock, unfoldInNote } from "@/lib/notes/reveal";
 import { useNotesStore } from "@/store/notes";
 import type { NoteBlock } from "@/types/notes";
@@ -71,6 +72,8 @@ function placeAt(root: HTMLElement, id: string, top: number) {
 }
 
 let root: HTMLElement;
+const railButton = () => screen.getByRole("button", { name: "Table of contents" });
+const openByClick = () => fireEvent.click(railButton());
 beforeEach(() => {
   seed(THREE);
   root = makeRoot(["s1", "p1", "h2", "h3"]);
@@ -100,44 +103,171 @@ describe("TocRail", () => {
     expect(widths[1]).toBeGreaterThan(widths[2]!);
   });
 
-  it("hover slides the list out over the content; leaving retracts it after a short delay", () => {
+  it("passing over the rail does nothing; resting on it 150 ms opens the list", () => {
     vi.useFakeTimers();
     render(<TocRail noteId={7} root={root} />);
+    const rail = railButton();
     const list = screen.getByTestId("toc-rail-list");
-    expect(list).toHaveAttribute("data-state", "closed");
-    expect(list.className).toMatch(/\babsolute\b/);
-    expect(list.className).toMatch(/data-\[state=closed\]:translate-x/);
-    fireEvent.mouseEnter(screen.getByTestId("toc-rail"));
-    expect(list).toHaveAttribute("data-state", "open");
-    expect(screen.getByRole("button", { name: "Setup" })).toBeInTheDocument();
-    fireEvent.mouseLeave(screen.getByTestId("toc-rail"));
-    expect(list).toHaveAttribute("data-state", "open");
+    fireEvent.pointerEnter(rail);
     act(() => {
-      vi.advanceTimersByTime(TOC_RAIL_CLOSE_MS);
+      vi.advanceTimersByTime(TOC_RAIL_OPEN_MS - 10);
+    });
+    fireEvent.pointerLeave(rail);
+    act(() => {
+      vi.advanceTimersByTime(TOC_RAIL_OPEN_MS * 2);
     });
     expect(list).toHaveAttribute("data-state", "closed");
+    fireEvent.pointerEnter(rail);
+    act(() => {
+      vi.advanceTimersByTime(TOC_RAIL_OPEN_MS - 10);
+    });
+    expect(list).toHaveAttribute("data-state", "closed");
+    act(() => {
+      vi.advanceTimersByTime(10);
+    });
+    expect(list).toHaveAttribute("data-state", "open");
+    expect(rail).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("re-entering before the delay keeps it open", () => {
+  it("leaving closes it after 150 ms; coming back before that keeps it open", () => {
     vi.useFakeTimers();
     render(<TocRail noteId={7} root={root} />);
-    const rail = screen.getByTestId("toc-rail");
-    fireEvent.mouseEnter(rail);
-    fireEvent.mouseLeave(rail);
+    const wrap = screen.getByTestId("toc-rail");
+    const list = screen.getByTestId("toc-rail-list");
+    openByClick();
+    fireEvent.pointerLeave(wrap);
     act(() => {
-      vi.advanceTimersByTime(TOC_RAIL_CLOSE_MS / 2);
+      vi.advanceTimersByTime(TOC_RAIL_CLOSE_MS - 50);
     });
-    fireEvent.mouseEnter(rail);
+    fireEvent.pointerEnter(wrap);
     act(() => {
       vi.advanceTimersByTime(TOC_RAIL_CLOSE_MS * 2);
     });
+    expect(list).toHaveAttribute("data-state", "open");
+    fireEvent.pointerLeave(wrap);
+    act(() => {
+      vi.advanceTimersByTime(TOC_RAIL_CLOSE_MS - 1);
+    });
+    expect(list).toHaveAttribute("data-state", "open");
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(list).toHaveAttribute("data-state", "closed");
+    expect(railButton()).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("a click on the rail opens the list; another closes it", () => {
+    render(<TocRail noteId={7} root={root} />);
+    const list = screen.getByTestId("toc-rail-list");
+    fireEvent.click(railButton());
+    expect(list).toHaveAttribute("data-state", "open");
+    fireEvent.click(railButton());
+    expect(list).toHaveAttribute("data-state", "closed");
+  });
+
+  it("after a mouse click on an entry the list stays open until the pointer leaves", () => {
+    vi.useFakeTimers();
+    render(<TocRail noteId={7} root={root} />);
+    openByClick();
+    const entry = screen.getByRole("button", { name: "Details" });
+    // A mouse press keeps the focus where it was.
+    expect(fireEvent.mouseDown(entry)).toBe(false);
+    fireEvent.click(entry, { detail: 1 });
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
     expect(screen.getByTestId("toc-rail-list")).toHaveAttribute("data-state", "open");
+    fireEvent.pointerLeave(screen.getByTestId("toc-rail"));
+    act(() => {
+      vi.advanceTimersByTime(TOC_RAIL_CLOSE_MS);
+    });
+    expect(screen.getByTestId("toc-rail-list")).toHaveAttribute("data-state", "closed");
+  });
+
+  it("by key: Tab reaches the rail without opening it; Enter opens on the current entry; arrows, Home and End move; Enter jumps and returns the focus", async () => {
+    const user = userEvent.setup();
+    placeAt(root, "s1", 40);
+    placeAt(root, "h2", 185);
+    placeAt(root, "h3", 400);
+    render(<TocRail noteId={7} root={root} />);
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Setup", hidden: true })).toHaveAttribute("aria-current", "location"),
+    );
+    const rail = railButton();
+    const list = screen.getByTestId("toc-rail-list");
+    await user.tab();
+    expect(rail).toHaveFocus();
+    expect(list).toHaveAttribute("data-state", "closed");
+    await user.keyboard("{Enter}");
+    expect(list).toHaveAttribute("data-state", "open");
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Setup" })).toHaveFocus());
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("button", { name: "Details" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}"); // stays on the last
+    expect(screen.getByRole("button", { name: "Details" })).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(screen.getByRole("button", { name: "1 Introduction" })).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(screen.getByRole("button", { name: "Details" })).toHaveFocus();
+    await user.keyboard("{ArrowUp}{Enter}");
+    expect(vi.mocked(revealBlock).mock.calls[0]![1]).toBe("h2");
+    expect(rail).toHaveFocus();
+    expect(list).toHaveAttribute("data-state", "closed");
+  });
+
+  it("Esc closes the list and leaves the focus on the rail", async () => {
+    const user = userEvent.setup();
+    render(<TocRail noteId={7} root={root} />);
+    const rail = railButton();
+    await user.tab();
+    await user.keyboard("{Enter}");
+    await vi.waitFor(() => expect(screen.getByTestId("toc-rail-list").contains(document.activeElement)).toBe(true));
+    await user.keyboard("{Escape}");
+    expect(rail).toHaveFocus();
+    expect(screen.getByTestId("toc-rail-list")).toHaveAttribute("data-state", "closed");
+    expect(rail).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("sits inside the note's scroll area, clear of its scrollbar", () => {
+    const scroller = document.createElement("div");
+    scroller.setAttribute("data-testid", "note-editor");
+    Object.defineProperty(scroller, "offsetWidth", { value: 600 });
+    Object.defineProperty(scroller, "clientWidth", { value: 585 });
+    root.appendChild(scroller);
+    render(<TocRail noteId={7} root={root} />);
+    expect(screen.getByTestId("toc-rail").style.right).toBe(`${15 + RAIL_CLEAR_PX}px`);
+  });
+
+  it("opens with the current row at its line's height", async () => {
+    placeAt(root, "s1", 40);
+    placeAt(root, "h2", 185);
+    placeAt(root, "h3", 400);
+    Object.defineProperty(root, "clientHeight", { value: 700, configurable: true });
+    Object.defineProperty(root, "clientWidth", { value: 600, configurable: true });
+    render(<TocRail noteId={7} root={root} />);
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Setup", hidden: true })).toHaveAttribute("aria-current", "location"),
+    );
+    const lines = [...screen.getByTestId("toc-rail").querySelectorAll<HTMLElement>("[data-toc-line]")];
+    lines.forEach((l, i) => {
+      Object.defineProperty(l, "offsetTop", { value: 100 + i * 10 });
+      Object.defineProperty(l, "offsetHeight", { value: 2 });
+    });
+    openByClick();
+    const lineY = (i: number) => 100 + i * 10 + 1;
+    const want = listLayout({ count: 3, current: 1, lineY, paneTop: -24, paneHeight: 700, paneWidth: 600 });
+    const list = screen.getByTestId("toc-rail-list");
+    expect(list.style.top).toBe(`${want.top}px`);
+    expect(list.style.height).toBe(`${want.height}px`);
+    expect(list.style.width).toBe(`${want.width}px`);
+    // The current row's centre lands on its line.
+    expect(want.top + 6 + 1 * 26 + 13 - want.scrollTop).toBe(lineY(1));
   });
 
   it("a click reveals and flashes the entry, unfolding a folded part", () => {
     render(<TocRail noteId={7} root={root} />);
-    fireEvent.mouseEnter(screen.getByTestId("toc-rail"));
-    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    openByClick();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }), { detail: 1 });
     expect(vi.mocked(unfoldInNote)).toHaveBeenCalledWith(7);
     const [calledRoot, calledId, opts] = vi.mocked(revealBlock).mock.calls[0]!;
     expect(calledRoot).toBe(root);
@@ -201,50 +331,6 @@ describe("TocRail", () => {
     await vi.waitFor(() => expect(screen.queryByTestId("toc-rail")).toBeNull());
   });
 
-  it("Esc in the list closes it and leaves focus on the rail, closed", async () => {
-    const user = userEvent.setup();
-    render(<TocRail noteId={7} root={root} />);
-    const rail = screen.getByRole("button", { name: "Table of contents" });
-    await user.tab();
-    expect(rail).toHaveFocus();
-    expect(screen.getByTestId("toc-rail-list")).toHaveAttribute("data-state", "open");
-    await user.tab();
-    expect(screen.getByRole("button", { name: "1 Introduction" })).toHaveFocus();
-    await user.keyboard("{Escape}");
-    expect(rail).toHaveFocus();
-    expect(screen.getByTestId("toc-rail-list")).toHaveAttribute("data-state", "closed");
-    expect(rail).toHaveAttribute("aria-expanded", "false");
-  });
-
-  it("leaving after a click on an entry closes the list with focus back on the rail, never inside the hidden list", () => {
-    vi.useFakeTimers();
-    render(<TocRail noteId={7} root={root} />);
-    const wrap = screen.getByTestId("toc-rail");
-    fireEvent.mouseEnter(wrap);
-    const entry = screen.getByRole("button", { name: "1 Introduction" });
-    entry.focus(); // a mouse click focuses the entry
-    fireEvent.mouseLeave(wrap);
-    act(() => {
-      vi.advanceTimersByTime(TOC_RAIL_CLOSE_MS);
-    });
-    const list = screen.getByTestId("toc-rail-list");
-    expect(list).toHaveAttribute("data-state", "closed");
-    expect(list.contains(document.activeElement)).toBe(false);
-    expect(screen.getByRole("button", { name: "Table of contents" })).toHaveFocus();
-    // Focus coming back to the rail does not reopen the list.
-    expect(list).toHaveAttribute("data-state", "closed");
-  });
-
-  it("a tap or a click while hovering leaves the list open", async () => {
-    const user = userEvent.setup();
-    render(<TocRail noteId={7} root={root} />);
-    const rail = screen.getByRole("button", { name: "Table of contents" });
-    await user.click(rail); // hover + focus + click, like a tap
-    expect(screen.getByTestId("toc-rail-list")).toHaveAttribute("data-state", "open");
-    await user.click(rail);
-    expect(screen.getByTestId("toc-rail-list")).toHaveAttribute("data-state", "open");
-  });
-
   it("the rail button controls the list", () => {
     render(<TocRail noteId={7} root={root} />);
     const rail = screen.getByRole("button", { name: "Table of contents" });
@@ -264,8 +350,8 @@ describe("TocRail", () => {
     placeAt(root, "s1", 40);
     placeAt(root, "h2", 185);
     placeAt(root, "h3", 350); // centred by the reveal: below the 90 px line
-    fireEvent.mouseEnter(screen.getByTestId("toc-rail"));
-    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    openByClick();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }), { detail: 1 });
     fireEvent.scroll(root); // the reveal's own smooth scroll
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.getByRole("button", { name: "Details" })).toHaveAttribute("aria-current", "location");
@@ -366,8 +452,8 @@ describe("TocRail", () => {
     placeAt(root, "s1", 40);
     placeAt(root, "h2", 185);
     placeAt(root, "h3", 350);
-    fireEvent.mouseEnter(screen.getByTestId("toc-rail"));
-    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    openByClick();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }), { detail: 1 });
     // The part is still unfolding: nothing scrolls for a while.
     await new Promise((r) => setTimeout(r, TOC_PIN_SETTLE_MS + 100));
     await act(async () => {
@@ -392,7 +478,7 @@ describe("TocRail", () => {
       { ...heading("b", "Beta", 2), parent_id: "a" },
     ]);
     render(<TocRail noteId={7} root={root} />);
-    fireEvent.mouseEnter(screen.getByTestId("toc-rail"));
+    openByClick();
     const names = screen.getAllByRole("button").filter((b) => b.closest("nav")).map((b) => b.textContent);
     expect(names).toEqual(["Alpha", "Beta", "Gamma"]);
   });
