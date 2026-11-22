@@ -483,6 +483,53 @@ describe("TocRail", () => {
     expect(names).toEqual(["Alpha", "Beta", "Gamma"]);
   });
 
+  it("hides the closed list before its closing animations let go (no frame of the full list)", async () => {
+    // Each animation holds the list's motion (fill: both) until it is
+    // cancelled; at that moment the list must already be hidden, or the
+    // browser paints the full list for a frame.
+    const made: { finish: () => void; hiddenAtCancel: boolean | null }[] = [];
+    const list = () => screen.getByTestId("toc-rail-list");
+    const proto = HTMLElement.prototype as unknown as { animate?: unknown };
+    const had = Object.prototype.hasOwnProperty.call(proto, "animate");
+    const before = proto.animate;
+    proto.animate = function () {
+      let finish = () => {};
+      const finished = new Promise<void>((r) => (finish = r));
+      const rec = { finish, hiddenAtCancel: null as boolean | null };
+      made.push(rec);
+      return {
+        finished,
+        reverse: () => {},
+        cancel: () => {
+          if (rec.hiddenAtCancel === null) rec.hiddenAtCancel = list().classList.contains("invisible");
+        },
+      } as unknown as Animation;
+    };
+    try {
+      render(<TocRail noteId={7} root={root} />);
+      openByClick();
+      expect(made.length).toBeGreaterThan(0);
+      await act(async () => {
+        made.forEach((a) => a.finish());
+        await Promise.resolve();
+      });
+      await vi.waitFor(() => expect(screen.getByTestId("toc-rail")).toHaveAttribute("data-list", "open"));
+      const opened = made.length;
+      fireEvent.click(railButton());
+      const closing = made.slice(opened);
+      expect(closing.length).toBeGreaterThan(0);
+      expect(list()).not.toHaveClass("invisible");
+      // The animations end: a microtask, outside any React event.
+      closing.forEach((a) => a.finish());
+      await vi.waitFor(() => expect(closing.every((a) => a.hiddenAtCancel !== null)).toBe(true));
+      expect(closing.map((a) => a.hiddenAtCancel)).toEqual(closing.map(() => true));
+      await vi.waitFor(() => expect(screen.getByTestId("toc-rail")).toHaveAttribute("data-list", "closed"));
+    } finally {
+      if (had) proto.animate = before;
+      else delete proto.animate;
+    }
+  });
+
   it("is off when the toolbar toggle turns it off", () => {
     useNotesStore.setState({ tocOn: false });
     render(<TocRail noteId={7} root={root} />);

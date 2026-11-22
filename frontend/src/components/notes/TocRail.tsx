@@ -12,6 +12,7 @@
  * reads the scroll position, so Follow reading's own scrolling just moves the
  * highlight. Off by the notes ⋯ menu (remembered). */
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { prefersReducedMotion } from "@/lib/motion";
@@ -271,25 +272,31 @@ export function TocRail({ noteId, root }: { noteId: number | null; root: HTMLEle
       anims.current.forEach((a) => a.cancel());
       anims.current = [];
     };
-    /** When the running animations end (none: at once), `then`, unless a
-     * newer open / close came first. */
-    const settle = (then: () => void) => {
+    /** When the running animations end (none: at once, `later` false),
+     * `then`, unless a newer open / close came first. */
+    const settle = (then: (later: boolean) => void) => {
       const mine = ++token.current;
       const run = anims.current;
       if (run.length === 0) {
-        then();
+        then(false);
         return;
       }
       Promise.all(run.map((a) => a.finished)).then(
         () => {
-          if (mine === token.current) then();
+          if (mine === token.current) then(true);
         },
         () => {},
       );
     };
-    const finish = (p: "open" | "closed") => () => {
+    /** Ends the motion in phase `p`. The phase reaches the DOM before the
+     * animations let go of their end frame: cancelled first, a closing
+     * list would stand at full size, visible, for the frame before React
+     * renders it hidden. (`later` false: inside a layout effect, where
+     * React renders the update before the paint anyway.) */
+    const finish = (p: "open" | "closed") => (later: boolean) => {
+      if (later) flushSync(() => setPhase(p));
+      else setPhase(p);
       dropAnims();
-      setPhase(p);
     };
     const fades = () => {
       const list = listRef.current;
@@ -410,7 +417,7 @@ export function TocRail({ noteId, root }: { noteId: number | null; root: HTMLEle
       if (instant) {
         ++token.current;
         pending.current = null;
-        finish("closed")();
+        finish("closed")(true);
         return;
       }
       if (p === "opening" && anims.current.length) {
