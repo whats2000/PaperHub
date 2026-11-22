@@ -321,6 +321,12 @@ describe("tables in the note editor", () => {
     expect(notesPaneSource).toMatch(/className="[^"]*\bnotes-pane\b[^"]*bg-card/);
   });
 
+  it("a table handle menu is as wide as its longest item, not squeezed by its 0 px portal anchor", () => {
+    // The menus are positioned inside BlockNote's zero-width portal anchor, so
+    // a shrink-to-fit width wrapped "Delete column" and "Align centre ✓".
+    expect(indexCss).toMatch(/\.bn-table-handle-menu\s*\{[^}]*width:\s*max-content/);
+  });
+
   it("the column handle menu offers insert, alignment and delete, and no colour", async () => {
     seed([seededTable]);
     const pm = mountEditor();

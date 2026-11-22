@@ -637,6 +637,11 @@
 .note-table-more {
     padding-inline: 2px;
 }
+/* The grips' menus sit in BlockNote's 0 px wide portal anchor, where a
+   shrink-to-fit width wraps every item ("Delete / column"). */
+.bn-table-handle-menu {
+    width: max-content;
+}
 @media (prefers-reduced-motion: reduce) {
     .paperhub-notes .tableWrapper { transition: none; }
     .bn-table-handle-menu { animation: none !important; }
