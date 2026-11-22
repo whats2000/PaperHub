@@ -335,7 +335,8 @@ export function applyBorderSet(b: Borders, c: TableContent, s: Selection, set: B
   const v = [...b.v];
   for (const g of segs) {
     const lines = g.axis === "h" ? h : v;
-    if (lines[g.r] === undefined) continue;
+    // A selection past the table's edge (it shrank meanwhile) sets nothing there.
+    if (lines[g.r] === undefined || g.c >= (lines[g.r] ?? "").length) continue;
     lines[g.r] = spliceStr(lines[g.r] ?? "", g.c, 1, value);
   }
   return { preset: b.preset, h, v };

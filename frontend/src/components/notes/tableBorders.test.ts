@@ -217,3 +217,14 @@ describe("border sets on a selection", () => {
     expect(cellEdges(b, anchor)).toEqual({ top: 2, bottom: 0, left: 0, right: 0 });
   });
 });
+
+describe("a selection past the table's edge", () => {
+  it("applies only to lines the table has (a column dropped while the picker was open)", () => {
+    const b = presetLines(2, 2, 1, "paper");
+    const t = plain(2, 2);
+    const out = applyBorderSet(b, t, { r0: 0, r1: 1, c0: 0, c1: 3 }, "all", 1);
+    expect(parseBorders(dumpBorders(out))).not.toBeNull();
+    expect(out.h.every((l) => l.length === 2)).toBe(true);
+    expect(out.v.every((l) => l.length === 3)).toBe(true);
+  });
+});
