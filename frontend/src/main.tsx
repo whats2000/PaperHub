@@ -6,6 +6,9 @@ import { I18nextProvider } from "react-i18next";
 import App from "./App";
 import i18n from "./lib/i18n";
 import "./index.css";
+import { installDragScrollGuard } from "./lib/dragScrollGuard";
+
+installDragScrollGuard(document);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

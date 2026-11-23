@@ -329,6 +329,13 @@
   html {
     @apply font-sans;
     }
+  /* While something is dragged (lib/dragScrollGuard.ts) the page itself
+     does not scroll: BlockNote's drag image for a table row/column is a
+     child of <body> whose 24px line made the page taller than the window,
+     so window scrollbars flashed on for the length of the drag. */
+  html[data-dragging] {
+    overflow: hidden;
+    }
 }
 
 /* Notes: commented text, a neutral underline + tint (yellow is for citations). */
