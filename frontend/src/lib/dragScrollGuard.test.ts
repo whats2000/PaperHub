@@ -52,3 +52,33 @@ describe("installDragScrollGuard", () => {
     expect(css).not.toMatch(/html\s*\{[^}]*overflow/);
   });
 });
+
+describe("installDragScrollGuard with a drag image in <body>", () => {
+  // BlockNote appends its drag image on dragstart and removes it on the
+  // handle's dragend, which for a row comes ~100ms after the drop (the
+  // handle moves with its row): the mark must outlast the image.
+  it("keeps the mark after a drop until the drag image leaves <body>", async () => {
+    uninstall = installDragScrollGuard(document);
+    fire("dragstart");
+    const img = document.createElement("div");
+    document.body.appendChild(img);
+    fire("drop");
+    fire("pointermove");
+    expect(root().hasAttribute("data-dragging")).toBe(true);
+    img.remove();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(root().hasAttribute("data-dragging")).toBe(false);
+  });
+
+  it("clears after a timeout if the image is never removed", async () => {
+    uninstall = installDragScrollGuard(document, { settleMs: 20 });
+    fire("dragstart");
+    const img = document.createElement("div");
+    document.body.appendChild(img);
+    fire("dragend");
+    expect(root().hasAttribute("data-dragging")).toBe(true);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(root().hasAttribute("data-dragging")).toBe(false);
+    img.remove();
+  });
+});
