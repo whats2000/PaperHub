@@ -835,10 +835,13 @@ def _compile_table_to_png(
         (tmpdir / "tbl.tex").write_text(standalone_tex, encoding="utf-8")
         # Local class/style files (cvpr.sty, …) live in the paper's source dir
         # (= png_path.parent); point TEXINPUTS there (trailing pathsep keeps the
-        # default texmf search path).
+        # default texmf search path). "." first: kpathsea searches TEXINPUTS
+        # before the compile dir, so a paper's own tbl.tex would win.
         env = dict(os.environ)
         prior = env.get("TEXINPUTS", "")
-        env["TEXINPUTS"] = str(png_path.parent.resolve()) + os.pathsep + prior
+        env["TEXINPUTS"] = (
+            "." + os.pathsep + str(png_path.parent.resolve()) + os.pathsep + prior
+        )
         pdf_path = tmpdir / "tbl.pdf"
         # Compile, stubbing any text-input file pdflatex reports missing and
         # retrying — so a font/symbol package absent from a fixed TeX Live (the

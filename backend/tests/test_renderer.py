@@ -528,6 +528,36 @@ def test_render_latex_falls_back_when_pandoc_exits_nonzero(
     assert any("pandoc failed" in r.message for r in caplog.records), (
         "expected a WARNING log on pandoc-exit-nonzero fallback"
     )
+    assert any(
+        "falling back to pylatexenc" in r.message for r in caplog.records
+    ), "the repair retry also failed, so the fallback must be logged"
+
+
+def test_render_latex_repair_retry_success_does_not_log_a_fallback(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When the repair retry (orphaned \\end, stray brace, …) gets pandoc
+    through, the HTML is pandoc's — the log must not claim a pylatexenc
+    fallback (arXiv:2501.02902 read as a plain-text paper because of it)."""
+    fixture = Path(__file__).parent / "fixtures" / "papers" / "arxiv_sample" / "main.tex"
+    out = tmp_path / "source.html"
+    err = subprocess.CalledProcessError(
+        returncode=64, cmd=["pandoc"], stderr="unexpected \\end",
+    )
+    with (
+        patch("paperhub.pipelines.renderer._render_latex_pandoc", side_effect=err),
+        patch(
+            "paperhub.pipelines.renderer._try_pandoc_brace_balanced",
+            return_value=True,
+        ),
+        caplog.at_level("INFO", logger="paperhub.pipelines.renderer"),
+    ):
+        render_html(source=fixture, kind="latex", out_path=out)
+
+    assert any("pandoc failed" in r.message for r in caplog.records)
+    assert not any(
+        "pylatexenc" in r.message for r in caplog.records
+    ), [r.message for r in caplog.records]
 
 
 def test_render_latex_falls_back_to_raw_envelope_when_pylatexenc_fails(

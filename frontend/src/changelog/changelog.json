@@ -1,5 +1,27 @@
 [
   {
+    "version": "2.43.1",
+    "date": "2026-11-26",
+    "highlights": {
+      "en": [
+        "Figures drawn in TikZ show up in the paper reader again, including ones built from a loop or that rely on style files shipped with the paper. Papers like KVzip that opened as plain text now open with their full layout and figures.",
+        "Papers already in your library were re-rendered, so they show the recovered figures without adding them again."
+      ],
+      "zh-TW": [
+        "以 TikZ 繪製的圖會重新出現在論文閱讀器中，包括用迴圈產生的圖，以及依賴論文自帶樣式檔的圖。像 KVzip 這類原本只能以純文字開啟的論文，現在會以完整版面和圖片開啟。",
+        "資料庫中既有的論文已重新渲染，不必重新加入就能看到補回的圖。"
+      ],
+      "zh-CN": [
+        "以 TikZ 绘制的图会重新出现在论文阅读器中，包括用循环生成的图，以及依赖论文自带样式文件的图。像 KVzip 这类原本只能以纯文本打开的论文，现在会以完整版面和图片打开。",
+        "库中已有的论文已重新渲染，无需重新添加就能看到补回的图。"
+      ],
+      "ja": [
+        "TikZ で描かれた図が論文リーダーに再び表示されるようになりました。ループで生成された図や、論文に同梱されたスタイルファイルに依存する図も含みます。KVzip のようにプレーンテキストでしか開けなかった論文も、レイアウトと図がそろった状態で開けます。",
+        "ライブラリにある既存の論文は再レンダリング済みのため、追加し直さなくても復元された図が表示されます。"
+      ]
+    }
+  },
+  {
     "version": "2.43.0",
     "date": "2026-11-15",
     "highlights": {

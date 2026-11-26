@@ -1,3 +1,4 @@
+import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -710,3 +711,27 @@ def test_orchestrator_rasterizes_nicetabular(
     assert "\\includegraphics{table-fig-001.png}" in out
     assert "\\begin{NiceTabular}" not in out
     assert (tmp_path / "table-fig-001.png").is_file()
+
+
+def test_compile_searches_the_compile_dir_before_the_source_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # kpathsea searches TEXINPUTS before "."; a paper shipping its own
+    # tbl.tex would otherwise be compiled instead of the table snippet.
+    seen: list[str] = []
+
+    def fake_run(*_a: object, **kw: object) -> object:
+        env = kw["env"]
+        assert isinstance(env, dict)
+        seen.append(env["TEXINPUTS"])
+        return SimpleNamespace(returncode=1, stdout="", stderr="")
+
+    monkeypatch.setattr("paperhub.pipelines.table_figures.subprocess.run", fake_run)
+    ok = _compile_table_to_png(
+        "\\begin{tabular}{c}a\\end{tabular}",
+        preamble="", body_prefix="", png_path=tmp_path / "t.png", dpi=72,
+    )
+    assert ok is False
+    assert seen and seen[0].startswith(
+        "." + os.pathsep + str(tmp_path.resolve()) + os.pathsep,
+    )
