@@ -11,7 +11,7 @@ import pytest
 
 from paperhub.notes.export import _cited, note_to_markdown
 from paperhub.notes.models import Block, Note
-from paperhub.notes.pandoc import markdown_to_docx
+from paperhub.notes.pandoc import _TBLPR_ORDER, markdown_to_docx
 
 NOTE = Note(id=1, target_kind="session", target_id="1", title="Notes",
             revision=1, updated_at="")
@@ -318,10 +318,33 @@ def test_default_docx_table_looks_like_paper() -> None:
     assert "<w:b " not in rows[1]
     assert "<w:shd " not in xml
     assert "ORR" in xml and "指標" in xml
+    _assert_tblpr_in_schema_order(xml)
+
+
+def _assert_tblpr_in_schema_order(xml: str) -> None:
+    """The table's properties are in CT_TblPr order (Word may refuse a
+    document whose properties are out of order), with our borders in place.
+    Only the children pandoc writes are present, and that differs by version:
+    3.1 writes ``<w:jc w:val="start" />`` (Word's default), 3.7 omits it."""
     tblpr = re.search(r"<w:tblPr>(.*?)</w:tblPr>", xml, re.S)[1]  # type: ignore[index]
-    names = re.findall(r"<w:(\w+)", tblpr)
-    top = [n for n in names if n in ("tblStyle", "tblW", "jc", "tblBorders", "tblLook")]
-    assert top == ["tblStyle", "tblW", "jc", "tblBorders", "tblLook"], top
+    top = [m[1] for m in re.finditer(
+        r"<w:(\w+)\b[^>]*?(?:/>|>.*?</w:\1>)", tblpr, re.S)]
+    assert top == sorted(top, key=_TBLPR_ORDER.index), top
+    assert {"tblStyle", "tblW", "tblBorders", "tblLook"} <= set(top), top
+
+
+def test_tblpr_order_check_accepts_either_pandoc_version() -> None:
+    borders = "<w:tblBorders><w:top w:val=\"nil\" /></w:tblBorders>"
+    common = ('<w:tblStyle w:val="Table" /><w:tblW w:type="auto" w:w="0" />'
+              '{jc}' + borders + '<w:tblLook w:val="0020" />')
+    for jc in ('<w:jc w:val="start" />', ""):  # pandoc 3.1 / 3.7
+        _assert_tblpr_in_schema_order(
+            "<w:tbl><w:tblPr>" + common.format(jc=jc) + "</w:tblPr></w:tbl>")
+    with pytest.raises(AssertionError):  # jc after the borders: out of order
+        _assert_tblpr_in_schema_order(
+            "<w:tbl><w:tblPr>" + common.format(jc="").replace(
+                "<w:tblLook", '<w:jc w:val="start" /><w:tblLook')
+            + "</w:tblPr></w:tbl>")
 
 
 @pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not installed")
