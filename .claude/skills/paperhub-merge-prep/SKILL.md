@@ -280,6 +280,39 @@ If a frontend rebuild or backend Docker image rebuild is needed for
 deployment, NOTE that to the user but DO NOT trigger it. The deploy is
 a separate downstream action with its own approval.
 
+## 7 ? After the merge lands: clean up worktrees and scratch copies
+
+Worktrees and workspace copies pile up across plans and fill the disk
+(2026-11-26: ~34 GB of forgotten copies scattered over `D:\`). Once the
+squash commit is on `main`, clean up in the same session ? don't leave
+it for later.
+
+**Where they live (so nothing is forgotten):** every worktree and every
+scratch workspace copy goes under the repo's gitignored `.worktrees/`
+folder ? worktrees at `.worktrees/<short-branch-name>`, workspace copies
+(a `papers_cache` + `paperhub.db` copy for live checks or migrations) at
+`.worktrees/_data/<purpose>`. Never create them as siblings of the repo
+or at a drive root.
+
+Steps:
+
+1. `git worktree list` and list `.worktrees/` (plus any legacy copies
+   outside it, e.g. `D:\paperhub-*`, `D:\GitHub\PaperHub-*`) with sizes.
+2. **Delete without asking** (approval of the merge covers these):
+   - the merged branch's worktree ? `git worktree remove <path>`, then
+     `git worktree prune` (the branch itself stays; it holds the dev
+     history);
+   - scratch workspace copies made for that branch. First stop any
+     server still running from them (a copy app on `:4173`/`:8110`).
+3. **Ask first** ? list them and delete only on approval:
+   - backups of the real workspace (`D:\paperhub-backups\*`,
+     `backend/workspace/*.bak-*`): they are copies of the user's data;
+   - worktrees of OTHER branches still in progress.
+4. A file that will not delete (a `.pyd`/`.dll` loaded by the editor or
+   another process) ? name the folder and what holds it in the report;
+   don't loop on it.
+5. Report what was removed, the space freed, and what is left.
+
 ## Anti-patterns to refuse
 
 - Bumping minor/major without explicit user approval when the
