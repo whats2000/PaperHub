@@ -1088,7 +1088,7 @@ def render_html(
                 # already spent significant work on download + extract) still
                 # produces a usable HTML artefact for the Citation Canvas.
                 logger.warning(
-                    "pandoc failed on %s (exit %s); falling back to pylatexenc. "
+                    "pandoc failed on %s (exit %s); retrying with repairs. "
                     "stderr: %s",
                     source,
                     exc.returncode,
@@ -1101,6 +1101,11 @@ def render_html(
                     source, out_path, resource_dir=resource_dir, macros=macros,
                 ):
                     return out_path
+                logger.warning(
+                    "pandoc repair retry failed on %s; falling back to "
+                    "pylatexenc.",
+                    source,
+                )
             except subprocess.TimeoutExpired:
                 # pandoc hung past the cap — kill it and fall back rather than
                 # parking the ingest until the worker OOMs.
